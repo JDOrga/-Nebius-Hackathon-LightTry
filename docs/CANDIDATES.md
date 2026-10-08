@@ -1,6 +1,6 @@
-# 完整候选入库清单
+# 工程文件清单
 
-首次提交仅使用此白名单。真实配置、认证、运行记录与临时诊断不在此列表。
+此清单仅用于查看工程结构，不控制 Git 文件选择；文件选择由 .gitignore 管理。真实配置、认证、运行记录与临时诊断被忽略。
 
 ## (root)
 
@@ -52,7 +52,6 @@
 
 - manifests/assets.json
 - manifests/extraction.json
-- manifests/git-allowlist.txt
 - manifests/patch_manifest.json
 - manifests/runtime-baseline.json
 - manifests/upstream.json

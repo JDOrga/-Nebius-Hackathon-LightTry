@@ -1,4 +1,4 @@
-"""Audit an explicit Git admission list; report location/category, never secret values."""
+"""Audit Git-visible files selected by .gitignore; never report secret values."""
 import argparse
 import ast
 import hashlib
@@ -17,12 +17,11 @@ RULES={
     'REAL_RESOURCE_IDENTIFIER':r'\b(?:tenant|project|devlab|computeinstance)-[a-z0-9]{16,}\b',
 }
 
-def allowlist():
-    names=(ROOT/'manifests/git-allowlist.txt').read_text().splitlines()
-    if len(names)!=len(set(names)):raise ValueError('DUPLICATE_ALLOWLIST_ENTRY')
-    for n in names:
-        if not n or Path(n).is_absolute() or '..' in Path(n).parts or '\\' in n:raise ValueError('INVALID_ALLOWLIST_PATH')
-    return names
+def candidate_files():
+    code,names=git('ls-files','--cached','--others','--exclude-standard')
+    if code:raise ValueError('GIT_REPOSITORY_REQUIRED')
+    _,deleted=git('diff','--cached','--name-only','--diff-filter=D')
+    return sorted(set(names)-set(deleted))
 
 def scan(names):
     risks=[];records=[]
@@ -55,21 +54,17 @@ def git(*args):
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--out',type=Path,default=ROOT/'.local/audit.json');a=p.parse_args()
-    names=allowlist();records,risks=scan(names)
-    _,tracked=git('ls-files');_,others=git('ls-files','--others','--exclude-standard')
-    extras=sorted((set(tracked)|set(others))-set(names))
-    risks.extend({'file':x,'category':'NOT_ON_ADMISSION_ALLOWLIST'} for x in extras)
+    names=candidate_files();records,risks=scan(names)
     ignored=[]
     for name in names:
-        code,_=git('check-ignore','--quiet','--',name)
+        code,_=git('check-ignore','--no-index','--quiet','--',name)
         if code==0:ignored.append(name)
-    risks.extend({'file':x,'category':'CANDIDATE_UNEXPECTEDLY_IGNORED'} for x in ignored)
+    risks.extend({'file':x,'category':'TRACKED_FILE_MATCHES_IGNORE_RULES'} for x in ignored)
     _,staged=git('diff','--cached','--name-only')
-    for x in staged:
-        if x not in names:risks.append({'file':x,'category':'UNAPPROVED_STAGED_PATH'})
     report={'candidate_files':len(names),'total_bytes':sum(x['bytes'] for x in records),
             'largest_bytes':max(x['bytes'] for x in records),'files':records,'risks':risks,
             'staged_files':staged,'binary_candidates':sum(r['category']=='BINARY_NOT_ALLOWED' for r in risks),
+            'selection':'.gitignore and Git index; no admission whitelist',
             'scan_limit':'Heuristic candidate-text scan, not a proof that every possible secret is absent; authentication paths and old histories are never read.'}
     a.out.parent.mkdir(parents=True,exist_ok=True);a.out.write_text(json.dumps(report,indent=2))
     print(json.dumps({k:report[k] for k in ('candidate_files','total_bytes','largest_bytes','risks','staged_files','binary_candidates')}))

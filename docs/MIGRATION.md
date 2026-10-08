@@ -1,6 +1,6 @@
 # WJC 迁移
 
-1. 首次提交和远程建立经审核后，`git clone <用户确认的远程> "C:\Project\Nebius"`。本轮尚无提交或远程，当前只能复制白名单工程进行离线验证。
+1. 项目仓库直接位于 `C:\Project\Nebius`，已有本地提交，远程尚未配置。远程明确后执行 `git clone <用户确认的远程> "C:\Project\Nebius"`；当前可从本地仓库 clone 做离线验证。历史数据和机器配置受 .gitignore 排除，不随 clone 复制。
 2. 使用已有 Windows PowerShell 5.1；已有 PowerShell 7 也支持，UTC 回归覆盖两者。准备自己的 Python 3.10+ 和 `requirements/offline.txt` 中列出的 CPU 检查依赖。可在自己选择的虚拟环境执行 `python -m pip install -r requirements/offline.txt`。不会默认安装 WSL、OpenSSH、CUDA、驱动或系统组件。离线自检的 Windows 原生测试需要已安装的 OpenSSH `ssh-keygen.exe`，只对合成公钥计算指纹。
 3. `Copy-Item -LiteralPath '.\config\local.example.json' -Destination '.\config\local.json'`，仅在目标不存在时执行。模板不能作为真实配置使用，不含真实资源或认证。
 4. 填写已有 CLI 在 WSL 中的绝对位置、已安装 WSL 发行版、自己的 profile、目标 tenant/project/devlab、自己的私钥路径和公钥指纹、自己的认证配置路径、known_hosts 路径、数据目录和固定上游目录。认证配置路径供离线元数据检查，可为 `\\wsl.localhost\<distro>\...`；工具不读取其中内容。本轮不会自动登录、生成凭据、设置权限或切换 profile。

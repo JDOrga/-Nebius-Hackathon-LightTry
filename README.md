@@ -17,4 +17,4 @@ python -B scripts/audit_repository.py
 
 [验证范围与已知限制](docs/VALIDATION.md)：云连接、代码传输和停机验收已验证；模型小任务没有成功，完整灯光推理仍待验收。
 
-Git 按 manifests/git-allowlist.txt 审核，.gitignore 是第二层保护。提交身份由操作者明确指定；远程、团队归属和公开/私有设置另行确认，不自动配置远程或推送。
+仓库直接位于当前项目目录，统一入口为 cloud/Invoke-Cloud.ps1。原 scripts/HOST_CAPTURE_NEXT.json 保留为忽略的历史指针，不作为当前入口。Git 文件选择使用 .gitignore，审计命令检查 Git 可见文件；历史数据、旧实验与真实配置保留本地并忽略。提交身份由操作者明确指定；远程、团队归属和公开/私有设置另行确认，不自动配置远程或推送。
