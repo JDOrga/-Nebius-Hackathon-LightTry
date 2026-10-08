@@ -14,4 +14,4 @@
 8. `export_results.py` 请求 `{root,data_root}`，只导出 JPEG/PNG/JSON/log，限 512MiB，不导出权重和大型张量；`-Operation export_results` 后 `-Operation download_results -DownloadResults`，下载至 run/results.tar.gz 并核对 SHA-256。解包到新本地目录再做结构验收和人工看图。统计不是视觉成功证明。
 9. 成功或失败都给本次 run 写 complete.json（stop_required=true）。守护负责停止并继续监督。`Confirm-RunningStopped.ps1 -Execute -RunDirectory ...` 做独立 API STOPPED 与 instances=[] 验收；stop 被接受不等于停机完成。核对最终 stopped_verified=true、防休眠释放、守护退出。失败时保留监督并人工处理，不延长截止、不自动重启。
 
-迁移版已在显式授权下验证开机、精确主机信任、SSH、容器身份、代码包上传与安装，并核验停机。模型小任务未成功，结果下载与完整灯光推理尚未验收。源代码与离线回归可审核，不能把合成测试当作收费运行的授权或线上验证。
+迁移版已在显式授权下验证开机、精确主机信任、SSH、容器身份、代码包上传与安装，并核验停机。后续复测已验证真实 Tokenizer GPU 编码/解码，以及结果导出、下载和 SHA-256 校验；完整灯光推理尚未验收。范围详见 `VALIDATION.md`。离线合成测试不构成收费运行授权。
