@@ -1,0 +1,12 @@
+{
+  "verification_scope": "authorized read-only runtime inspection; Tokenizer smoke failed before result and full renderer inference was not verified here",
+  "upstream_commit": "0f3e2dc435032ecbad654c2fc2153df85384b138",
+  "python": "3.10.21",
+  "torch": "2.6.0+cu124",
+  "cuda_runtime": "12.4",
+  "nvcc_release": "12.4",
+  "transformer_engine": "1.12.0",
+  "av": "17.1.0",
+  "gpu": "NVIDIA L40S",
+  "wheel_hash_lock_complete": false
+}

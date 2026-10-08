@@ -1,0 +1,4 @@
+# Only CPU/offline checks. Install into a user-selected environment, never globally.
+numpy==1.26.4
+Pillow==11.1.0
+PyYAML==6.0.2

@@ -1,0 +1,4 @@
+# Versions observed in the authorized existing Linux Python 3.10 / CUDA 12.4 environment.
+# Existing environment only; these do not install automatically. No apex/nvdiffrast.
+transformer-engine[pytorch]==1.12.0
+av==17.1.0

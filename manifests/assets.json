@@ -1,0 +1,30 @@
+[
+  {
+    "path": "upstream/asset/examples/image_examples/image_1.jpg",
+    "source_url": "https://raw.githubusercontent.com/nv-tlabs/cosmos-transfer1-diffusion-renderer/0f3e2dc435032ecbad654c2fc2153df85384b138/asset/examples/image_examples/image_1.jpg",
+    "size": 138328,
+    "git_blob": "a9ed0e324369fe66b7cac8b264b46b641310bd25",
+    "sha256": "a661cbc653d91b7c0f8d297a529c25e26d7a9b6ec2a038d7fa0976ef95474c12"
+  },
+  {
+    "path": "upstream/asset/examples/hdri_examples/sunny_vondelpark_2k.hdr",
+    "source_url": "https://raw.githubusercontent.com/nv-tlabs/cosmos-transfer1-diffusion-renderer/0f3e2dc435032ecbad654c2fc2153df85384b138/asset/examples/hdri_examples/sunny_vondelpark_2k.hdr",
+    "size": 7594746,
+    "git_blob": "238cb061fd528b2f8facd38df6af658110204ac5",
+    "sha256": "581d9338941a7c387aaa99f331b956473aa80559ae767c012034ef0fe30bb4d5"
+  },
+  {
+    "path": "upstream/asset/examples/hdri_examples/pink_sunrise_2k.hdr",
+    "source_url": "https://raw.githubusercontent.com/nv-tlabs/cosmos-transfer1-diffusion-renderer/0f3e2dc435032ecbad654c2fc2153df85384b138/asset/examples/hdri_examples/pink_sunrise_2k.hdr",
+    "size": 6622693,
+    "git_blob": "6b309f2841780478cb693dc786779becf5495ba3",
+    "sha256": "7f8a5cce3b934313337a89c9df0418e5fc82e98856a2accecc9d2eb1204586a2"
+  },
+  {
+    "path": "upstream/asset/examples/hdri_examples/street_lamp_2k.hdr",
+    "source_url": "https://raw.githubusercontent.com/nv-tlabs/cosmos-transfer1-diffusion-renderer/0f3e2dc435032ecbad654c2fc2153df85384b138/asset/examples/hdri_examples/street_lamp_2k.hdr",
+    "size": 7097695,
+    "git_blob": "ee434336dbc126e68334525a91386a434de8ae76",
+    "sha256": "012584d8e6c7c9050ce4dbf43654443481c39b31886183c78c5d1d2f1634652b"
+  }
+]

@@ -1,0 +1,20 @@
+{
+  "cli_path": "/replace/with/existing/nebius-cli",
+  "wsl_distro": "REPLACE_WITH_EXISTING_DISTRO",
+  "profile": "REPLACE_WITH_EXISTING_PROFILE",
+  "tenant_id": "tenant-REPLACE",
+  "project_id": "project-REPLACE",
+  "devlab_id": "devlab-REPLACE",
+  "key_path": "C:/replace/with/own/private key",
+  "public_key_fingerprint": "SHA256:REPLACE_WITH_OWN_PUBLIC_KEY_FINGERPRINT",
+  "known_hosts_path": "C:/replace/with/own/known_hosts",
+  "auth_config_path": "C:/replace/with/own/local-profile-config",
+  "data_dir": "C:/replace/with/local data",
+  "upstream_repo": "C:/replace/with/pinned upstream",
+  "container_python": "/replace/with/existing/environment/bin/python",
+  "container_repo": "/replace/with/pinned/upstream",
+  "container_checkpoint_dir": "/replace/with/existing/checkpoints",
+  "container_data_dir": "/replace/with/persistent/data",
+  "cuda_home": "/replace/with/verified/cuda-toolkit",
+  "cloud_stop_enabled": false
+}

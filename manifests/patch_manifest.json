@@ -1,0 +1,21 @@
+{
+  "commit": "0f3e2dc435032ecbad654c2fc2153df85384b138",
+  "files": [
+    {
+      "path": "cosmos_predict1/diffusion/inference/diffusion_renderer_utils/rendering_utils.py",
+      "before_sha256": "3dfd87bf04bec157741dd10a06dcd142ae7b107300c496cf727dcb6f49c7ec9e",
+      "after_sha256": "0466471530994414808def1bcab6a9cb03ad1e61799f6f6ad8c63bf53fc54e1e"
+    },
+    {
+      "path": "cosmos_predict1/diffusion/inference/diffusion_renderer_utils/utils_env_proj.py",
+      "before_sha256": "fb8bcb335e506cec6ac6c7a3653b45c41dd66b839f94ac25119ff73856e0ad50",
+      "after_sha256": "82fadf0c17f83a837b5b705b217880aa423876037943212ba309aa248d1935c6"
+    },
+    {
+      "path": "cosmos_predict1/diffusion/inference/diffusion_renderer_utils/env_sampling.py",
+      "before_sha256": null,
+      "after_sha256": "a6d07c12ef73f2ffa54d206055c60eb0bad563deb469f4c72bf48035490dac19"
+    }
+  ],
+  "patch_sha256": "c79cdd1773b14a0c3d3518a8043b17449b3a37c0f07be382e35c897556e8f482"
+}

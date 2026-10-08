@@ -1,0 +1,177 @@
+{
+  "selection": "current pointer, 14 matching code hashes; relative source lineage only",
+  "files": [
+    {
+      "file": "scripts/apply_hdr_patch.py",
+      "source_label": "scripts/apply_hdr_patch.py",
+      "source_sha256": "a1cc27398566188b41ef184e49e94a0e5cf943e5357ebe23be2102a74c7b4a4a"
+    },
+    {
+      "file": "scripts/weights.py",
+      "source_label": "scripts/weights.py",
+      "source_sha256": "8f87063eeba108e278268c4ee5944e811c86f081184ec92738f393f9a5ffd857"
+    },
+    {
+      "file": "scripts/run_experiment.py",
+      "source_label": "scripts/run_experiment.py",
+      "source_sha256": "e354e708a1572959631afb1f139796f420a72dbc0663169bc1b5a684420c7a95"
+    },
+    {
+      "file": "scripts/validate_outputs.py",
+      "source_label": "scripts/validate_outputs.py",
+      "source_sha256": "aa4bdeed5b79a931680f052d3fc793fd7e41acc2be9f0b30de97198568356147"
+    },
+    {
+      "file": "scripts/preflight.py",
+      "source_label": "scripts/preflight.py",
+      "source_sha256": "b7bc70c43e9444df84eba72e7edc52d4a04899d55b7fc20a842be4abcfd614ba"
+    },
+    {
+      "file": "scripts/check_official_hdrs.py",
+      "source_label": "scripts/check_official_hdrs.py",
+      "source_sha256": "a4dbb8d10650a9bfbecbe838d11fabffc490231ff4a75a362b5298aa769cc18b"
+    },
+    {
+      "file": "prototype/env_sampling.py",
+      "source_label": "prototype/env_sampling.py",
+      "source_sha256": "a6d07c12ef73f2ffa54d206055c60eb0bad563deb469f4c72bf48035490dac19"
+    },
+    {
+      "file": "prototype/numpy_reference.py",
+      "source_label": "prototype/numpy_reference.py",
+      "source_sha256": "e59c497a4b151915d2ce5ddab67b3b8a629d64cd298a6bb6d8ec188428f0521e"
+    },
+    {
+      "file": "prototype/test_math_numpy.py",
+      "source_label": "prototype/test_math_numpy.py",
+      "source_sha256": "7faa7ef3ca39bf2ad02ad815127d74639c25073dae962cd5e7214bbd8d6559cb"
+    },
+    {
+      "file": "prototype/test_golden_cases.py",
+      "source_label": "prototype/test_golden_cases.py",
+      "source_sha256": "cdc6bb5e24d175b0126d0cdc81b156f783ef19df1f68a727992975e68bb01173"
+    },
+    {
+      "file": "prototype/test_torch_integration.py",
+      "source_label": "prototype/test_torch_integration.py",
+      "source_sha256": "213fbed3040cb3879512d8bf8509d92f2819b9bdb9e20746ebb2439437c8d01c"
+    },
+    {
+      "file": "prototype/test_patch_static.py",
+      "source_label": "prototype/test_patch_static.py",
+      "source_sha256": "f43cdc62972af95201566356e9d55ad5e7663355b79f220e1c72ed09b55e2396"
+    },
+    {
+      "file": "prototype/test_upstream_integration.py",
+      "source_label": "prototype/test_upstream_integration.py",
+      "source_sha256": "8ec0616ac6d81b999e8eaf6c0a1a20a6f9d9b4bd0659652c2ca829c327ba71ac"
+    },
+    {
+      "file": "prototype/upstream_hdr_smoke.py",
+      "source_label": "prototype/upstream_hdr_smoke.py",
+      "source_sha256": "86364fb3289ded53fbba6f62de8cb42f3bdb721158626a229b2130c7605f21ec"
+    },
+    {
+      "file": "tests/test_preparation.py",
+      "source_label": "tests/test_preparation.py",
+      "source_sha256": "f769e0a3a8cf49985e5da03ec4ef2b1b6f9376ac46f951cc645096a72f9d6063"
+    },
+    {
+      "file": "cloud/Capture-TeaHost.ps1",
+      "source_label": "scripts/Capture-TeaHost.ps1",
+      "source_sha256": "d9163ef156581b5d7102eeaece4ac7de4f59ca01da33f35eb226d9a335288e34"
+    },
+    {
+      "file": "cloud/HostCapture.Native.ps1",
+      "source_label": "scripts/HostCapture.Native.ps1",
+      "source_sha256": "880cbf70d105962d4304b818af2a7be67cdacd1ece127961b5947a3ed7d3d555"
+    },
+    {
+      "file": "cloud/HostCapture.Native.cs",
+      "source_label": "scripts/HostCapture.Native.cs",
+      "source_sha256": "eedf98368482fe68d2e59827362765550ba72e2acb76d601d0fa3786b3c98e11"
+    },
+    {
+      "file": "cloud/host_capture_api.py",
+      "source_label": "scripts/host_capture_api.py",
+      "source_sha256": "0a9933c418c64d6b6fbd5ec0ee45aa79b3a36f4faf6b092369fa282b78404963"
+    },
+    {
+      "file": "cloud/Confirm-TeaHost.ps1",
+      "source_label": "scripts/Confirm-TeaHost.ps1",
+      "source_sha256": "444db54299daaf8a7e96683730604c9000d3857ae8edb31d5722f1a396ea1f68"
+    },
+    {
+      "file": "cloud/Wait-CaptureTeaHost.ps1",
+      "source_label": "diagnostics/tea-running-clock-heartbeat-20261008-v7/Wait-CaptureTeaHost.ps1",
+      "source_sha256": "5f53827011c0a590bee8c80f77c29f730707c47ffe1360cec5e72ec647a00e5c"
+    },
+    {
+      "file": "cloud/Start-TeaRunningGuard.ps1",
+      "source_label": "diagnostics/tea-running-clock-heartbeat-20261008-v7/Start-TeaRunningGuard.ps1",
+      "source_sha256": "e9c549fcb4bdb16a5c7d9a43ec0cad8eab109af45d0c886d0148c21a7d8d2e8f"
+    },
+    {
+      "file": "cloud/TeaRunningGuard.ps1",
+      "source_label": "diagnostics/tea-running-clock-heartbeat-20261008-v7/TeaRunningGuard.ps1",
+      "source_sha256": "367a8a19652d2ecd6f95042d3c41913b6f87833810fcfee9bfa1efef9a0d3fa3"
+    },
+    {
+      "file": "cloud/live_session_running.py",
+      "source_label": "diagnostics/tea-running-clock-heartbeat-20261008-v7/live_session_running.py",
+      "source_sha256": "e49f7e16a296831c1e2b5c96a224bfb92c2535e40dda7e1ed459ac85cb530441"
+    },
+    {
+      "file": "cloud/Confirm-RunningStopped.ps1",
+      "source_label": "diagnostics/tea-running-clock-heartbeat-20261008-v7/Confirm-RunningStopped.ps1",
+      "source_sha256": "2b77b2a4165fff7c6782207a4d5fac403692f4e329e70dd29c9e3169d09372eb"
+    },
+    {
+      "file": "cloud/Invoke-ScaleRemote.ps1",
+      "source_label": "diagnostics/tea-request-utc-20261008-v8/Invoke-ScaleRemote.ps1",
+      "source_sha256": "647dd09b3158b8f56144a82e0853986a6b04fea2d1ce557e6f0b01e88a2d1ffa"
+    },
+    {
+      "file": "cloud/Common.ps1",
+      "source_label": "legacy-tool/Common.ps1",
+      "source_sha256": "d7cdf3f820de755e4911253fcfaef5d76b76cd85567f2b6d273a41f8a69c514c"
+    },
+    {
+      "file": "cloud/cli_bridge.py",
+      "source_label": "legacy-tool/cli_bridge.py",
+      "source_sha256": "81b54b819858f723fc63ef6b3091ab98ff677f6cda793c272965a13d8df1d694"
+    },
+    {
+      "file": "cloud/remote_probe.py",
+      "source_label": "legacy-tool/remote_probe.py",
+      "source_sha256": "8a2b3906ece4948dd5168abd002123bda42715487b9d7a809a4c07f2384adf4a"
+    },
+    {
+      "file": "cloud/experiment_vm_bridge.py",
+      "source_label": "diagnostics/tea-scale-preparation-20261008-v3-running-clock/experiment_vm_bridge.py",
+      "source_sha256": "0efc6293d302f426c54a90395047bc54decdf194eb1068a07a3057315634407b"
+    },
+    {
+      "file": "patches/replace_hdr_sampling.patch",
+      "source_label": "artifacts/replace_hdr_sampling.patch",
+      "source_sha256": "c79cdd1773b14a0c3d3518a8043b17449b3a37c0f07be382e35c897556e8f482"
+    },
+    {
+      "file": "manifests/patch_manifest.json",
+      "source_label": "evidence/patch_manifest.json",
+      "source_sha256": "af0c577ff0074ec7bdaf13f486761ceaf7ca6213d29941d0365feb1e7497b429"
+    },
+    {
+      "file": "third_party/Cosmos-LICENSE",
+      "source_label": "upstream/LICENSE",
+      "source_sha256": "7382b1cf711e7a7c7af9816e0e07b49b91e7149b7c6d347225f98800fcb1f1c2"
+    },
+    {
+      "file": "requirements/inference-upstream.txt",
+      "source_label": "upstream/requirements.txt",
+      "source_sha256": "2cfa314bf906bd5c5feadff0f089186af61d615ee71ce028404911fe16b6a948"
+    }
+  ],
+  "runtime": "guarded-cosmos",
+  "entry": "cloud/Invoke-Cloud.ps1"
+}
