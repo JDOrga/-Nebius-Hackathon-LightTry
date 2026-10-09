@@ -1,0 +1,465 @@
+{
+  "version": 1,
+  "renderer": "Cosmos Diffusion Renderer",
+  "presets": [
+    {
+      "id": "sunny",
+      "name": "晴日公园",
+      "description": "自然日光的氛围",
+      "hdr": "sunny_vondelpark_2k.hdr",
+      "index": 0,
+      "sha256": "581d9338941a7c387aaa99f331b956473aa80559ae767c012034ef0fe30bb4d5"
+    },
+    {
+      "id": "sunrise",
+      "name": "粉色晨光",
+      "description": "偏粉色的晨光氛围",
+      "hdr": "pink_sunrise_2k.hdr",
+      "index": 1,
+      "sha256": "7f8a5cce3b934313337a89c9df0418e5fc82e98856a2accecc9d2eb1204586a2"
+    },
+    {
+      "id": "street",
+      "name": "夜间街灯",
+      "description": "街灯环境的明暗与色调",
+      "hdr": "street_lamp_2k.hdr",
+      "index": 2,
+      "sha256": "012584d8e6c7c9050ce4dbf43654443481c39b31886183c78c5d1d2f1634652b"
+    }
+  ],
+  "samples": [
+    {
+      "id": "01_matte_terracotta",
+      "name": "陶罐",
+      "material": "哑光陶器",
+      "date": "2026-10-07",
+      "runId": "2aa06a2c4e154ad0b03424c0d1d3dcca",
+      "original": {
+        "assetId": "01_matte_terracotta-original",
+        "url": "/assets/01_matte_terracotta-original",
+        "width": 4272,
+        "height": 2848,
+        "sha256": "5e46330920891b48012b33ea28cf1f34ca282e8936cd2e25f06383681518ba90"
+      },
+      "input": {
+        "assetId": "01_matte_terracotta-input",
+        "url": "/assets/01_matte_terracotta-input",
+        "width": 1280,
+        "height": 704,
+        "sha256": "cbbfad2ba8e746586ecf8187a228c4fae5df7c8b41d1ee0b7e441d8006679cb3"
+      },
+      "results": {
+        "sunny": {
+          "assetId": "01_matte_terracotta-sunny",
+          "url": "/assets/01_matte_terracotta-sunny",
+          "width": 1280,
+          "height": 704,
+          "sha256": "c6488cc0df96241fcc0c1f90d90a1f8f1f299d8196c84a7f0c1f398afa9507d2"
+        },
+        "sunrise": {
+          "assetId": "01_matte_terracotta-sunrise",
+          "url": "/assets/01_matte_terracotta-sunrise",
+          "width": 1280,
+          "height": 704,
+          "sha256": "366930838833928c87fa222d8b4bd646b6bf5c96598038738ed1ebe5f6848ff3"
+        },
+        "street": {
+          "assetId": "01_matte_terracotta-street",
+          "url": "/assets/01_matte_terracotta-street",
+          "width": 1280,
+          "height": 704,
+          "sha256": "a783785beab2dbdba894e660e647067b347e72dc34f0da48d1c703b00861eb7a"
+        }
+      },
+      "unstable": false,
+      "warning": "",
+      "canvas": {
+        "width": 1280,
+        "height": 704,
+        "validRegion": [
+          112,
+          0,
+          1168,
+          704
+        ],
+        "paddingRgb": [
+          127,
+          127,
+          127
+        ],
+        "policy": "按记录等比缩放，保留中性灰留白；完整画布，无主体裁切。"
+      },
+      "credit": {
+        "title": "Terracotta pot. Fayoztepa",
+        "creator": "Miss Kamola",
+        "license": "CC0 1.0",
+        "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Terracotta_pot._Fayoztepa.jpg",
+        "color_handling": "RGB decoded values assumed sRGB (not measured); no tonal enhancement"
+      }
+    },
+    {
+      "id": "02_text_tea_tin",
+      "name": "茶盒",
+      "material": "印刷金属盒",
+      "date": "2026-10-07",
+      "runId": "2aa06a2c4e154ad0b03424c0d1d3dcca",
+      "original": {
+        "assetId": "02_text_tea_tin-original",
+        "url": "/assets/02_text_tea_tin-original",
+        "width": 4288,
+        "height": 2848,
+        "sha256": "e8eb6c581a2a4b2f8e812256c68c81705ae9c44913df3a7f6505ff89d4738c72"
+      },
+      "input": {
+        "assetId": "02_text_tea_tin-input",
+        "url": "/assets/02_text_tea_tin-input",
+        "width": 1280,
+        "height": 704,
+        "sha256": "4f94b62fed4964ed1b3c3cdc1e669121db46fc096ac0e4f203c0e965b5afbc72"
+      },
+      "results": {
+        "sunny": {
+          "assetId": "02_text_tea_tin-sunny",
+          "url": "/assets/02_text_tea_tin-sunny",
+          "width": 1280,
+          "height": 704,
+          "sha256": "f849698ff200af3810f61787bb7b57df3766502ded24b6dfcef79c955d85ee11"
+        },
+        "sunrise": {
+          "assetId": "02_text_tea_tin-sunrise",
+          "url": "/assets/02_text_tea_tin-sunrise",
+          "width": 1280,
+          "height": 704,
+          "sha256": "03692cf255ae8c742f4e031982b9e120d429f51afbdd353f5cb0c58162559871"
+        },
+        "street": {
+          "assetId": "02_text_tea_tin-street",
+          "url": "/assets/02_text_tea_tin-street",
+          "width": 1280,
+          "height": 704,
+          "sha256": "93ef30872b4ea4d6ffe3ab173a676b7a3795f6ba1d235bcbca755cc0381f1cd7"
+        }
+      },
+      "unstable": false,
+      "warning": "",
+      "canvas": {
+        "width": 1280,
+        "height": 704,
+        "validRegion": [
+          110,
+          0,
+          1170,
+          704
+        ],
+        "paddingRgb": [
+          127,
+          127,
+          127
+        ],
+        "policy": "按记录等比缩放，保留中性灰留白；完整画布，无主体裁切。"
+      },
+      "credit": {
+        "title": "Tabloid Compressed Tea tin: Burroughs Wellcome & Co. product (L0041232)",
+        "creator": "Wellcome Library, London",
+        "license": "CC BY 4.0",
+        "license_url": "https://creativecommons.org/licenses/by/4.0/",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Tabloid_Compressed_Tea_tin;_Burroughs_Wellcome_%26_Co._product_Wellcome_L0041232.jpg",
+        "color_handling": "Embedded Adobe RGB (1998) to sRGB via LittleCMS relative colorimetric intent; no tonal enhancement"
+      }
+    },
+    {
+      "id": "03_glossy_metal_teapot",
+      "name": "金属壶",
+      "material": "反光金属",
+      "date": "2026-10-07",
+      "runId": "2aa06a2c4e154ad0b03424c0d1d3dcca",
+      "original": {
+        "assetId": "03_glossy_metal_teapot-original",
+        "url": "/assets/03_glossy_metal_teapot-original",
+        "width": 3264,
+        "height": 2448,
+        "sha256": "3280610c05178d6bb474f9db21b675dacc597fa01b026a17ee59b00690714cc9"
+      },
+      "input": {
+        "assetId": "03_glossy_metal_teapot-input",
+        "url": "/assets/03_glossy_metal_teapot-input",
+        "width": 1280,
+        "height": 704,
+        "sha256": "0ac48169ec0be3847fcbca446133bf10c6c1ca230927daeeb7f3a5159ef50bc1"
+      },
+      "results": {
+        "sunny": {
+          "assetId": "03_glossy_metal_teapot-sunny",
+          "url": "/assets/03_glossy_metal_teapot-sunny",
+          "width": 1280,
+          "height": 704,
+          "sha256": "67254538813766482d552f3c6161b55cf125d0e8e877e1b4e143fe6ae16db49c"
+        },
+        "sunrise": {
+          "assetId": "03_glossy_metal_teapot-sunrise",
+          "url": "/assets/03_glossy_metal_teapot-sunrise",
+          "width": 1280,
+          "height": 704,
+          "sha256": "dce4fded3e919d14a860b7937c2c4433c58d4a8c5b65c3dcbcc2c65e86639fe2"
+        },
+        "street": {
+          "assetId": "03_glossy_metal_teapot-street",
+          "url": "/assets/03_glossy_metal_teapot-street",
+          "width": 1280,
+          "height": 704,
+          "sha256": "7e3de3557a8d9255f12d1fbf7f3fd05bbad10caae622c4902a737fb7d880d1a6"
+        }
+      },
+      "unstable": false,
+      "warning": "",
+      "canvas": {
+        "width": 1280,
+        "height": 704,
+        "validRegion": [
+          170,
+          0,
+          1109,
+          704
+        ],
+        "paddingRgb": [
+          127,
+          127,
+          127
+        ],
+        "policy": "按记录等比缩放，保留中性灰留白；完整画布，无主体裁切。"
+      },
+      "credit": {
+        "title": "Metal Tea Pot (16063326056)",
+        "creator": "oatsy40",
+        "license": "CC BY 2.0",
+        "license_url": "https://creativecommons.org/licenses/by/2.0/",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Metal_Tea_Pot_(16063326056).jpg",
+        "color_handling": "RGB decoded values assumed sRGB (not measured); no tonal enhancement"
+      }
+    },
+    {
+      "id": "04_transparent_glass",
+      "name": "玻璃杯",
+      "material": "效果不稳定",
+      "date": "2026-10-07",
+      "runId": "2aa06a2c4e154ad0b03424c0d1d3dcca",
+      "original": {
+        "assetId": "04_transparent_glass-original",
+        "url": "/assets/04_transparent_glass-original",
+        "width": 1627,
+        "height": 2090,
+        "sha256": "306f9d3a9b15df0099305c85ab5d2995022dc1b4f5db0ea8e16d5e3ed2c904f2"
+      },
+      "input": {
+        "assetId": "04_transparent_glass-input",
+        "url": "/assets/04_transparent_glass-input",
+        "width": 1280,
+        "height": 704,
+        "sha256": "6473ac008002f3eb7a0cc01f88a79ce0849dd17332e1a39097687f4bacb47345"
+      },
+      "results": {
+        "sunny": {
+          "assetId": "04_transparent_glass-sunny",
+          "url": "/assets/04_transparent_glass-sunny",
+          "width": 1280,
+          "height": 704,
+          "sha256": "99f1d13b769e27edc67c41f678dce254ae8fbc038221ab9486fc1e80f23da428"
+        },
+        "sunrise": {
+          "assetId": "04_transparent_glass-sunrise",
+          "url": "/assets/04_transparent_glass-sunrise",
+          "width": 1280,
+          "height": 704,
+          "sha256": "21aa2010696b94588b11b0804c919a1a55ceeee0a360f7499f6fd08c708d9db5"
+        },
+        "street": {
+          "assetId": "04_transparent_glass-street",
+          "url": "/assets/04_transparent_glass-street",
+          "width": 1280,
+          "height": 704,
+          "sha256": "3fd066482a69265018b9363ad8713ce149cd87358eecd7838bbfd307d8d3a8a1"
+        }
+      },
+      "unstable": true,
+      "warning": "透明边缘与透射背景明显变化，效果不稳定。",
+      "canvas": {
+        "width": 1280,
+        "height": 704,
+        "validRegion": [
+          366,
+          0,
+          914,
+          704
+        ],
+        "paddingRgb": [
+          127,
+          127,
+          127
+        ],
+        "policy": "按记录等比缩放，保留中性灰留白；完整画布，无主体裁切。"
+      },
+      "credit": {
+        "title": "Glass bottle.jpg (image shows a drinking glass)",
+        "creator": "Yesseruser",
+        "license": "CC0 1.0",
+        "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        "source_url": "https://commons.wikimedia.org/wiki/File:Glass_bottle.jpg",
+        "color_handling": "Embedded sRGB to sRGB via LittleCMS relative colorimetric intent; no tonal enhancement"
+      }
+    }
+  ],
+  "assets": {
+    "01_matte_terracotta-original": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/originals/01_matte_terracotta.jpg",
+      "sha256": "5e46330920891b48012b33ea28cf1f34ca282e8936cd2e25f06383681518ba90",
+      "bytes": 3735742,
+      "width": 4272,
+      "height": 2848
+    },
+    "01_matte_terracotta-input": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/inputs-srgb/01_matte_terracotta.png",
+      "sha256": "cbbfad2ba8e746586ecf8187a228c4fae5df7c8b41d1ee0b7e441d8006679cb3",
+      "bytes": 881684,
+      "width": 1280,
+      "height": 704
+    },
+    "01_matte_terracotta-sunny": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0000/01_matte_terracotta/0000.0000.jpg",
+      "sha256": "c6488cc0df96241fcc0c1f90d90a1f8f1f299d8196c84a7f0c1f398afa9507d2",
+      "bytes": 48840,
+      "width": 1280,
+      "height": 704
+    },
+    "01_matte_terracotta-sunrise": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0001/01_matte_terracotta/0000.0000.jpg",
+      "sha256": "366930838833928c87fa222d8b4bd646b6bf5c96598038738ed1ebe5f6848ff3",
+      "bytes": 45088,
+      "width": 1280,
+      "height": 704
+    },
+    "01_matte_terracotta-street": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0002/01_matte_terracotta/0000.0000.jpg",
+      "sha256": "a783785beab2dbdba894e660e647067b347e72dc34f0da48d1c703b00861eb7a",
+      "bytes": 46942,
+      "width": 1280,
+      "height": 704
+    },
+    "02_text_tea_tin-original": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/originals/02_text_tea_tin.jpg",
+      "sha256": "e8eb6c581a2a4b2f8e812256c68c81705ae9c44913df3a7f6505ff89d4738c72",
+      "bytes": 2089226,
+      "width": 4288,
+      "height": 2848
+    },
+    "02_text_tea_tin-input": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/inputs-srgb/02_text_tea_tin.png",
+      "sha256": "4f94b62fed4964ed1b3c3cdc1e669121db46fc096ac0e4f203c0e965b5afbc72",
+      "bytes": 1076990,
+      "width": 1280,
+      "height": 704
+    },
+    "02_text_tea_tin-sunny": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0000/02_text_tea_tin/0000.0000.jpg",
+      "sha256": "f849698ff200af3810f61787bb7b57df3766502ded24b6dfcef79c955d85ee11",
+      "bytes": 162252,
+      "width": 1280,
+      "height": 704
+    },
+    "02_text_tea_tin-sunrise": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0001/02_text_tea_tin/0000.0000.jpg",
+      "sha256": "03692cf255ae8c742f4e031982b9e120d429f51afbdd353f5cb0c58162559871",
+      "bytes": 145784,
+      "width": 1280,
+      "height": 704
+    },
+    "02_text_tea_tin-street": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0002/02_text_tea_tin/0000.0000.jpg",
+      "sha256": "93ef30872b4ea4d6ffe3ab173a676b7a3795f6ba1d235bcbca755cc0381f1cd7",
+      "bytes": 109319,
+      "width": 1280,
+      "height": 704
+    },
+    "03_glossy_metal_teapot-original": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/originals/03_glossy_metal_teapot.jpg",
+      "sha256": "3280610c05178d6bb474f9db21b675dacc597fa01b026a17ee59b00690714cc9",
+      "bytes": 2667326,
+      "width": 3264,
+      "height": 2448
+    },
+    "03_glossy_metal_teapot-input": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/inputs-srgb/03_glossy_metal_teapot.png",
+      "sha256": "0ac48169ec0be3847fcbca446133bf10c6c1ca230927daeeb7f3a5159ef50bc1",
+      "bytes": 872740,
+      "width": 1280,
+      "height": 704
+    },
+    "03_glossy_metal_teapot-sunny": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0000/03_glossy_metal_teapot/0000.0000.jpg",
+      "sha256": "67254538813766482d552f3c6161b55cf125d0e8e877e1b4e143fe6ae16db49c",
+      "bytes": 62781,
+      "width": 1280,
+      "height": 704
+    },
+    "03_glossy_metal_teapot-sunrise": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0001/03_glossy_metal_teapot/0000.0000.jpg",
+      "sha256": "dce4fded3e919d14a860b7937c2c4433c58d4a8c5b65c3dcbcc2c65e86639fe2",
+      "bytes": 66636,
+      "width": 1280,
+      "height": 704
+    },
+    "03_glossy_metal_teapot-street": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0002/03_glossy_metal_teapot/0000.0000.jpg",
+      "sha256": "7e3de3557a8d9255f12d1fbf7f3fd05bbad10caae622c4902a737fb7d880d1a6",
+      "bytes": 56633,
+      "width": 1280,
+      "height": 704
+    },
+    "04_transparent_glass-original": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/originals/04_transparent_glass.jpg",
+      "sha256": "306f9d3a9b15df0099305c85ab5d2995022dc1b4f5db0ea8e16d5e3ed2c904f2",
+      "bytes": 1696779,
+      "width": 1627,
+      "height": 2090
+    },
+    "04_transparent_glass-input": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/inputs-srgb/04_transparent_glass.png",
+      "sha256": "6473ac008002f3eb7a0cc01f88a79ce0849dd17332e1a39097687f4bacb47345",
+      "bytes": 486619,
+      "width": 1280,
+      "height": 704
+    },
+    "04_transparent_glass-sunny": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0000/04_transparent_glass/0000.0000.jpg",
+      "sha256": "99f1d13b769e27edc67c41f678dce254ae8fbc038221ab9486fc1e80f23da428",
+      "bytes": 61896,
+      "width": 1280,
+      "height": 704
+    },
+    "04_transparent_glass-sunrise": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0001/04_transparent_glass/0000.0000.jpg",
+      "sha256": "21aa2010696b94588b11b0804c919a1a55ceeee0a360f7499f6fd08c708d9db5",
+      "bytes": 41635,
+      "width": 1280,
+      "height": 704
+    },
+    "04_transparent_glass-street": {
+      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0002/04_transparent_glass/0000.0000.jpg",
+      "sha256": "3fd066482a69265018b9363ad8713ce149cd87358eecd7838bbfd307d8d3a8a1",
+      "bytes": 45407,
+      "width": 1280,
+      "height": 704
+    }
+  },
+  "provenance": {
+    "runId": "2aa06a2c4e154ad0b03424c0d1d3dcca",
+    "sourceDirectory": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca",
+    "checkedRecords": [
+      "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/prepared_inputs.json",
+      "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/configuration.json",
+      "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/local_integrity.json",
+      "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward-performance/performance.json"
+    ],
+    "note": "Full-frame forward JPEG only. Later tea basecolor, local-scale crops and CPU fusion candidates are excluded. Historical final acceptance process failed; forward generation completed, hashes verified."
+  }
+}
