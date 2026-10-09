@@ -45,7 +45,7 @@ function Invoke-Bridge([ValidateSet('local','status','target','host-target','sto
     if ($AuthorizedStop) { $arguments += '--authorized-stop' }
     # Compile before calculating the remaining process budget.
     . (Join-Path $PSScriptRoot 'HostCapture.Native.ps1')
-    $native=Get-Command wsl.exe -CommandType Application -ErrorAction Stop
+    $native=Get-Command wsl.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
     $remaining=$TimeoutMs-[int]$watch.ElapsedMilliseconds
     if($remaining -le 0){throw 'BRIDGE_PROCESS_BUDGET_EXHAUSTED'}
     $seconds=([Math]::Max(0.001,($remaining-250)/1000.0)).ToString('0.000',[Globalization.CultureInfo]::InvariantCulture)
@@ -114,7 +114,7 @@ function Invoke-BoundedTransfer([string]$Executable,[string[]]$Arguments) {
     $budget=[int][Math]::Min(90000,($script:RemoteDeadline-[DateTimeOffset]::UtcNow).TotalMilliseconds)
     if($budget -le 0){throw 'FIXED_REMOTE_DEADLINE_REACHED'}
     . (Join-Path $PSScriptRoot 'HostCapture.Native.ps1')
-    $native=Get-Command $Executable -CommandType Application -ErrorAction Stop
+    $native=Get-Command $Executable -CommandType Application -ErrorAction Stop | Select-Object -First 1
     $r=[TeaHostNativeBudget2]::Run($native.Source,$Arguments,$budget,1048576)
     if(!$r.Started -or $r.TimedOut -or $r.CleanupIncomplete -or !$r.OutputComplete -or $r.Truncated -or $r.ReadFailed -or $r.ExitCode -ne 0){
         $failure=[Exception]::new('BOUNDED_TRANSFER_FAILED_OUTPUT_NOT_ACCEPTED')
