@@ -43,7 +43,7 @@ try {
             root = Path(temp)
             cloud = root / 'cloud'
             cloud.mkdir()
-            for name in ('Common.ps1', 'RequestJson.ps1', 'HostCapture.Native.ps1', 'HostCapture.Native.cs'):
+            for name in ('Common.ps1', 'RequestJson.ps1', 'TransportDiagnostics.ps1', 'HostCapture.Native.ps1', 'HostCapture.Native.cs'):
                 shutil.copyfile(ROOT / 'cloud' / name, cloud / name)
             common = cloud / 'Common.ps1'
             common.write_text(common.read_text() + r'''

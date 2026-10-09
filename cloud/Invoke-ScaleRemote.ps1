@@ -37,6 +37,9 @@ if($Operation -in @('launch','install_bundle','upload_directory') -or $UploadArc
 if($cutoff -gt [DateTimeOffset]::Parse($receipt.deadline_utc)){$cutoff=[DateTimeOffset]::Parse($receipt.deadline_utc)}
 $script:RemoteDeadline=$cutoff
 $argsList=Get-SshArguments $target
+$diagnosticContext=@{operation=$Operation;connection_arguments_sha256=(Get-TransportTextDigest ($argsList|ConvertTo-Json -Compress));
+ target_identity_sha256=(Get-TransportTextDigest (@($target.vm_id,$target.ip,$target.ssh_user,$target.image)|ConvertTo-Json -Compress));
+ host_pin_sha256=(RuntimeDigest $trust.pin_path)}
 $fresh=Invoke-Bridge target
 if ($fresh.vm_id -ne $target.vm_id -or $fresh.ip -ne $target.ip -or $fresh.ssh_user -ne $target.ssh_user -or $fresh.image -ne $target.image) { throw 'API target changed before SSH.' }
 $bundle=Get-Content -LiteralPath (Join-Path $run 'bundle.json') -Raw -Encoding UTF8 | ConvertFrom-JsonUtc
@@ -52,7 +55,7 @@ if ($DownloadResults) {
     $dest=Join-Path $run 'results.tar.gz'
     if (Test-Path -LiteralPath $dest) { throw 'Preserve existing download.' }
     $scpArgs=@($argsList[0..($argsList.Count-3)])+@(($target.ssh_user+'@'+$target.ip+':'+$expected),$dest)
-    $transfer=Invoke-BoundedTransfer 'scp.exe' $scpArgs
+    $transfer=Invoke-BoundedTransfer 'scp.exe' $scpArgs (Join-Path $run ($Operation+'-native.json')) $diagnosticContext
     $code=$transfer.ExitCode
     if ($code -ne 0) { throw ('RESULT_SCP_FAILED_EXIT_'+$code) }
     if ((RuntimeDigest $dest) -ne $metadata.sha256) { throw 'RESULT_ARCHIVE_HASH_MISMATCH' }
@@ -65,7 +68,7 @@ if ($UploadArchive) {
     if ((RuntimeDigest $archive) -ne $hash) { throw 'Archive hash changed.' }
     $remote='/home/'+$target.ssh_user+'/nebius-upload-'+(Split-Path $run -Leaf)+'/'+$bundle.archive
     $scpArgs=@($argsList[0..($argsList.Count-3)])+@($archive,($target.ssh_user+'@'+$target.ip+':'+$remote))
-    $transfer=Invoke-BoundedTransfer 'scp.exe' $scpArgs
+    $transfer=Invoke-BoundedTransfer 'scp.exe' $scpArgs (Join-Path $run ($Operation+'-native.json')) $diagnosticContext
     $code=$transfer.ExitCode
     if ($code -ne 0) { throw ('SCP_FAILED_EXIT_'+$code) }
     Write-AtomicJson (Join-Path $run 'upload-receipt.json') @{vm_id=$target.vm_id;archive_sha256=$hash;archive_filename=$bundle.archive;remote_path=$remote;utc=[DateTimeOffset]::UtcNow.ToString('o')}
@@ -81,8 +84,13 @@ if ($RequestPath) { $jsonText=Get-Content -LiteralPath $RequestPath -Raw -Encodi
 if($Operation -eq 'launch'){if(!$RequestPath){throw 'LAUNCH_REQUEST_REQUIRED'};$request.container_request | Add-Member -NotePropertyName guard_launch_receipt -NotePropertyValue $receipt -Force}
 $program=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'experiment_vm_bridge.py') -Raw -Encoding UTF8
 $command=New-EncodedShellCommand $program (ConvertTo-Base64 ($request | ConvertTo-Json -Depth 8 -Compress))
+$diagnosticContext.request_sha256=Get-TransportTextDigest ($request|ConvertTo-Json -Depth 8 -Compress)
 if ($command.Length -gt 28000) { throw 'Native command too large.' }
-$output=Invoke-NativeSshCommand $argsList $command (Join-Path $run ($Operation+'-native.json'))
-$result=Read-RemoteResult $output $nonce $Operation $target.image
+$output=Invoke-NativeSshCommand $argsList $command (Join-Path $run ($Operation+'-native.json')) -Context $diagnosticContext
+try{$result=Read-RemoteResult $output $nonce $Operation $target.image}catch{
+ $validationFailure=$_
+ try{Write-AtomicJson (Join-Path $run ($Operation+'-validation-failure.json')) @{phase='remote_result_validation';operation=$Operation;code=(Get-RemoteFailureCode $validationFailure.Exception.Message);utc=[DateTimeOffset]::UtcNow.ToString('o');raw_output_saved=$false}}catch{}
+ throw $validationFailure
+}
 Write-AtomicJson (Join-Path $run ($Operation+'-result.json')) $result
 $result | ConvertTo-Json -Depth 6

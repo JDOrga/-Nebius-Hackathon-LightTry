@@ -1,4 +1,5 @@
 . (Join-Path $PSScriptRoot 'RequestJson.ps1')
+. (Join-Path $PSScriptRoot 'TransportDiagnostics.ps1')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:ToolRoot = $PSScriptRoot
@@ -109,26 +110,45 @@ function Read-RemoteResult([string]$Output, [string]$Nonce, [string]$Operation, 
     }
     $result
 }
-function Invoke-BoundedTransfer([string]$Executable,[string[]]$Arguments) {
+function Invoke-BoundedTransfer([string]$Executable,[string[]]$Arguments,[string]$DiagnosticsPath,[hashtable]$Context) {
     if (!$script:RemoteDeadline) { throw 'FIXED_REMOTE_DEADLINE_REQUIRED' }
     $budget=[int][Math]::Min(90000,($script:RemoteDeadline-[DateTimeOffset]::UtcNow).TotalMilliseconds)
     if($budget -le 0){throw 'FIXED_REMOTE_DEADLINE_REACHED'}
     . (Join-Path $PSScriptRoot 'HostCapture.Native.ps1')
     $native=Get-Command $Executable -CommandType Application -ErrorAction Stop | Select-Object -First 1
+    $metadata=@{started_utc=[DateTimeOffset]::UtcNow.ToString('o');context=(Get-SafeTransportContext $Context);
+        executable_name=[IO.Path]::GetFileName($native.Source);argument_count=$Arguments.Count;
+        argument_characters=(@($Arguments|ForEach-Object {$_.Length})|Measure-Object -Sum).Sum;
+        arguments_sha256=(Get-TransportTextDigest ($Arguments|ConvertTo-Json -Compress));
+        fixed_deadline_utc=$script:RemoteDeadline.ToString('o')}
+    $attemptPath=$null
+    if($DiagnosticsPath){
+        $attemptDirectory=Join-Path ([IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($DiagnosticsPath))) 'transport-attempts'
+        New-Item -ItemType Directory -Force -Path $attemptDirectory|Out-Null
+        $attemptId=[Guid]::NewGuid().ToString('N');$metadata.attempt_id=$attemptId
+        $attemptPath=Join-Path $attemptDirectory ([IO.Path]::GetFileNameWithoutExtension($DiagnosticsPath)+'-'+$attemptId+'.json')
+    }
+    if($DiagnosticsPath){Write-AtomicJson $DiagnosticsPath @{schema_version=2;phase='native_prepared';invocation=$metadata;raw_output_saved=$false}}
+    # Compilation and evidence writing consume the original fixed deadline too.
+    $budget=[int][Math]::Min(90000,($script:RemoteDeadline-[DateTimeOffset]::UtcNow).TotalMilliseconds)
+    if($budget -le 0){throw 'FIXED_REMOTE_DEADLINE_REACHED'}
     $r=[TeaHostNativeBudget2]::Run($native.Source,$Arguments,$budget,1048576)
+    $summary=Get-SafeNativeSummary $r
+    $summary.invocation=$metadata;$summary.completed_utc=[DateTimeOffset]::UtcNow.ToString('o')
+    $diagnosticFailed=$false
+    if($DiagnosticsPath){try{Write-AtomicJson $DiagnosticsPath $summary}catch{$diagnosticFailed=$true}}
+    if($attemptPath){try{Write-AtomicJson $attemptPath $summary}catch{$diagnosticFailed=$true}}
     if(!$r.Started -or $r.TimedOut -or $r.CleanupIncomplete -or !$r.OutputComplete -or $r.Truncated -or $r.ReadFailed -or $r.ExitCode -ne 0){
         $failure=[Exception]::new('BOUNDED_TRANSFER_FAILED_OUTPUT_NOT_ACCEPTED')
-        $failure.Data['native_summary']=@{status=$r.Status;exit_code=$r.ExitCode;started=$r.Started;timed_out=$r.TimedOut;output_complete=$r.OutputComplete;truncated=$r.Truncated;read_failed=$r.ReadFailed;cleanup_incomplete=$r.CleanupIncomplete;elapsed_ms=$r.ElapsedMs;public_failure_labels=@($r.Stderr -split '\r?\n'|Where-Object {$_ -match '^(CONTAINER_STAGE_FAILED_EXIT_[0-9]+|SMOKE_[A-Z0-9_]{1,110}|VM_[A-Z0-9_]{1,110}|DOCKER_QUERY_FAILED|NO_VALID_RUNNING_CONTAINERS|CONTAINER_MATCH_NOT_UNIQUE|INVALID_ARCHIVE_NAME)$'});raw_output_saved=$false}
+        $summary.diagnostic_write_failed=$diagnosticFailed
+        $failure.Data['native_summary']=$summary
         throw $failure
     }
+    if($diagnosticFailed){throw 'TRANSPORT_DIAGNOSTIC_WRITE_FAILED_AFTER_NATIVE_SUCCESS'}
     return $r
 }
-function Invoke-NativeSshCommand([string[]]$Arguments,[string]$Command,[string]$DiagnosticsPath,[string]$Executable='ssh.exe') {
-    try {$r=Invoke-BoundedTransfer $Executable (@($Arguments)+@($Command))}catch{
-        if($DiagnosticsPath -and $_.Exception.Data.Contains('native_summary')){Write-AtomicJson $DiagnosticsPath $_.Exception.Data['native_summary']}
-        throw
-    }
-    if($DiagnosticsPath){Write-AtomicJson $DiagnosticsPath @{exit_code=$r.ExitCode;output_complete=$r.OutputComplete;raw_stdout_saved=$false;stderr_saved=$false}}
+function Invoke-NativeSshCommand([string[]]$Arguments,[string]$Command,[string]$DiagnosticsPath,[string]$Executable='ssh.exe',[hashtable]$Context) {
+    $r=Invoke-BoundedTransfer $Executable (@($Arguments)+@($Command)) $DiagnosticsPath $Context
     return $r.Stdout
 }
 function Set-ConnectionPhase([string]$Path,[string]$Phase) {
