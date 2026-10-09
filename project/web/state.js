@@ -11,7 +11,15 @@ export function reduce(state, event) {
     case 'PRESET': return { ...state, presetId: event.id, task: null, error: null };
     case 'UPLOAD_START': return { ...state, mode: 'generate', upload: null, task: null, error: null, view: { ...EMPTY_VIEW } };
     case 'UPLOAD': return { ...state, mode: 'generate', upload: event.input, task: null, error: null, view: { ...EMPTY_VIEW } };
-    case 'TASK': return { ...state, task: event.task };
+    case 'TASK': {
+      const task = event.task;
+      if (state.mode !== 'generate' || task.input?.id !== state.upload?.id || task.preset?.id !== state.presetId ||
+          (state.task && state.task.status !== 'not_connected' && state.task.taskId !== task.taskId)) return state;
+      return { ...state, task, error: null, upload: task.status === 'not_connected' ? state.upload : task.input };
+    }
+    case 'RESTORE_TASK': return { ...state, mode: 'generate', upload: event.task.input,
+      presetId: event.task.preset.id, task: event.task, error: null, view: { ...EMPTY_VIEW } };
+    case 'NEW_TASK': return { ...state, task: null, error: null };
     case 'ERROR': return { ...state, error: event.message };
     case 'COMPARE': return { ...state, comparison: event.value };
     case 'VIEW': return { ...state, view: { ...state.view, ...event.value } };
@@ -22,7 +30,11 @@ export function reduce(state, event) {
 export function selection(state, catalog) {
   const preset = catalog.presets.find(p => p.id === state.presetId);
   if (state.mode === 'generate') {
-    return { sample: null, preset, input: state.upload, result: null, exportUrl: null };
+    const task = state.task;
+    const candidate = task?.result;
+    const result = task?.status === 'succeeded' && task.input.id === state.upload?.id && task.preset.id === preset?.id &&
+      candidate?.taskId === task.taskId && candidate.inputId === state.upload.id && candidate.presetId === preset.id ? candidate : null;
+    return { sample: null, preset, input: state.upload, result, exportUrl: result?.downloadUrl || null };
   }
   const sample = catalog.samples.find(s => s.id === state.sampleId);
   return { sample, preset, input: sample?.input, result: sample?.results[preset?.id],

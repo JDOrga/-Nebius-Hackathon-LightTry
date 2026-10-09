@@ -3,7 +3,7 @@
 <body>
 <header class="header"><a class="brand" href="/"><img src="/favicon.svg" alt="" width="36" height="36"><span>光照预览 <small>COSMOS</small></span></a><nav><span class="local-badge"><i></i> 本地原型</span><a href="/about.html">使用说明与素材来源 ↗</a></nav></header>
 <main>
-  <section class="intro"><div><div class="eyebrow">让光线，换一种氛围</div><h1>为产品找到合适的光。</h1><p>比较光照下的氛围、色温与明暗，辅助选择你的灯光方案。</p></div><div class="mode-switch" aria-label="数据来源"><button id="sample-mode" aria-pressed="true">样例演示</button><button id="generate-mode" aria-pressed="false">照片预览 <span>暂不生成</span></button></div></section>
+  <section class="intro"><div><div class="eyebrow">让光线，换一种氛围</div><h1>为产品找到合适的光。</h1><p>比较光照下的氛围、色温与明暗，辅助选择你的灯光方案。</p></div><div class="mode-switch" aria-label="数据来源"><button id="sample-mode" aria-pressed="true">样例演示</button><button id="generate-mode" aria-pressed="false">我的照片 <span>推理默认关闭</span></button></div></section>
   <div class="workspace">
     <section class="preview-card" aria-label="图片预览">
       <div class="preview-heading"><div><span class="eyebrow" id="source-label">样例演示</span><h2 id="image-title">载入样例</h2></div><span id="image-size" class="muted"></span></div>
@@ -18,9 +18,13 @@
     <aside class="controls">
       <section class="panel" id="lights-panel"><div class="section-title"><h2>光照方案</h2><span>03</span></div><p class="muted small">同一主体，三种环境光氛围</p><div id="preset-list" class="preset-list"></div><div class="hdr-note" id="hdr-note"></div></section>
       <section class="panel" id="samples-panel"><div class="section-title"><h2>内置样例</h2><span>04</span></div><div id="sample-list" class="sample-list"></div><button id="view-original" class="text-button">查看原始照片 ↗</button><p class="small muted">历史实测结果 · 2026-10-07</p></section>
-      <section class="upload-box" id="drop-zone" tabindex="0" role="button" aria-label="载入照片预览，暂不支持生成"><span class="upload-icon">＋</span><strong>载入照片预览</strong><span class="upload-capability">暂不支持生成</span><span>点击选图，或拖拽到这里</span><small>JPG / PNG / WebP · 最大 20 MB</small></section>
+      <section class="upload-box" id="drop-zone" tabindex="0" role="button" aria-label="载入照片"><span class="upload-icon">＋</span><strong>载入照片</strong><span class="upload-capability">本机预览 · 提交后才生成</span><span>点击选图，或拖拽到这里</span><small>JPG / PNG / WebP · 最大 20 MB</small></section>
       <input id="file-input" type="file" accept="image/jpeg,image/png,image/webp" hidden>
       <p id="upload-error" class="error" role="alert" hidden></p>
+      <button id="view-upload-original" class="text-button" hidden>查看本次原始照片 ↗</button>
+      <button id="submit-task" class="export-button" hidden disabled>提交光照任务</button>
+      <button id="cancel-task" class="text-button" hidden>取消任务（需执行端支持）</button>
+      <button id="restore-task" class="text-button" hidden>查看上次任务</button>
       <button id="export" class="export-button" disabled>↓ 下载当前光照结果</button><p id="export-note" class="small muted center">导出实际结果 JPEG，保留完整画布</p>
     </aside>
   </div>

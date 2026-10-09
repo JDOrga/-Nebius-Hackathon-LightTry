@@ -98,11 +98,13 @@ class HTTPTests(unittest.TestCase):
                 urlopen(self.base + route)
             self.assertEqual(caught.exception.code, 404)
 
-    def test_server_has_no_upload_or_inference_endpoint(self):
+    def test_default_service_rejects_generation(self):
         from urllib.request import Request
         with self.assertRaises(HTTPError) as caught:
             urlopen(Request(self.base + '/api/inference', data=b'input', method='POST'))
-        self.assertEqual(caught.exception.code, 501)
+        self.assertEqual(caught.exception.code, 403)
+        with urlopen(self.base + '/api/inference') as response:
+            self.assertFalse(json.load(response)['enabled'])
 
 
 class ConfigurationTests(unittest.TestCase):

@@ -15,7 +15,7 @@ $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'));$run=Join-Path $roo
 New-Item -ItemType Directory $run|Out-Null
 $settings.cloud_stop_enabled=$true
 Write-AtomicJson (Join-Path $run 'live-settings.json') $settings
-Write-AtomicJson (Join-Path $run 'startup.json') @{created_utc=[DateTimeOffset]::UtcNow.ToString('o');offline=[bool]$Offline;single_run=$true;budget_usd_including_tax=$ApprovedBudgetUsdIncludingTax;approval_reference=$ApprovalReference;devlab_id=$settings.devlab_id;timing_policy='RUNNING_ANCHORED_18_25_27';absolute_deadline_utc=$DeadlineUtc;restart_limit=1}
+Write-AtomicJson (Join-Path $run 'startup.json') @{created_utc=[DateTimeOffset]::UtcNow.ToString('o');offline=[bool]$Offline;single_run=$true;budget_usd_including_tax=$ApprovedBudgetUsdIncludingTax;approval_reference=$ApprovalReference;devlab_id=$settings.devlab_id;timing_policy='RUNNING_ANCHORED_18_25_27';absolute_deadline_utc=$DeadlineUtc;restart_limit=1;startup_wait_seconds=600}
 if($Offline){Write-AtomicJson (Join-Path $run 'simulated-cloud.json') @{state='STOPPED';instances=@();verify_reads=0;stop_requests=0}}
 $exe=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
 $guard=Join-Path $PSScriptRoot 'TeaRunningGuard.ps1'

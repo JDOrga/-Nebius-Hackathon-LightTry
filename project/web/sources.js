@@ -16,13 +16,50 @@ export const disconnectedInference = {
       error: { code: 'SERVICE_NOT_CONNECTED', message: '已载入，尚未连接推理服务' } };
   },
 };
+async function responseJSON(response) {
+  let value;
+  try { value = await response.json(); } catch { throw new Error('服务返回无效，请查看本次任务状态后重试。'); }
+  if (!response.ok) {
+    const error = new Error(value.error?.message || '任务请求失败。');
+    error.code = value.error?.code; throw error;
+  }
+  return value;
+}
+export const serviceInference = {
+  token: null,
+  async capabilities() {
+    const value = await responseJSON(await fetch('/api/inference'));
+    this.token = value.csrfToken;
+    return value;
+  },
+  async submit(input, preset, file, requestId) {
+    if (!file) throw new Error('刷新后原始文件不在浏览器内，请重新载入照片再提交新任务。');
+    const bytes = new TextEncoder().encode(JSON.stringify({ inputId: input.id, presetId: preset.id, name: input.name, requestId }));
+    return responseJSON(await fetch('/api/tasks', { method: 'POST', headers: {
+      'Content-Type': file.type, 'X-LightTry-Token': this.token, 'X-LightTry-Request': btoa(String.fromCharCode(...bytes)),
+    }, body: file }));
+  },
+  async getTask(taskId) {
+    if (!/^[0-9a-f]{32}$/.test(taskId)) throw new Error('任务身份无效。');
+    return responseJSON(await fetch(`/api/tasks/${taskId}`));
+  },
+  async getRequest(requestId) {
+    if (!/^[0-9a-f]{32}$/.test(requestId)) throw new Error('请求身份无效。');
+    return responseJSON(await fetch(`/api/requests/${requestId}`));
+  },
+  async cancelTask(taskId) {
+    return responseJSON(await fetch(`/api/tasks/${taskId}/cancel`, {
+      method: 'POST', headers: { 'X-LightTry-Token': this.token },
+    }));
+  },
+};
 export async function decodeUpload(file) {
   const url = URL.createObjectURL(file);
   try {
     const image = new Image();
     image.src = url;
     await image.decode();
-    return { id: crypto.randomUUID(), name: file.name, url, width: image.naturalWidth, height: image.naturalHeight, kind: 'upload' };
+    return { id: crypto.randomUUID().replaceAll('-', ''), name: file.name, url, width: image.naturalWidth, height: image.naturalHeight, kind: 'upload' };
   } catch {
     URL.revokeObjectURL(url);
     throw new Error('图片无法解码，文件可能损坏。请重新选择 JPG、PNG 或 WebP 图片。');

@@ -2,8 +2,67 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createState, reduce, selection, validateFile, validateDimensions, fitSize, previewLayout } from '../web/state.js';
-import { disconnectedInference } from '../web/sources.js';
+import { disconnectedInference, serviceInference } from '../web/sources.js';
 const catalog = JSON.parse(readFileSync(new URL('../data/catalog.json', import.meta.url), 'utf8'));
+
+test('only matching current task success exposes a real download and expires cleanly', () => {
+  const input = {id:'new-input',name:'new.png',kind:'upload',width:1280,height:704,url:'/input'};
+  let state = reduce(createState(catalog), {type:'UPLOAD',input});
+  const task = {taskId:'current-task',input,preset:catalog.presets[0],status:'running',result:null};
+  state = reduce(state,{type:'TASK',task});
+  for (const status of ['queued','running','failed','expired','not_connected']) {
+    const next = reduce(state,{type:'TASK',task:{...task,status}});
+    assert.equal(selection(next,catalog).result,null);
+    assert.equal(selection(next,catalog).exportUrl,null);
+  }
+  const result = {taskId:task.taskId,inputId:input.id,presetId:task.preset.id,url:'/current-result',downloadUrl:'/current-download'};
+  state = reduce(state,{type:'TASK',task:{...task,status:'succeeded',result}});
+  assert.equal(selection(state,catalog).exportUrl,'/current-download');
+  for (const key of ['taskId','inputId','presetId']) {
+    const wrong = {...result,[key]:'previous-task'};
+    assert.equal(selection({...state,task:{...state.task,result:wrong}},catalog).result,null);
+  }
+  state = reduce(state,{type:'TASK',task:{...task,status:'expired',result:null}});
+  assert.equal(selection(state,catalog).exportUrl,null);
+});
+
+test('late tasks cannot replace current input, preset or task; restore is explicit', () => {
+  const input = {id:'new',kind:'upload',name:'new.png',url:'/input',width:1280,height:704};
+  let state=reduce(createState(catalog),{type:'UPLOAD',input});
+  const task={taskId:'one',input,preset:catalog.presets[0],status:'running',result:null};
+  state=reduce(state,{type:'TASK',task});
+  for (const bad of [{...task,input:{...input,id:'old'}},{...task,preset:catalog.presets[1]},{...task,taskId:'old'}]) {
+    assert.equal(reduce(state,{type:'TASK',task:bad}),state);
+  }
+  const sample=reduce(state,{type:'MODE',mode:'sample'});
+  assert.equal(reduce(sample,{type:'TASK',task}),sample);
+  const restored=reduce(sample,{type:'RESTORE_TASK',task});
+  assert.equal(restored.mode,'generate');assert.equal(restored.upload.id,'new');
+  assert.equal(selection(restored,catalog).sample,null);
+});
+
+test('HTTP adapter sends file and IDs, preserves task contract and safe errors', async () => {
+  const realFetch=globalThis.fetch;
+  const calls=[];
+  globalThis.fetch=async (url,options) => {
+    calls.push({url,options});
+    return {ok:true,json:async()=>url==='/api/inference'?{enabled:true,csrfToken:'local-token'}:{taskId:'a'.repeat(32),status:'queued'}};
+  };
+  try {
+    await serviceInference.capabilities();
+    const file=new Blob(['synthetic'],{type:'image/png'});
+    await serviceInference.submit({id:'b'.repeat(32),name:'中文照片.png'},catalog.presets[0],file,'c'.repeat(32));
+    const submit=calls[1];assert.equal(submit.url,'/api/tasks');assert.equal(submit.options.body,file);
+    assert.equal(submit.options.headers['X-LightTry-Token'],'local-token');
+    const meta=JSON.parse(Buffer.from(submit.options.headers['X-LightTry-Request'],'base64').toString('utf8'));
+    assert.equal(meta.name,'中文照片.png');assert.equal(meta.presetId,'sunny');
+    assert.equal(Object.keys(meta).sort().join(','),'inputId,name,presetId,requestId');
+    await serviceInference.getTask('a'.repeat(32));
+    await assert.rejects(serviceInference.getTask('../private'));
+    globalThis.fetch=async()=>({ok:false,json:async()=>({error:{code:'TASK_BUSY',message:'任务正在执行'}})});
+    await assert.rejects(serviceInference.submit(meta,catalog.presets[0],file,'c'.repeat(32)),/任务正在执行/);
+  } finally {globalThis.fetch=realFetch;}
+});
 
 test('each sample selects its own three forward results and exact HDR mapping', () => {
   assert.deepEqual(catalog.presets.map(p => [p.id, p.hdr, p.index]), [

@@ -1,0 +1,11 @@
+{
+  "enabled": false,
+  "guard_run_directory": "REPLACE_WITH_CURRENT_LOCAL_CLOUD_RUN_DIRECTORY",
+  "model_license_ack": false,
+  "timeout_seconds": 1080,
+  "retention_seconds": 86400,
+  "weights_mode": "full",
+  "historical_weights_manifest": null,
+  "historical_weights_receipt": null,
+  "historical_weights_reference": null
+}

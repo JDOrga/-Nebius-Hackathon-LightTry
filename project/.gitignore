@@ -4,3 +4,5 @@ demo-assets/
 demo.local.json
 __pycache__/
 *.pyc
+.tasks/
+inference.local.json

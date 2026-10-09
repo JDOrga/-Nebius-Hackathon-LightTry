@@ -6,7 +6,13 @@ import tempfile
 OUT=Path(tempfile.mkdtemp(prefix='guard fixtures with spaces '))
 def put(p,v):
  temp=p.with_suffix('.writing');temp.write_text(json.dumps(v));temp.replace(p)
-def read(p):return json.loads(p.read_text(encoding='utf-8-sig'))
+def read(p):
+ end=time.monotonic()+1
+ while True:
+  try:return json.loads(p.read_text(encoding='utf-8-sig'))
+  except PermissionError:
+   if time.monotonic()>=end:raise
+   time.sleep(.02)
 def wait(check,timeout=15):
  start=time.monotonic()
  while time.monotonic()-start<timeout:
@@ -68,6 +74,16 @@ try:
  release(d,p)
  assert read(d/'simulated-cloud.json')['stop_requests']>=1 and (d/'complete.json').exists()
  rows.append(dict(name='heartbeat write failure keeps stop-only supervision until independent receipt',passed=True))
+finally:finish(d,p)
+d,p=fixture('bounded-startup-without-running')
+try:
+ s=read(d/'startup.json');s['startup_wait_seconds']=2;put(d/'startup.json',s)
+ # Startup policy is read at guard entry, so use a request older than the
+ # production 600-second bound; no RUNNING receipt must be synthesized.
+ put(d/'restart-attempt.json',dict(request_utc=(datetime.now(timezone.utc)-timedelta(seconds=601)).isoformat()))
+ release(d,p)
+ assert not (d/'running-confirmation.json').exists()
+ rows.append(dict(name='startup request bound stops without anchoring RUNNING',passed=True))
 finally:finish(d,p)
 result=dict(passed=True,test_count=len(rows),tests=rows,elapsed_seconds=time.monotonic()-start,cloud_API_calls=0,SSH_connections=0,simulation_only=True)
 (OUT/'guard-tests.json').write_text(json.dumps(result,indent=2));print(json.dumps(result))
