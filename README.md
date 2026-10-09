@@ -15,6 +15,8 @@ python -B scripts/audit_repository.py
 
 [架构与预览边界](docs/ARCHITECTURE.md) · [第三方许可与素材](docs/THIRD_PARTY.md) · [故障处理](docs/TROUBLESHOOTING.md) · [候选文件完整清单](docs/CANDIDATES.md)
 
-[验证范围与已知限制](docs/VALIDATION.md)：云连接、代码传输和停机验收已验证；模型小任务没有成功，完整灯光推理仍待验收。
+[验证范围与已知限制](docs/VALIDATION.md)：云连接、代码传输、停机验收与 Tokenizer GPU 编码/解码小任务已验证；完整灯光推理仍待验收。
 
-仓库直接位于当前项目目录，统一入口为 cloud/Invoke-Cloud.ps1。原 scripts/HOST_CAPTURE_NEXT.json 保留为忽略的历史指针，不作为当前入口。Git 文件选择使用 .gitignore，审计命令检查 Git 可见文件；历史数据、旧实验与真实配置保留本地并忽略。提交身份由操作者明确指定；远程、团队归属和公开/私有设置另行确认，不自动配置远程或推送。
+仓库直接位于当前项目目录，统一入口为 cloud/Invoke-Cloud.ps1。已废弃脚本和历史指针移至忽略的 `.local/legacy-source/`，保留原目录结构及哈希清单，仅供查阅，不作为运行入口。Git 文件选择使用 .gitignore，审计命令检查 Git 可见文件；历史数据、旧实验与真实配置保留本地并忽略。提交身份由操作者明确指定；远程、团队归属和公开/私有设置另行确认，不自动配置远程或推送。
+
+自检先检查 `requirements/offline.txt` 中的依赖，再自动发现 `prototype/` 和 `tests/` 顶层的 `test_*.py`。支持 unittest 与现有独立测试脚本；每组单独运行，失败或超时仍写入报告并继续后续组。缺依赖时先在自己的虚拟环境中安装，工具不会自动安装。

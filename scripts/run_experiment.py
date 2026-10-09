@@ -6,6 +6,7 @@ Use the previously prepared Python 3.10 venv. No dependency installation here.
 import argparse
 import datetime as dt
 import json
+import hashlib
 import os
 from pathlib import Path
 import signal
@@ -17,6 +18,49 @@ from weights import parse_deadline, verify, check_time
 from validate_outputs import validate_inverse, validate_forward, contact_sheet
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def file_identity(path, deadline):
+    if path.is_symlink() or not path.is_file():
+        raise ValueError('INPUT_MUST_BE_REGULAR_FILE: ' + str(path))
+    digest = hashlib.sha256()
+    with path.open('rb') as source:
+        while True:
+            check_time(deadline)
+            block = source.read(8 * 1024**2)
+            if not block:
+                break
+            digest.update(block)
+    return {'sha256': digest.hexdigest(), 'bytes': path.stat().st_size}
+
+
+def recovery_identity(args, deadline):
+    """Bind both the actual dataset and the image displayed in the contact sheet."""
+    if not args.input_dir.is_dir():
+        raise ValueError('INPUT_DIRECTORY_REQUIRED')
+    files = []
+    for path in sorted(args.input_dir.rglob('*')):
+        if path.is_symlink():
+            raise ValueError('INPUT_SYMLINK_NOT_ALLOWED')
+        if path.is_file():
+            files.append({'path': path.relative_to(args.input_dir).as_posix(),
+                          **file_identity(path, deadline)})
+    if not files:
+        raise ValueError('INPUT_DIRECTORY_EMPTY')
+    return {'schema': 1, 'input_dir': str(args.input_dir), 'files': files,
+            'input_image': {'path': str(args.input_image), **file_identity(args.input_image, deadline)},
+            'checkpoint_dir': str(args.checkpoint_dir), 'offload': args.offload,
+            'cuda_home': str(args.cuda_home.resolve()),
+            'weights_manifest': file_identity(ROOT / 'manifests/weights_manifest.json', deadline),
+            'patch_manifest': file_identity(ROOT / 'manifests/patch_manifest.json', deadline)}
+
+
+def validate_recovery(prior, current):
+    if 'recovery' not in prior:
+        raise ValueError('Prior plan has no input identity; start a new inverse run')
+    if any(prior.get(k) != current.get(k) for k in
+           ('height', 'width', 'steps', 'seed', 'repo', 'python', 'recovery')):
+        raise ValueError('Forward recovery inputs or settings differ from prior inverse run')
 
 
 def run_bounded(command, repo, logfile, env, deadline):
@@ -105,10 +149,12 @@ def main():
     if os.name != "posix" or sys.version_info[:2] != (3, 10):
         raise RuntimeError("Execute only in the verified Linux Python 3.10 environment")
     check_time(deadline)
+    plan['recovery'] = recovery_identity(args, deadline)
+    if args.stage == 'forward':
+        validate_recovery(json.loads((args.run_dir / 'plan.json').read_text()), plan)
     # Read-only targeted patch check, then authoritative hashes for every checkpoint.
     subprocess.run([sys.executable, "-B", str(ROOT / "scripts/apply_hdr_patch.py"), "--repo", str(args.repo)], check=True)
     manifest = json.loads((ROOT / "manifests/patch_manifest.json").read_text())
-    import hashlib
     for entry in manifest["files"]:
         if hashlib.sha256((args.repo / entry["path"]).read_bytes()).hexdigest() != entry["after_sha256"]:
             raise ValueError("HDR patch not applied")
@@ -121,9 +167,6 @@ def main():
         args.run_dir.mkdir(parents=True)
         (args.run_dir / "plan.json").write_text(json.dumps(plan, indent=2))
     else:
-        prior = json.loads((args.run_dir / "plan.json").read_text())
-        if any(prior[k] != plan[k] for k in ("height", "width", "steps", "seed", "repo")):
-            raise ValueError("Forward recovery settings differ from prior inverse run")
         if (args.run_dir / "forward").exists():
             raise FileExistsError("Preserve old forward directory before retrying")
     env = os.environ.copy()

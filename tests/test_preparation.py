@@ -131,6 +131,27 @@ class PreparationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_outputs.validate_forward(root, 16, 32)
 
+    def test_constant_material_channels_are_warnings_but_other_checks_remain(self):
+        from PIL import Image
+        import numpy as np
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            frames = root / 'gbuffer_frames'
+            frames.mkdir()
+            values = np.arange(16 * 32 * 3, dtype=np.uint8).reshape(16, 32, 3)
+            for label in validate_outputs.PASSES:
+                pixels = np.zeros_like(values) if label in ('roughness', 'metallic') else values
+                Image.fromarray(pixels).save(frames / ('image.' + label + '.jpg'))
+            records = validate_outputs.validate_inverse(root, 16, 32)
+            self.assertEqual(sum(bool(r.get('warnings')) for r in records), 2)
+            Image.new('RGB', (32, 16)).save(frames / 'image.basecolor.jpg')
+            with self.assertRaisesRegex(ValueError, 'constant output'):
+                validate_outputs.validate_inverse(root, 16, 32)
+            Image.fromarray(values).save(frames / 'image.basecolor.jpg')
+            Image.new('RGB', (16, 16)).save(frames / 'image.metallic.jpg')
+            with self.assertRaisesRegex(ValueError, 'size/mode'):
+                validate_outputs.validate_inverse(root, 16, 32)
+
     @unittest.skipUnless(UPSTREAM.is_dir(), 'external pinned upstream not configured')
     def test_manifest_is_immutable_official_and_matches_prior_md5(self):
         manifest = json.loads((ROOT / "manifests/weights_manifest.json").read_text())

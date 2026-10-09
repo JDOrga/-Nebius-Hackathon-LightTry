@@ -96,6 +96,7 @@
 
 - tests/test_absolute_deadline.py
 - tests/test_api_worker.py
+- tests/test_bridge_budget.py
 - tests/test_budget.py
 - tests/test_cli_read_retry.py
 - tests/test_host_capture.py
@@ -103,7 +104,10 @@
 - tests/test_output_complete.py
 - tests/test_portability.py
 - tests/test_preparation.py
+- tests/test_recovery_identity.py
+- tests/test_restart_boundary.py
 - tests/test_running_guard.py
+- tests/test_selftest_runner.py
 - tests/test_utc_precision.py
 
 ## third_party

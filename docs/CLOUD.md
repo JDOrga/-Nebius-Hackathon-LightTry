@@ -14,4 +14,8 @@
 8. `export_results.py` 请求 `{root,data_root}`，只导出 JPEG/PNG/JSON/log，限 512MiB，不导出权重和大型张量；`-Operation export_results` 后 `-Operation download_results -DownloadResults`，下载至 run/results.tar.gz 并核对 SHA-256。解包到新本地目录再做结构验收和人工看图。统计不是视觉成功证明。
 9. 成功或失败都给本次 run 写 complete.json（stop_required=true）。守护负责停止并继续监督。`Confirm-RunningStopped.ps1 -Execute -RunDirectory ...` 做独立 API STOPPED 与 instances=[] 验收；stop 被接受不等于停机完成。核对最终 stopped_verified=true、防休眠释放、守护退出。失败时保留监督并人工处理，不延长截止、不自动重启。
 
+桥接状态查询及停止流程的整次 WSL 调用有 35 秒上限，内部 CLI 调用共享该预算；守护截止前的查询预算会按剩余窗口缩短。启动前在慢查询及标记写入之后重新检查授权、心跳、取消与截止；截止后不再新启，停止和停机核验继续允许执行。
+
+`run_experiment.py --stage forward` 恢复必须使用原输入目录、对照图片及运行配置；新计划记录并核验输入哈希。旧计划没有该信息时需新建 inverse 运行。roughness/metallic 常量输出会在验收 JSON 中留下复核提示，不再仅因常量而终止流程。
+
 迁移版已在显式授权下验证开机、精确主机信任、SSH、容器身份、代码包上传与安装，并核验停机。后续复测已验证真实 Tokenizer GPU 编码/解码，以及结果导出、下载和 SHA-256 校验；完整灯光推理尚未验收。范围详见 `VALIDATION.md`。离线合成测试不构成收费运行授权。

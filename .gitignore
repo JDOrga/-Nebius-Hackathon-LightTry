@@ -46,7 +46,8 @@ dist/
 *.exr
 *.mp4
 
-# Superseded source files retained in their original locations.
+# Superseded sources are archived under .local/legacy-source/.
+# Keep these exclusions so an accidental restore cannot reintroduce old code.
 /prototype/run_checks.py
 /scripts/Capture-TeaHost.ps1
 /scripts/Confirm-TeaHost.ps1

@@ -36,4 +36,27 @@ class RetryTests(unittest.TestCase):
                 self.assertEqual(cli_bridge.run_cli(self.settings,['ai','devlab','get']),{})
                 self.assertEqual([c.kwargs['timeout'] for c in run.call_args_list],[25,10])
 
+    def test_sequential_calls_share_operation_budget(self):
+        with patch.object(cli_bridge.time, 'monotonic', side_effect=[100, 100, 112, 112, 124, 124, 136, 136]), \
+                patch.object(cli_bridge.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, '{}', '')) as run:
+            for _ in range(3):
+                cli_bridge.run_cli(self.settings, ['ai', 'devlab', 'get'], budget_end=135)
+            with self.assertRaisesRegex(RuntimeError, 'BUDGET_EXHAUSTED'):
+                cli_bridge.run_cli(self.settings, ['ai', 'devlab', 'get'], budget_end=135)
+            self.assertEqual([c.kwargs['timeout'] for c in run.call_args_list], [25, 23, 11])
+
+    def test_expired_restart_blocked_at_process_boundary(self):
+        with patch.object(cli_bridge.time, 'time', return_value=101), \
+                patch.object(cli_bridge.subprocess, 'run') as run:
+            with self.assertRaisesRegex(RuntimeError, 'ABSOLUTE_DEADLINE_REACHED'):
+                cli_bridge.run_cli(self.settings, ['ai', 'devlab', 'restart'], False, not_after=100)
+            run.assert_not_called()
+
+    def test_restart_process_has_remaining_time_and_no_cli_retries(self):
+        with patch.object(cli_bridge.time, 'time', return_value=100), \
+                patch.object(cli_bridge.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, 'operation', '')) as run:
+            cli_bridge.run_cli(self.settings, ['ai', 'devlab', 'restart'], False, not_after=102)
+            self.assertEqual(run.call_args.kwargs['timeout'], 2)
+            self.assertIn('--retries=0', run.call_args.args[0])
+
 if __name__=='__main__':unittest.main()

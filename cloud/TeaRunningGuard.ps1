@@ -14,7 +14,19 @@ $lock=$null;$sleepHeld=$false;$clock=$null;$deadline=$null;$anchor=$null
 $seenActive=$false;$failures=0;$stopLatched=$false;$lastStop=[DateTimeOffset]::MinValue;$confirmed=0;$iterations=0;$stopRequests=0;$lastState='UNKNOWN'
 function Heartbeat($status){$path=Join-Path $run 'heartbeat.json';if(Test-Path $path -PathType Container){throw 'HEARTBEAT_PATH_IS_DIRECTORY'};Write-AtomicJson $path @{pid=$PID;utc=[DateTimeOffset]::UtcNow.ToString('o');status=$status;offline=$offline;sleep_held=$sleepHeld;stopped_verified=($status -eq 'stopped');running_confirmed=($null -ne $anchor);deadline_utc=$(if($deadline){$deadline.ToString('o')}else{$null});running_confirmed_utc=$(if($anchor){$anchor.ToString('o')}else{$null});consecutive_api_failures=$failures;supervision_stop_latched=$stopLatched;iterations=$iterations;stop_attempts=$stopRequests;last_cloud_state=$lastState}}
 function Observe {
- if(!$offline){return (Invoke-Bridge status)}
+ if(!$offline){
+  $budget=35000.0
+  # Before the cutoff, a status read may not occupy the stop window.
+  # After it, bounded reads remain available to verify STOPPED.
+  $due=Due
+  if($due -and $stopRequests -eq 0 -and $lastState -notin @('STOPPING','STOPPED')){throw 'GUARD_STOP_REQUIRED_BEFORE_OBSERVATION'}
+  if(!$due){
+   if($absolute){$budget=[Math]::Min($budget,($absolute-[DateTimeOffset]::UtcNow).TotalMilliseconds)}
+   if($clock){$budget=[Math]::Min($budget,($stopSeconds-$clock.Elapsed.TotalSeconds)*1000);$budget=[Math]::Min($budget,($deadline-[DateTimeOffset]::UtcNow).TotalMilliseconds)}
+  }
+  if($budget -lt 1){throw 'GUARD_OBSERVATION_DEADLINE_REACHED'}
+  return (Invoke-Bridge status -TimeoutMs ([int][Math]::Floor($budget)))
+ }
  $p=Join-Path $run 'simulated-cloud.json';$s=Get-Content $p -Raw|ConvertFrom-JsonUtc
  if($s.PSObject.Properties.Name -contains 'status_failures_remaining' -and $s.status_failures_remaining -gt 0){$s.status_failures_remaining--;Write-AtomicJson $p $s;throw 'SYNTHETIC_API_FAILURE'}
  if($s.state -eq 'STOPPING'){$s.verify_reads++;if($s.verify_reads -ge 2){$s.state='STOPPED';$s.instances=@()};Write-AtomicJson $p $s}
@@ -29,6 +41,14 @@ function Due {
  if($absolute -and [DateTimeOffset]::UtcNow -ge $absolute){return $true}
  if($stopLatched -or (Test-Path (Join-Path $run 'complete.json')) -or (Test-Path (Join-Path $run 'cancel.json'))){return $true}
  return ($null -ne $clock -and ($clock.Elapsed.TotalSeconds -ge $stopSeconds -or [DateTimeOffset]::UtcNow -ge $deadline))
+}
+function PauseGuard {
+ $milliseconds=$interval*1000.0
+ if(!(Due)){
+  if($absolute){$milliseconds=[Math]::Min($milliseconds,($absolute-[DateTimeOffset]::UtcNow).TotalMilliseconds)}
+  if($clock){$milliseconds=[Math]::Min($milliseconds,($stopSeconds-$clock.Elapsed.TotalSeconds)*1000);$milliseconds=[Math]::Min($milliseconds,($deadline-[DateTimeOffset]::UtcNow).TotalMilliseconds)}
+ }
+ Start-Sleep -Milliseconds ([int][Math]::Max(1,[Math]::Floor($milliseconds)))
 }
 function StartRunningClock($observed){
  $script:anchor=[DateTimeOffset]::UtcNow;$script:clock=[Diagnostics.Stopwatch]::StartNew();$script:deadline=$anchor.AddSeconds($stopSeconds)
@@ -52,6 +72,9 @@ try {
  while($true){
   $iterations++;$status='awaiting_running'
   try{
+   # Submit a due stop before beginning another potentially slow observation.
+   $operation='stop'
+   if((Due) -and $lastState -notin @('STOPPING','STOPPED') -and ([DateTimeOffset]::UtcNow-$lastStop).TotalSeconds -ge $interval){$lastStop=[DateTimeOffset]::UtcNow;SubmitStop}
    $operation='observe';$observed=Observe;$failures=0
    if($observed.id -ne $startup.devlab_id -or !$observed.project_ownership_verified){throw 'API_SCOPE_MISMATCH'}
    $lastState=$observed.state
@@ -72,7 +95,7 @@ try {
    if($failures -ge 3){$stopLatched=$true;Write-AtomicJson (Join-Path $run 'supervision-stop.json') @{reason='THREE_CONSECUTIVE_API_FAILURES';utc=[DateTimeOffset]::UtcNow.ToString('o');restart_allowed=$false}}
    $status='retrying';if((Due) -and ([DateTimeOffset]::UtcNow-$lastStop).TotalSeconds -ge $interval){$lastStop=[DateTimeOffset]::UtcNow;try{SubmitStop}catch{}}
   }
-  Heartbeat $status;Start-Sleep -Seconds $interval
+  Heartbeat $status;PauseGuard
  }
  Heartbeat 'awaiting_independent_stopped'
  while($true){

@@ -9,17 +9,45 @@ import os
 # Reuse the original CLI bridge; no authentication or settings copies.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import cli_bridge as bridge
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
+from weights import parse_utc
 
 
 def utc():
     return datetime.now(timezone.utc)
 
 
-def mutate(settings, operation):
+def mutate(settings, operation, *, not_after=None):
     # Asynchronous CLI mutation output is a plain operation ID; do not parse it
     # as JSON or expose it. The guard separately verifies the resource state.
     bridge.run_cli(settings, ['ai', 'devlab', operation, '--id', settings['devlab_id'],
-                             '--async', '--profile', settings['profile']], json_result=False)
+                             '--async', '--profile', settings['profile']], json_result=False,
+                   not_after=not_after)
+
+
+def check_restart_guard(run, launch, settings):
+    """Re-read live authorization after slow work and immediately before restart."""
+    deadline = parse_utc(launch['absolute_deadline_utc'])
+    if utc() >= deadline:
+        raise ValueError('ABSOLUTE_DEADLINE_REACHED')
+    snapshot = json.loads((run / 'live-settings.json').read_text(encoding='utf-8-sig'))
+    if any(snapshot[k] != settings[k] for k in ('devlab_id', 'project_id')):
+        raise ValueError('GUARD_SCOPE_MISMATCH')
+    beat = json.loads((run / 'heartbeat.json').read_text(encoding='utf-8-sig'))
+    now = utc()
+    if now >= deadline:
+        raise ValueError('ABSOLUTE_DEADLINE_REACHED')
+    age = (now - parse_utc(beat['utc'])).total_seconds()
+    if (launch.get('offline') or not snapshot['cloud_stop_enabled']
+            or beat['status'] != 'ready_waiting_start' or not beat['sleep_held']
+            or not 0 <= age <= 25):
+        raise ValueError('LIVE_GUARD_NOT_READY')
+    if any((run / name).exists() for name in ('cancel.json', 'complete.json', 'supervision-stop.json')):
+        raise ValueError('GUARD_STOP_ALREADY_REQUESTED')
+    if (launch.get('timing_policy') != 'RUNNING_ANCHORED_18_25_27'
+            or beat.get('running_confirmed') or (run / 'running-confirmation.json').exists()):
+        raise ValueError('PRE_RUNNING_SINGLE_START_REQUIRED')
+    return deadline
 
 
 def main():
@@ -61,23 +89,19 @@ def main():
     if a.action == 'restart':
         if launch.get('budget_usd_including_tax') <= 0 or not launch.get('approval_reference'):
             raise ValueError('USD3_APPROVAL_REFERENCE_REQUIRED')
-        if utc() >= datetime.fromisoformat(launch['absolute_deadline_utc']):
-            raise ValueError('ABSOLUTE_DEADLINE_REACHED')
-        observed = bridge.devlab_summary(bridge.run_cli(settings, ['ai', 'devlab', 'get', '--id', settings['devlab_id']]), settings)
+        deadline = check_restart_guard(run, launch, settings)
+        observed = bridge.devlab_summary(bridge.run_cli(settings, ['ai', 'devlab', 'get', '--id', settings['devlab_id']],
+                                                       not_after=deadline.timestamp()), settings)
         if observed['state'] != 'STOPPED':
             raise ValueError('EXPECTED_STOPPED_BEFORE_SINGLE_RESTART')
-        beat = json.loads((run / 'heartbeat.json').read_text(encoding='utf-8-sig'))
-        age = (utc() - datetime.fromisoformat(beat['utc'])).total_seconds()
-        if not snapshot['cloud_stop_enabled'] or beat['status'] != 'ready_waiting_start' or not beat['sleep_held'] or age > 25:
-            raise ValueError('LIVE_GUARD_NOT_READY')
-        if launch.get('timing_policy') != 'RUNNING_ANCHORED_18_25_27' or beat.get('running_confirmed') or (run/'running-confirmation.json').exists():
-            raise ValueError('PRE_RUNNING_SINGLE_START_REQUIRED')
+        check_restart_guard(run, launch, settings)
         # Exclusive local marker prevents a retry even after an uncertain response.
         marker = run / 'restart-attempt.json'
         started = utc().isoformat()
         with marker.open('x', encoding='utf-8') as f:
             json.dump({'request_utc': started, 'devlab_id': settings['devlab_id'], 'clock_not_started': True}, f)
-        mutate(settings, 'restart')
+        deadline = check_restart_guard(run, launch, settings)
+        mutate(settings, 'restart', not_after=deadline.timestamp())
         print(json.dumps({'restart_request_utc': started, 'clock_not_started': True, 'accepted': True, 'restart_attempts': 1}))
     else:
         if not snapshot['cloud_stop_enabled']:

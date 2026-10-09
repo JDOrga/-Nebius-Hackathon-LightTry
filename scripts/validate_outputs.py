@@ -8,7 +8,7 @@ from pathlib import Path
 PASSES = ("basecolor", "normal", "depth", "roughness", "metallic")
 
 
-def inspect(paths, height, width):
+def inspect(paths, height, width, *, allow_constant=False):
     import numpy as np
     from PIL import Image
     records = []
@@ -19,24 +19,29 @@ def inspect(paths, height, width):
             if img.size != (width, height) or img.mode != "RGB":
                 raise ValueError("Unexpected image size/mode: " + str(path))
             arr = np.asarray(img).copy()
-        if not np.isfinite(arr).all() or arr.std() < 0.5:
+        constant = arr.std() < 0.5
+        if not np.isfinite(arr).all() or (constant and not allow_constant):
             raise ValueError("Invalid or effectively constant output: " + str(path))
         records.append({"path": str(path), "size": path.stat().st_size,
                         "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
                         "mean": float(arr.mean()), "std": float(arr.std()),
                         "shape": list(arr.shape)})
+        if constant:
+            records[-1]["warnings"] = ["Constant material channel; confirm against the scene during visual review"]
         arrays.append(arr)
     return records, arrays
 
 
 def validate_inverse(root, height, width):
-    files = []
+    records = []
     for label in PASSES:
         matches = list((root / "gbuffer_frames").rglob(f"*.{label}.jpg"))
         if len(matches) != 1:
             raise ValueError(f"Expected one {label} G-buffer, found {len(matches)}")
-        files.extend(matches)
-    return inspect(files, height, width)[0]
+        channel_records, _ = inspect(matches, height, width,
+                                     allow_constant=label in ("roughness", "metallic"))
+        records.extend(channel_records)
+    return records
 
 
 def validate_forward(root, height, width):

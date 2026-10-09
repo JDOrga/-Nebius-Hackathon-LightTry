@@ -24,7 +24,16 @@ function New-EncodedShellCommand([string]$Program, [string]$Arguments = '') {
     if ($Arguments -and $Arguments -notmatch '^[A-Za-z0-9+/= ]+$') { throw 'Unsafe encoded argument.' }
     "printf '%s' '$encoded' | base64 -d | python3 - $Arguments".TrimEnd()
 }
-function Invoke-Bridge([ValidateSet('local','status','target','host-target','stop')][string]$Action, [switch]$AuthorizedStop) {
+function Invoke-BridgeProcess([string]$Executable,[string[]]$Arguments,[int]$TimeoutMs) {
+    . (Join-Path $PSScriptRoot 'HostCapture.Native.ps1')
+    $result=[TeaHostNativeBudget2]::Run($Executable,$Arguments,$TimeoutMs,1048576)
+    if(!$result.Started -or $result.TimedOut -or $result.CleanupIncomplete -or !$result.OutputComplete -or $result.Truncated -or $result.ReadFailed){
+        throw 'BRIDGE_PROCESS_BUDGET_OR_OUTPUT_FAILURE'
+    }
+    return $result
+}
+function Invoke-Bridge([ValidateSet('local','status','target','host-target','stop')][string]$Action, [switch]$AuthorizedStop, [ValidateRange(1,35000)][int]$TimeoutMs=35000) {
+    $watch=[Diagnostics.Stopwatch]::StartNew()
     $settings = Read-Settings
     if ($Action -eq 'local') { return @{mode='OFFLINE';cloud_calls=0;config_present=$true} }
     if ($Action -eq 'stop' -and (!$AuthorizedStop -or !$settings.cloud_stop_enabled)) { throw 'Cloud stop is disabled for this preparation.' }
@@ -34,15 +43,17 @@ function Invoke-Bridge([ValidateSet('local','status','target','host-target','sto
                    '--settings',(ConvertTo-WslPath $script:SettingsFile),'--action',$Action,'--execute')
     if ($Action -in @('target','host-target')) { $arguments += @('--public-key-file',(ConvertTo-WslPath ($settings.key_path+'.pub'))) }
     if ($AuthorizedStop) { $arguments += '--authorized-stop' }
-    # PS5.1 wraps native stderr as ErrorRecord and can throw before exit-code handling.
-    $savedErrorAction=$ErrorActionPreference
-    try {
-        $ErrorActionPreference='Continue'
-        $raw = @(& wsl.exe @arguments 2>&1)
-        $exitCode=$LASTEXITCODE
-    } finally { $ErrorActionPreference=$savedErrorAction }
+    # Compile before calculating the remaining process budget.
+    . (Join-Path $PSScriptRoot 'HostCapture.Native.ps1')
+    $native=Get-Command wsl.exe -CommandType Application -ErrorAction Stop
+    $remaining=$TimeoutMs-[int]$watch.ElapsedMilliseconds
+    if($remaining -le 0){throw 'BRIDGE_PROCESS_BUDGET_EXHAUSTED'}
+    $seconds=([Math]::Max(0.001,($remaining-250)/1000.0)).ToString('0.000',[Globalization.CultureInfo]::InvariantCulture)
+    $arguments+=@('--timeout-seconds',$seconds)
+    $result=Invoke-BridgeProcess $native.Source $arguments $remaining
+    $exitCode=$result.ExitCode
     if ($exitCode -ne 0) {
-        $safeError = ($raw -join "`n")
+        $safeError = $result.Stderr
         if ($safeError -match 'LOGIN_REQUIRED_NO_LOCAL_PROFILE_CONFIG') { throw 'Login required: LOCAL local Nebius profile is not configured.' }
         if ($safeError -match 'PROJECT_ID_OR_TENANT_MISMATCH') { throw 'The API project identity or owning tenant differs from the verified target. No cloud action or SSH connection was attempted.' }
         if ($safeError -match 'PROFILE_PROJECT_MISMATCH') { throw 'LOCAL profile project differs from the specified target project. No API or login was attempted; confirm the project context first.' }
@@ -52,7 +63,7 @@ function Invoke-Bridge([ValidateSet('local','status','target','host-target','sto
         if ($safeError -match '"error"\s*:\s*"([A-Z0-9_]+)"') { throw ('Nebius bridge: '+$Matches[1]) }
         throw 'Nebius bridge failed. Check WSL/CLI locally; raw diagnostics suppressed.'
     }
-    try { ($raw -join "`n") | ConvertFrom-JsonUtc } catch { throw 'Bridge returned invalid JSON.' }
+    try { $result.Stdout | ConvertFrom-JsonUtc } catch { throw 'Bridge returned invalid JSON.' }
 }
 function Test-PublicKey {
     $settings = Read-Settings

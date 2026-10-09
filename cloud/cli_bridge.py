@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import time
+from functools import partial
 from pathlib import Path
 
 
@@ -19,18 +20,26 @@ def cli_error_label(exit_code, stderr):
     return 'CLI_FAILED_EXIT_' + str(exit_code)
 
 
-def run_cli(settings, args, json_result=True):
+def run_cli(settings, args, json_result=True, *, budget_end=None, not_after=None):
+    mutation = args[:3] in (['ai', 'devlab', 'restart'], ['ai', 'devlab', 'stop'])
     command = [settings['cli_path'], *args, '--color=false', '--no-check-update',
                '--no-progress', '--no-browser', '--auth-timeout=3s',
-               '--timeout=15s', '--per-retry-timeout=10s', '--retries=1']
+               '--timeout=15s', '--per-retry-timeout=10s',
+               '--retries=0' if mutation else '--retries=1']
     if json_result:
         command += ['--format', 'json', '--profile', settings['profile']]
-    mutation = args[:3] in (['ai', 'devlab', 'restart'], ['ai', 'devlab', 'stop'])
     end = time.monotonic() + (25 if mutation else 35)
+    if budget_end is not None:
+        end = min(end, budget_end)
     for attempt in range(1 if mutation else 2):
         remaining = end - time.monotonic()
         if remaining <= 0:
             raise RuntimeError('CLI_READ_BUDGET_EXHAUSTED')
+        if not_after is not None:
+            wall_remaining = not_after - time.time()
+            if wall_remaining <= 0:
+                raise RuntimeError('ABSOLUTE_DEADLINE_REACHED')
+            remaining = min(remaining, wall_remaining)
         try:
             result = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True,
                                     text=True, timeout=min(25, remaining))
@@ -147,21 +156,26 @@ def main():
     p.add_argument('--action', choices=['local', 'status', 'target', 'host-target', 'stop'], required=True)
     p.add_argument('--public-key-file')
     p.add_argument('--authorized-stop', action='store_true')
+    p.add_argument('--timeout-seconds', type=float, default=35)
     args = p.parse_args()
+    if not 0 < args.timeout_seconds <= 35:
+        p.error('timeout-seconds must be in (0, 35]')
+    # All profile, ownership, state and mutation calls share this one budget.
+    call = partial(run_cli, budget_end=time.monotonic() + args.timeout_seconds)
     settings = json.loads(Path(args.settings).read_text(encoding='utf-8-sig'))
     if not args.execute or args.action == 'local':
         print(json.dumps({'offline':True,'cloud_calls':0,'config_exists':Path.home().joinpath('.nebius/config.yaml').is_file()})); return
     config_exists = Path.home().joinpath('.nebius/config.yaml').is_file()
     if not config_exists:
         raise RuntimeError('LOGIN_REQUIRED_NO_LOCAL_PROFILE_CONFIG')
-    tenant = run_cli(settings, ['config', 'get', 'tenant-id', '--profile', settings['profile']], json_result=False)
-    project = run_cli(settings, ['config', 'get', 'parent-id', '--profile', settings['profile']], json_result=False)
+    tenant = call(settings, ['config', 'get', 'tenant-id', '--profile', settings['profile']], json_result=False)
+    project = call(settings, ['config', 'get', 'parent-id', '--profile', settings['profile']], json_result=False)
     # Wrong project defaults are rejected locally. Default tenant differences
     # are permitted only when live project ownership matches the fixed target.
     validate_profile_context(settings, tenant, project)
-    project_raw = run_cli(settings, ['iam', 'v2', 'project', 'get', '--id', settings['project_id']])
+    project_raw = call(settings, ['iam', 'v2', 'project', 'get', '--id', settings['project_id']])
     owner = validate_project_owner(project_raw, settings)
-    devlab = run_cli(settings, ['ai', 'devlab', 'get', '--id', settings['devlab_id']])
+    devlab = call(settings, ['ai', 'devlab', 'get', '--id', settings['devlab_id']])
     summary = devlab_summary(devlab, settings)
     if args.action == 'status':
         print(json.dumps({**summary, 'tenant_id': owner, 'project_ownership_verified': True}))
@@ -173,10 +187,10 @@ def main():
                   (host_only and x['state'] == 'IMAGE_PULLING' and x['compute_instance_state'] == 'RUNNING')]
         if len(active) != 1:
             raise ValueError('CURRENT_VM_NOT_UNIQUE')
-        vm = run_cli(settings, ['compute', 'instance', 'get', '--id', active[0]['compute_instance_id']])
+        vm = call(settings, ['compute', 'instance', 'get', '--id', active[0]['compute_instance_id']])
         target = connection_target(devlab, vm, Path(args.public_key_file).read_text(), settings, allow_image_pulling=host_only)
         # Catch a restart during the two API reads; caller rechecks immediately before SSH, too.
-        fresh = devlab_summary(run_cli(settings, ['ai', 'devlab', 'get', '--id', settings['devlab_id']]), settings)
+        fresh = devlab_summary(call(settings, ['ai', 'devlab', 'get', '--id', settings['devlab_id']]), settings)
         if fresh['state'] != summary['state'] or fresh['instances'] != summary['instances']:
             raise ValueError('VM_CHANGED_DURING_VALIDATION')
         print(json.dumps(target))
@@ -185,7 +199,7 @@ def main():
             raise RuntimeError('CLOUD_STOP_NOT_ENABLED_OR_AUTHORIZED')
         if summary['state'] != 'STOPPED':
             # CLI --async returns a plain operation ID, even with --format=json.
-            run_cli(settings, ['ai', 'devlab', 'stop', '--id', settings['devlab_id'], '--async',
+            call(settings, ['ai', 'devlab', 'stop', '--id', settings['devlab_id'], '--async',
                                '--profile', settings['profile']], json_result=False)
         # A successful stop submission is not STOPPED confirmation.
         print(json.dumps({'stop_submitted': True, 'stopped_verified': False}))

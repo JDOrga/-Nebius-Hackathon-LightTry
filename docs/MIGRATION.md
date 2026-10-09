@@ -5,7 +5,9 @@
 3. `Copy-Item -LiteralPath '.\config\local.example.json' -Destination '.\config\local.json'`，仅在目标不存在时执行。模板不能作为真实配置使用，不含真实资源或认证。
 4. 填写已有 CLI 在 WSL 中的绝对位置、已安装 WSL 发行版、自己的 profile、目标 tenant/project/devlab、自己的私钥路径和公钥指纹、自己的认证配置路径、known_hosts 路径、数据目录和固定上游目录。认证配置路径供离线元数据检查，可为 `\\wsl.localhost\<distro>\...`；工具不读取其中内容。本轮不会自动登录、生成凭据、设置权限或切换 profile。
 5. 填写现有推理环境的 container_python/container_repo/container_checkpoint_dir/container_data_dir/cuda_home。Linux 路径只在显式远端请求中使用。所有真实机器信息只放 `config/local.json`。若配置存放在另一个本地位置，设置 `NEBIUS_LOCAL_CONFIG` 为该 JSON 路径。
-6. `python -B scripts/local_config.py` 检查字段及本地路径元数据；缺认证时明确报错且不会调用云端。`python -B scripts/selftest.py` 用合成配置与替身验证迁移。可选 GPU/upstream 检查缺依赖时会明确 skip。
+6. `python -B scripts/local_config.py` 检查字段及本地路径元数据；缺认证时明确报错且不会调用云端。`python -B scripts/selftest.py` 先检查离线依赖，再自动发现 `prototype/`、`tests/` 顶层测试，用合成配置与替身验证迁移。每个文件独立运行并记录日志，失败或超时仍输出报告，后续组继续执行。可选 GPU/upstream 检查缺依赖时会明确 skip。
+
+本机旧脚本和历史指针已从活动源码目录移到 `.local/legacy-source/2026-10-09/`，共 48 个文件。归档中的 `manifest.json` 记录原路径、归档路径、大小与 SHA-256，移动后已校验一致；没有删除历史内容。该目录被忽略，不随 clone 复制，也不参与测试发现。仅在需要查阅历史时使用；重新运行旧流程前必须检查过期路径和授权，不能把归档当作当前入口。
 
 每次换 VM 都需重新核对目标 VM 与准确的 SHA256 主机指纹，按 CLOUD.md 的显式流程创建单次 pin。WJC 使用自己的认证和钥匙；不得复制 WJX 的 key、token、OAuth、known_hosts、旧授权、心跳或运行收据。
 
