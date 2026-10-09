@@ -5,7 +5,7 @@
 - API_AUTH_OR_PERMISSION：停止捕获；API_TRANSIENT/API_TIMEOUT 只有限重试。连续三次监督失败、身份映射变化、多 VM、输出不完整、清理失败均不能放行 SSH。
 - 主机信任变化：保留本次失败 run，重新核对资源、VM 和准确指纹；不得自动接受新 key、删除 known_hosts 或复制另一台电脑的 pin。
 - 未完成传输/导出：保留 partial/failed 包，不把非零退出、截断或 SHA 不符当成功。采用新的独立目标目录或由操作者审核后保留旧文件，不能批量清理。
-- SSH/SCP 非零退出：先查看本次 `<operation>-native.json` 和 `transport-attempts/` 的对应调用记录。schema_version=2 在成功和失败时均记录固定截止、调用时间、原生预算/退出/管道/清理信息、连接参数及目标/pin/request 的摘要哈希；不存完整 argv、凭据内容或原始 stdout/stderr。stderr_categories 只是固定模式匹配观察，不能单独证明根因或批准重试；未命中为 UNCLASSIFIED_STDERR，不能把未知 SSH 255 写成可恢复通信错误。远端完成标记、JSON 或身份错误另记 `<operation>-validation-failure.json`，不得混同原生 SSH 失败。每次调用另存摘要，保留前一次 inspect 的证据。
+- SSH/SCP 非零退出：先查看本次 `<operation>-native.json` 和 `transport-attempts/` 的对应调用记录。schema_version=2 在成功和失败时均记录固定截止、调用时间、原生预算/退出/管道/清理信息、连接参数及目标/pin/request 的摘要哈希；不存完整 argv、凭据内容或原始 stdout/stderr。stderr_categories 只是固定模式匹配观察，不能单独证明根因或批准重试；未命中为 UNCLASSIFIED_STDERR，不能把未知 SSH 255 写成可恢复通信错误。`stderr_excerpt` 保留识别到的完整错误句及上下文，重建句子时遮蔽目标、路径、指纹和协商列表；自由文本及密钥/令牌等无法安全识别的行只记录省略数量。最多扫描前后合计32768字符，保留4096 UTF-8字节、40行；过长保留两端及省略标记，记录扫描/行数/字节截断、保留字节和源捕获不完整标志。源捕获标志来自原生进程整体输出状态，不能单独保证stderr完整。脱敏失败只写EXCERPT UNAVAILABLE与redaction_failed，不回退保存原文。未知错误句可能仍被省略，摘录不是全量stderr。远端完成标记、JSON 或身份错误另记 `<operation>-validation-failure.json`，不得混同原生 SSH 失败。每次调用另存摘要，保留前一次 inspect 的证据。
 - 历史 SSH 255 若只有退出码且原始 stderr 已丢弃：可以用保留的 request/settings 与同一参数构造器离线比较路径、命令长度及截止；这些属于重建，不能当成当时 argv 或补写当时错误类别。不能通过再次开机来默认补证据。
 - inverse 不完整：新 run 重试，保留旧目录。forward 恢复仅在原五个 G-buffer、计划参数与尺寸核验后进行；已有 forward 目录不能覆盖。
 - OOM：停止本次工作，保留日志。显式 offload 是现有上游选项，但耗时未承诺。截止不足即退出，不延长或重启收费资源。

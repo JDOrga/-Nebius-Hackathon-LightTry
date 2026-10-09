@@ -10,6 +10,81 @@ import unittest
 ROOT=Path(__file__).resolve().parents[1]
 
 class NativeMetadataTests(unittest.TestCase):
+    def _excerpts(self, cases):
+        shells=[Path(os.environ['SystemRoot'])/'System32/WindowsPowerShell/v1.0/powershell.exe']
+        if shutil.which('pwsh'):shells.append(Path(shutil.which('pwsh')))
+        source=r'''param([string]$Module,[string]$Cases,[string]$Output)
+. $Module
+$items=Get-Content -LiteralPath $Cases -Raw -Encoding UTF8|ConvertFrom-Json
+$records=@()
+foreach($case in $items){$records+=Get-SafeStderrExcerpt $case.stderr ([bool]$case.incomplete)}
+$records|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $Output -Encoding UTF8
+'''
+        with tempfile.TemporaryDirectory() as d:
+            base=Path(d);wrapper=base/'excerpt.ps1';wrapper.write_text(source)
+            inputs=base/'cases.json';inputs.write_text(json.dumps(cases),encoding='utf-8')
+            for i,shell in enumerate(shells):
+                output=base/(str(i)+'.json')
+                p=subprocess.run([str(shell),'-NoProfile','-File',str(wrapper),str(ROOT/'cloud/TransportDiagnostics.ps1'),str(inputs),str(output)],capture_output=True,timeout=20)
+                self.assertEqual(p.returncode,0,p.stderr)
+                yield str(shell),json.loads(output.read_text(encoding='utf-8-sig'))
+
+    def test_excerpt_preserves_error_sentences_and_redacts_identifiers_secrets(self):
+        stderr='\n'.join([
+            'Warning: Identity file C:/Users/private-user/key with spaces not accessible: No such file or directory.',
+            'Load key "/home/private-user/key.pem": error in libcrypto',
+            'private-user@[2001:db8::1234]: Permission denied (publickey,password).',
+            '@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @',
+            'The fingerprint for the ED25519 key sent by the remote host is',
+            'SHA256:PRIVATEFINGERPRINT0123456789',
+            'Offending ED25519 key in C:/Users/private-user/known_hosts:9',
+            '-'*5+'BEGIN OPENSSH PRIVATE KEY'+'-'*5,'PRIVATE_KEY_BODY','-'*5+'END OPENSSH PRIVATE KEY'+'-'*5,
+            'Authorization: Bearer PRIVATE_TOKEN', 'ssh: secret=PRIVATE_SHORT',
+            'https' + '://private-user:PRIVATE_PASSWORD@private.invalid/private/path',
+            'Cookie: PRIVATE_COOKIE',
+            '\x1b[31mssh: connect to host private.invalid port 22: Connection refused\x1b[0m',
+        ])
+        cases=[{'stderr':stderr,'incomplete':False},{'stderr':'','incomplete':False}]
+        for shell,records in self._excerpts(cases):
+            with self.subTest(shell=shell):
+                value,empty=records
+                self.assertIn('Load key [REDACTED PATH]: error in libcrypto',value['text'])
+                self.assertIn('Permission denied (publickey,password)',value['text'])
+                self.assertIn('ssh: connect to host [REDACTED HOST] port 22: Connection refused',value['text'])
+                self.assertIn('Offending ED25519 key in [REDACTED PATH]:9',value['text'])
+                self.assertIn('[REDACTED FINGERPRINT]',value['text'])
+                self.assertNotIn('PRIVATE_',json.dumps(value));self.assertNotIn('private-user',value['text'])
+                self.assertNotIn('private.invalid',value['text']);self.assertNotIn('2001:db8',value['text'])
+                self.assertNotIn('C:/Users',value['text']);self.assertNotIn('/home/',value['text'])
+                self.assertEqual(value['unrecognized_lines_omitted_in_scan'],7)
+                self.assertFalse(value['truncated']);self.assertFalse(value['redaction_failed'])
+                self.assertFalse(value['raw_stderr_saved']);self.assertEqual(empty['text'],'')
+                self.assertEqual(empty['retained_lines'],0)
+
+    def test_excerpt_bounds_keep_trailing_error_and_mark_each_truncation(self):
+        line='Unable to negotiate with private.invalid port 22: no matching key exchange method found. Their offer: PRIVATE_OFFERS'
+        cases=[
+            {'stderr':('Connection reset by private.invalid port 22\n'*100),'incomplete':False},
+            {'stderr':(line+'\n')*100,'incomplete':False},
+            {'stderr':'ssh: connect to host private.invalid port 22: Connection refused\n'+('SECRET_NOISE '*10000)+'\nLoad key /private/key: invalid format\n','incomplete':False},
+            {'stderr':'Host key verification failed.','incomplete':True},
+        ]
+        for shell,records in self._excerpts(cases):
+            with self.subTest(shell=shell):
+                for value in records:
+                    self.assertLessEqual(len(value['text'].encode()),4096)
+                    self.assertEqual(value['retained_bytes'],len(value['text'].encode()))
+                    self.assertLessEqual(value['retained_lines'],40)
+                    self.assertLessEqual(value['scanned_characters'],32768)
+                    self.assertTrue(value['truncated']);self.assertFalse(value['redaction_failed'])
+                    self.assertNotIn('PRIVATE_',value['text']);self.assertNotIn('SECRET_NOISE',value['text'])
+                self.assertTrue(records[0]['line_truncated'])
+                self.assertTrue(records[1]['byte_truncated'])
+                self.assertTrue(records[2]['scan_truncated'])
+                self.assertIn('Connection refused',records[2]['text'])
+                self.assertIn('Load key [REDACTED PATH]: invalid format',records[2]['text'])
+                self.assertTrue(records[3]['source_capture_incomplete'])
+
     def test_categories_context_and_success_failure_use_same_safe_schema(self):
         shells=[Path(os.environ['SystemRoot'])/'System32/WindowsPowerShell/v1.0/powershell.exe']
         if shutil.which('pwsh'):shells.append(Path(shutil.which('pwsh')))
@@ -50,6 +125,9 @@ foreach($case in $all){
                         self.assertEqual(record['invocation']['context'],{'operation':'inspect','connection_arguments_sha256':'a'*64})
                         self.assertTrue(record['output_complete']);self.assertTrue(record['process_exited'])
                         self.assertFalse(record['raw_output_saved']);self.assertFalse(record['stderr_saved'])
+                        self.assertFalse(record['stderr_excerpt']['redaction_failed'])
+                        if name=='auth':self.assertIn('Permission denied (publickey)',record['stderr_excerpt']['text'])
+                        if name=='reset':self.assertEqual(record['stderr_excerpt']['text'],stderr)
                         self.assertGreater(record['invocation']['argument_characters'],0)
                         self.assertEqual(len(record['invocation']['arguments_sha256']),64)
                         self.assertEqual(record['phase'],'native_completed')
@@ -76,6 +154,27 @@ catch{
             wrapper=Path(d)/'write_failure.ps1';wrapper.write_text(source)
             p=subprocess.run([str(shell),'-NoProfile','-File',str(wrapper),str(ROOT/'cloud/Common.ps1'),str(shell),str(Path(d)/'synthetic.json')],capture_output=True,timeout=35)
             self.assertEqual(p.returncode,0,p.stderr)
+
+    def test_excerpt_failure_omits_text_without_masking_exit_code(self):
+        shell=Path(os.environ['SystemRoot'])/'System32/WindowsPowerShell/v1.0/powershell.exe'
+        source=r'''param([string]$Common,[string]$Executable,[string]$Record)
+. $Common
+$script:RemoteDeadline=[DateTimeOffset]::UtcNow.AddSeconds(30)
+function Get-SafeStderrExcerpt {throw 'PRIVATE_REDACTION_ERROR'}
+try{Invoke-NativeSshCommand @('-NoProfile','-Command') "[Console]::Error.WriteLine('PRIVATE_RAW_OUTPUT');exit 255" $Record $Executable|Out-Null;throw 'EXPECTED_FAILURE_MISSING'}
+catch {if($_.Exception.Message -ne 'BOUNDED_TRANSFER_FAILED_OUTPUT_NOT_ACCEPTED'){throw}}
+'''
+        with tempfile.TemporaryDirectory() as d:
+            base=Path(d);wrapper=base/'excerpt_failure.ps1';wrapper.write_text(source)
+            record=base/'diagnostic.json'
+            p=subprocess.run([str(shell),'-NoProfile','-File',str(wrapper),str(ROOT/'cloud/Common.ps1'),str(shell),str(record)],capture_output=True,timeout=35)
+            self.assertEqual(p.returncode,0,p.stderr)
+            text=record.read_text(encoding='utf-8-sig');value=json.loads(text)
+            self.assertEqual(value['exit_code'],255)
+            self.assertTrue(value['stderr_excerpt']['redaction_failed'])
+            self.assertEqual(value['stderr_excerpt']['text'],'[STDERR EXCERPT UNAVAILABLE]')
+            self.assertEqual(value['stderr_excerpt']['retained_bytes'],len(value['stderr_excerpt']['text'].encode()))
+            self.assertNotIn('PRIVATE_',text)
 
     def test_error_metadata_on_ps5_and_ps7(self):
         shells=[Path(os.environ['SystemRoot'])/'System32/WindowsPowerShell/v1.0/powershell.exe']
