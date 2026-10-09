@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 import threading
+import tempfile
 import unittest
 from pathlib import Path
 from urllib.error import HTTPError
@@ -19,22 +20,23 @@ spec.loader.exec_module(server)
 class CatalogTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        if not server.resolve_assets_dir().exists():
+            raise unittest.SkipTest(server.INSTALL_HINT)
         cls.catalog = server.load_catalog()
-        cls.source = ROOT.parent / cls.catalog['provenance']['sourceDirectory']
+        cls.source = server.resolve_assets_dir()
+        cls.records = json.loads((cls.source / 'source-records.json').read_text(encoding='utf-8'))
 
     def test_input_and_original_identities_match_prepared_records(self):
-        records = json.loads((self.source / 'prepared_inputs.json').read_text(encoding='utf-8'))
-        for sample, record in zip(self.catalog['samples'], records['images']):
+        for sample, record in zip(self.catalog['samples'], self.records['images']):
             self.assertEqual(sample['input']['sha256'], record['derived_sha256'])
             self.assertEqual(sample['original']['sha256'], record['sha256'])
             self.assertEqual(sample['canvas']['validRegion'], record['valid_region_xyxy'])
             self.assertEqual((sample['input']['width'], sample['input']['height']), (1280, 704))
 
     def test_forward_matches_historical_export_hashes_and_hdr_order(self):
-        exported = json.loads((self.source / 'local_integrity.json').read_text())
-        hashes = {e['path'].replace('\\', '/'): e['sha256'] for e in exported['files']}
-        config = json.loads((self.source / 'configuration.json').read_text())
-        for preset, hdr in zip(self.catalog['presets'], config['hdrs']):
+        hashes = {e['path'].replace('\\', '/'): e['sha256'] for e in self.records['forward']['exported_results']}
+        self.assertEqual(self.records['forward']['state'], 'official_entry_completed')
+        for preset, hdr in zip(self.catalog['presets'], self.records['hdrs']):
             self.assertEqual(preset['hdr'], hdr['filename'])
             self.assertEqual(preset['sha256'], hdr['sha256'])
             for sample in self.catalog['samples']:
@@ -53,6 +55,9 @@ class CatalogTests(unittest.TestCase):
 class HTTPTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        if not server.resolve_assets_dir().exists():
+            raise unittest.SkipTest(server.INSTALL_HINT)
+        server.Handler.assets_dir = server.resolve_assets_dir()
         server.Handler.catalog = server.load_catalog()
         cls.httpd = ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
         cls.base = f'http://127.0.0.1:{cls.httpd.server_port}'
@@ -87,11 +92,35 @@ class HTTPTests(unittest.TestCase):
                 urlopen(self.base + route)
             self.assertEqual(caught.exception.code, 404)
 
+    def test_provenance_and_assets_paths_are_not_served(self):
+        for route in ('/source-records.json', '/assets/ATTRIBUTION.txt', '/demo-assets/source-records.json'):
+            with self.assertRaises(HTTPError) as caught:
+                urlopen(self.base + route)
+            self.assertEqual(caught.exception.code, 404)
+
     def test_server_has_no_upload_or_inference_endpoint(self):
         from urllib.request import Request
         with self.assertRaises(HTTPError) as caught:
             urlopen(Request(self.base + '/api/inference', data=b'input', method='POST'))
         self.assertEqual(caught.exception.code, 501)
+
+
+class ConfigurationTests(unittest.TestCase):
+    def test_missing_assets_gives_install_instructions(self):
+        with tempfile.TemporaryDirectory(prefix='LightTry missing assets ') as directory:
+            with self.assertRaisesRegex(ValueError, 'install_demo_assets.py'):
+                server.load_catalog(directory)
+
+    def test_relative_paths_use_project_root_and_reject_escape(self):
+        self.assertEqual(server.resolve_assets_dir('example assets'), (ROOT / 'example assets').resolve())
+        with self.assertRaisesRegex(ValueError, '越界'):
+            server.asset_path(ROOT, {'path': '../outside.jpg'})
+
+    def test_environment_and_explicit_path_precedence(self):
+        from unittest.mock import patch
+        with patch.dict('os.environ', {'LIGHTTRY_DEMO_ASSETS': 'machine assets'}):
+            self.assertEqual(server.resolve_assets_dir(), (ROOT / 'machine assets').resolve())
+            self.assertEqual(server.resolve_assets_dir('explicit assets'), (ROOT / 'explicit assets').resolve())
 
 
 if __name__ == '__main__':

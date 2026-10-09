@@ -12,6 +12,8 @@
 /upstream/
 /RUNBOOK.md
 /.local/
+demo-assets/
+demo.local.json
 /config/local.json
 /manifests/git-allowlist.txt
 /scripts/HOST_CAPTURE_NEXT.json

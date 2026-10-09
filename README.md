@@ -1,6 +1,8 @@
 # Cosmos 灯光预览工程
 
-有限保真度的灯光预览，默认 1280×704。当前提供 Cosmos 推理、HDR 替代采样、验收和显式守护执行链；产品 UI 开发暂停。
+LightTry 本地样例演示入口在 [project/README.md](project/README.md)。普通演示只需 Python 3.11 和单独提供的本地素材包，无需云认证、SSH、GPU 或历史目录。WJC 的最短接手步骤见 [本地演示迁移](project/docs/LOCAL_DEMO_MIGRATION.md)。本轮改动未提交，独立素材支持属于候选交付，不能将当前 GitHub HEAD 的 clone 称为已验收版本。
+
+有限保真度的灯光预览，默认 1280×704。下文为既有 Cosmos 推理、HDR 替代采样、验收和显式守护执行链，普通本地演示无需执行这些流程。
 
 先阅读 [迁移步骤](docs/MIGRATION.md) 与 [依赖说明](docs/DEPENDENCIES.md)。复制配置模板到不入库的 config/local.json，并填写自己的现有路径与目标。默认命令均不启动、重启或停止云资源：
 

@@ -1,3 +1,6 @@
 qa/
+demo-assets/
+# Machine-specific demo configuration, if maintained outside environment variables.
+demo.local.json
 __pycache__/
 *.pyc

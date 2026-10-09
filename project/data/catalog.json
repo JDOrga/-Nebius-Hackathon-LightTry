@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "renderer": "Cosmos Diffusion Renderer",
   "presets": [
     {
@@ -311,140 +311,140 @@
   ],
   "assets": {
     "01_matte_terracotta-original": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/originals/01_matte_terracotta.jpg",
+      "path": "originals/01_matte_terracotta-original.jpg",
       "sha256": "5e46330920891b48012b33ea28cf1f34ca282e8936cd2e25f06383681518ba90",
       "bytes": 3735742,
       "width": 4272,
       "height": 2848
     },
     "01_matte_terracotta-input": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/inputs-srgb/01_matte_terracotta.png",
+      "path": "inputs/01_matte_terracotta-input.png",
       "sha256": "cbbfad2ba8e746586ecf8187a228c4fae5df7c8b41d1ee0b7e441d8006679cb3",
       "bytes": 881684,
       "width": 1280,
       "height": 704
     },
     "01_matte_terracotta-sunny": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0000/01_matte_terracotta/0000.0000.jpg",
+      "path": "results/01_matte_terracotta-sunny.jpg",
       "sha256": "c6488cc0df96241fcc0c1f90d90a1f8f1f299d8196c84a7f0c1f398afa9507d2",
       "bytes": 48840,
       "width": 1280,
       "height": 704
     },
     "01_matte_terracotta-sunrise": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0001/01_matte_terracotta/0000.0000.jpg",
+      "path": "results/01_matte_terracotta-sunrise.jpg",
       "sha256": "366930838833928c87fa222d8b4bd646b6bf5c96598038738ed1ebe5f6848ff3",
       "bytes": 45088,
       "width": 1280,
       "height": 704
     },
     "01_matte_terracotta-street": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0002/01_matte_terracotta/0000.0000.jpg",
+      "path": "results/01_matte_terracotta-street.jpg",
       "sha256": "a783785beab2dbdba894e660e647067b347e72dc34f0da48d1c703b00861eb7a",
       "bytes": 46942,
       "width": 1280,
       "height": 704
     },
     "02_text_tea_tin-original": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/originals/02_text_tea_tin.jpg",
+      "path": "originals/02_text_tea_tin-original.jpg",
       "sha256": "e8eb6c581a2a4b2f8e812256c68c81705ae9c44913df3a7f6505ff89d4738c72",
       "bytes": 2089226,
       "width": 4288,
       "height": 2848
     },
     "02_text_tea_tin-input": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/inputs-srgb/02_text_tea_tin.png",
+      "path": "inputs/02_text_tea_tin-input.png",
       "sha256": "4f94b62fed4964ed1b3c3cdc1e669121db46fc096ac0e4f203c0e965b5afbc72",
       "bytes": 1076990,
       "width": 1280,
       "height": 704
     },
     "02_text_tea_tin-sunny": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0000/02_text_tea_tin/0000.0000.jpg",
+      "path": "results/02_text_tea_tin-sunny.jpg",
       "sha256": "f849698ff200af3810f61787bb7b57df3766502ded24b6dfcef79c955d85ee11",
       "bytes": 162252,
       "width": 1280,
       "height": 704
     },
     "02_text_tea_tin-sunrise": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0001/02_text_tea_tin/0000.0000.jpg",
+      "path": "results/02_text_tea_tin-sunrise.jpg",
       "sha256": "03692cf255ae8c742f4e031982b9e120d429f51afbdd353f5cb0c58162559871",
       "bytes": 145784,
       "width": 1280,
       "height": 704
     },
     "02_text_tea_tin-street": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0002/02_text_tea_tin/0000.0000.jpg",
+      "path": "results/02_text_tea_tin-street.jpg",
       "sha256": "93ef30872b4ea4d6ffe3ab173a676b7a3795f6ba1d235bcbca755cc0381f1cd7",
       "bytes": 109319,
       "width": 1280,
       "height": 704
     },
     "03_glossy_metal_teapot-original": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/originals/03_glossy_metal_teapot.jpg",
+      "path": "originals/03_glossy_metal_teapot-original.jpg",
       "sha256": "3280610c05178d6bb474f9db21b675dacc597fa01b026a17ee59b00690714cc9",
       "bytes": 2667326,
       "width": 3264,
       "height": 2448
     },
     "03_glossy_metal_teapot-input": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/inputs-srgb/03_glossy_metal_teapot.png",
+      "path": "inputs/03_glossy_metal_teapot-input.png",
       "sha256": "0ac48169ec0be3847fcbca446133bf10c6c1ca230927daeeb7f3a5159ef50bc1",
       "bytes": 872740,
       "width": 1280,
       "height": 704
     },
     "03_glossy_metal_teapot-sunny": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0000/03_glossy_metal_teapot/0000.0000.jpg",
+      "path": "results/03_glossy_metal_teapot-sunny.jpg",
       "sha256": "67254538813766482d552f3c6161b55cf125d0e8e877e1b4e143fe6ae16db49c",
       "bytes": 62781,
       "width": 1280,
       "height": 704
     },
     "03_glossy_metal_teapot-sunrise": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0001/03_glossy_metal_teapot/0000.0000.jpg",
+      "path": "results/03_glossy_metal_teapot-sunrise.jpg",
       "sha256": "dce4fded3e919d14a860b7937c2c4433c58d4a8c5b65c3dcbcc2c65e86639fe2",
       "bytes": 66636,
       "width": 1280,
       "height": 704
     },
     "03_glossy_metal_teapot-street": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0002/03_glossy_metal_teapot/0000.0000.jpg",
+      "path": "results/03_glossy_metal_teapot-street.jpg",
       "sha256": "7e3de3557a8d9255f12d1fbf7f3fd05bbad10caae622c4902a737fb7d880d1a6",
       "bytes": 56633,
       "width": 1280,
       "height": 704
     },
     "04_transparent_glass-original": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/originals/04_transparent_glass.jpg",
+      "path": "originals/04_transparent_glass-original.jpg",
       "sha256": "306f9d3a9b15df0099305c85ab5d2995022dc1b4f5db0ea8e16d5e3ed2c904f2",
       "bytes": 1696779,
       "width": 1627,
       "height": 2090
     },
     "04_transparent_glass-input": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/inputs-srgb/04_transparent_glass.png",
+      "path": "inputs/04_transparent_glass-input.png",
       "sha256": "6473ac008002f3eb7a0cc01f88a79ce0849dd17332e1a39097687f4bacb47345",
       "bytes": 486619,
       "width": 1280,
       "height": 704
     },
     "04_transparent_glass-sunny": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0000/04_transparent_glass/0000.0000.jpg",
+      "path": "results/04_transparent_glass-sunny.jpg",
       "sha256": "99f1d13b769e27edc67c41f678dce254ae8fbc038221ab9486fc1e80f23da428",
       "bytes": 61896,
       "width": 1280,
       "height": 704
     },
     "04_transparent_glass-sunrise": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0001/04_transparent_glass/0000.0000.jpg",
+      "path": "results/04_transparent_glass-sunrise.jpg",
       "sha256": "21aa2010696b94588b11b0804c919a1a55ceeee0a360f7499f6fd08c708d9db5",
       "bytes": 41635,
       "width": 1280,
       "height": 704
     },
     "04_transparent_glass-street": {
-      "path": "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward/relit_frames_0002/04_transparent_glass/0000.0000.jpg",
+      "path": "results/04_transparent_glass-street.jpg",
       "sha256": "3fd066482a69265018b9363ad8713ce149cd87358eecd7838bbfd307d8d3a8a1",
       "bytes": 45407,
       "width": 1280,
@@ -460,6 +460,8 @@
       "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/local_integrity.json",
       "controlled-tests/20261007-four-materials/executions/2aa06a2c4e154ad0b03424c0d1d3dcca/run/forward-performance/performance.json"
     ],
-    "note": "Full-frame forward JPEG only. Later tea basecolor, local-scale crops and CPU fusion candidates are excluded. Historical final acceptance process failed; forward generation completed, hashes verified."
+    "note": "Full-frame forward JPEG only. Later tea basecolor, local-scale crops and CPU fusion candidates are excluded. Historical final acceptance process failed; forward generation completed, hashes verified.",
+    "packRecord": "source-records.json",
+    "runtimeSource": "Independent demo-assets; historical locations are audit references only, never runtime lookup paths."
   }
 }

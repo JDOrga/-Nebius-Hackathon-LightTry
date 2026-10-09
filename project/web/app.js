@@ -1,4 +1,4 @@
-import { createState, reduce, selection, validateFile, validateDimensions, fitSize } from './state.js';
+import { createState, reduce, selection, validateFile, validateDimensions, fitSize, previewLayout } from './state.js';
 import { sampleSource, disconnectedInference, decodeUpload } from './sources.js';
 
 const $ = id => document.getElementById(id);
@@ -20,7 +20,7 @@ function renderStatus() {
   $('upload-status').hidden = !generate;
   $('upload-status').replaceChildren();
   const title = document.createElement('strong');
-  title.textContent = state.upload ? '已载入，尚未连接推理服务' : '真实生成尚未连接';
+  title.textContent = state.upload ? '已载入，尚未连接推理服务' : '照片预览 · 暂不支持生成';
   const detail = document.createElement('span');
   detail.textContent = state.upload ? '当前仅显示你的原图。连接服务后才能生成光照结果。' : '选择一张图片，先在本机预览原图。';
   $('upload-status').append(title, detail);
@@ -35,7 +35,7 @@ async function render() {
   $('sample-mode').setAttribute('aria-pressed', String(!generate));
   $('generate-mode').setAttribute('aria-pressed', String(generate));
   $('samples-panel').hidden = generate;
-  $('source-label').textContent = generate ? '真实生成 · 服务未连接' : '样例演示 · 历史实测';
+  $('source-label').textContent = generate ? '照片预览 · 暂不支持生成' : '样例演示 · 历史实测';
   $('image-title').textContent = generate ? input?.name || '载入你的产品照片' : `${sample.name} / ${preset.name}`;
   $('image-size').textContent = input ? `${input.width} × ${input.height} px` : '';
   $('canvas-note').textContent = generate ? '本机原图预览 · 等比显示' : '完整画布 · 等比显示 · 保留已有留白';
@@ -43,6 +43,11 @@ async function render() {
   $('sample-warning').textContent = sample?.warning || '';
   $('export-note').textContent = generate ? '尚无生成结果，暂不能导出重打光结果' : '导出实际结果 JPEG，保留完整画布';
   $('hdr-note').textContent = `环境文件：${preset.hdr}`;
+  $('compact-light-label').textContent = generate ? '目标光照 · 暂不支持生成' : '光照方案';
+  $('compact-preset-list').innerHTML = catalog.presets.map(p => `<button class="compact-preset" data-preset="${escape(p.id)}" aria-pressed="${p.id === preset.id}" aria-label="${escape(p.name)}">${escape(p.name)}</button>`).join('');
+  surface.dataset.mode = generate ? 'original' : state.comparison;
+  surface.dataset.width = input?.width || 1280;
+  surface.dataset.height = input?.height || 704;
   document.querySelectorAll('[data-comparison]').forEach(button => {
     button.disabled = generate && button.dataset.comparison !== 'original';
     button.setAttribute('aria-pressed', String(button.dataset.comparison === (generate ? 'original' : state.comparison)));
@@ -55,11 +60,12 @@ async function render() {
   $('sample-list').innerHTML = catalog.samples.map(s => `<button class="sample-button ${s.unstable ? 'unstable' : ''}" data-sample="${escape(s.id)}" aria-pressed="${s.id === state.sampleId}" aria-label="${escape(s.name)}${s.unstable ? '，效果不稳定' : ''}"><img src="${s.original.url}" alt=""><span>${escape(s.name)}</span></button>`).join('');
   renderStatus();
   if (!input) {
-    surface.innerHTML = '<div class="empty"><span class="empty-icon">↥</span><h3>从一张产品照片开始</h3><p>点击右侧选图，或把图片拖到页面。<br>图片只在本机预览，推理服务尚未连接。</p></div>';
+    surface.innerHTML = '<div class="empty"><span class="empty-icon">↥</span><h3>载入照片预览</h3><p>选择或拖入一张图片。<br>当前暂不支持生成光照结果。</p></div>';
     applyView();
     return;
   }
   surface.innerHTML = '<div class="empty"><p>读取本地图片…</p></div>';
+  applyView();
   try {
     // Decode both identities before showing either, so a rapid switch never pairs an old result with a new input.
     await Promise.all([input, ...(result ? [result] : [])].map(async record => {
@@ -93,16 +99,21 @@ async function render() {
 function applyView() {
   if (!state) return;
   const { view } = state;
+  const layout = previewLayout(surface.dataset.mode, surface.clientWidth, Number(surface.dataset.width), Number(surface.dataset.height));
+  surface.classList.toggle('is-stacked', layout.stacked);
+  // The border is outside the panel height. ResizeObserver settles again if the width changes.
+  surface.style.height = `${layout.height + 2}px`;
   surface.classList.toggle('is-pannable', view.zoom > 1);
   $('zoom-label').textContent = `${Math.round(view.zoom * 100)}%`;
   $('zoom-in').disabled = view.zoom >= 3;
   $('zoom-out').disabled = view.zoom <= 1;
   $('compare-range').value = view.split;
-  $('view-hint').textContent = view.zoom > 1 ? '已放大 · 拖动平移 · 适合窗口可恢复完整画布' : state.mode === 'generate' ? '仅原图预览，尚无光照结果' : state.comparison === 'slider' ? '拖动滑杆比较光照差异' : '完整显示，可放大查看';
+  $('view-hint').textContent = view.zoom > 1 ? '已放大 · 拖动平移 · 适合窗口可恢复完整画布' : state.mode === 'generate' ? '仅原图预览，尚无光照结果' : state.comparison === 'slider' ? '拖动滑杆比较光照差异' : layout.stacked ? '上下比较 · 完整画布' : '完整显示，可放大查看';
   surface.querySelectorAll('.view-panel').forEach(panel => {
     const canvas = panel.querySelector('.image-canvas');
     if (!canvas) return;
-    const size = fitSize(Number(surface.dataset.width), Number(surface.dataset.height), panel.clientWidth, panel.clientHeight);
+    const panelRect = panel.getBoundingClientRect();
+    const size = fitSize(Number(surface.dataset.width), Number(surface.dataset.height), panelRect.width, panelRect.height);
     canvas.style.width = `${size.width}px`; canvas.style.height = `${size.height}px`;
     canvas.style.transform = `translate(${view.panX * size.width}px, ${view.panY * size.height}px) scale(${view.zoom})`;
     const original = canvas.querySelector('.original-layer');
@@ -151,10 +162,11 @@ $('sample-list').onclick = event => {
   const button = event.target.closest('[data-sample]');
   if (button) { ++uploadVersion; dispatch({ type: 'SAMPLE', id: button.dataset.sample }); }
 };
-$('preset-list').onclick = event => {
+function selectPreset(event) {
   const button = event.target.closest('[data-preset]');
   if (button) { dispatch({ type: 'PRESET', id: button.dataset.preset }); disconnectedTask(); }
-};
+}
+$('preset-list').onclick = $('compact-preset-list').onclick = selectPreset;
 document.querySelectorAll('[data-comparison]').forEach(button => button.onclick = () => dispatch({ type: 'COMPARE', value: button.dataset.comparison }));
 $('zoom-in').onclick = () => zoom(.25);
 $('zoom-out').onclick = () => zoom(-.25);

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createState, reduce, selection, validateFile, validateDimensions, fitSize } from '../web/state.js';
+import { createState, reduce, selection, validateFile, validateDimensions, fitSize, previewLayout } from '../web/state.js';
 import { disconnectedInference } from '../web/sources.js';
 const catalog = JSON.parse(readFileSync(new URL('../data/catalog.json', import.meta.url), 'utf8'));
 
@@ -15,7 +15,8 @@ test('each sample selects its own three forward results and exact HDR mapping', 
     assert.equal(selected.result.assetId, `${sample.id}-${preset.id}`);
     assert.equal(selected.input.assetId, `${sample.id}-input`);
     assert.equal(selected.exportUrl, `/download/${sample.id}/${preset.id}`);
-    assert.match(catalog.assets[selected.result.assetId].path, new RegExp(`relit_frames_000${preset.index}/${sample.id}/0000.0000.jpg$`));
+    assert.equal(catalog.assets[selected.result.assetId].path, `results/${sample.id}-${preset.id}.jpg`);
+    assert.equal(catalog.assets[selected.result.assetId].sha256, selected.result.sha256);
   }
 });
 test('new upload cannot inherit sample results, even after selecting a preset', () => {
@@ -75,5 +76,17 @@ test('fit preserves image aspect ratio in large and narrow panels without croppi
     const fitted = fitSize(1280, 704, ...dims);
     assert.ok(Math.abs(fitted.width / fitted.height - 1280 / 704) < 1e-10);
     assert.ok(fitted.width <= dims[0] + .00001 && fitted.height <= dims[1] + .00001);
+  }
+});
+test('side comparison fills two wide panels or two stacked narrow panels with complete canvases', () => {
+  for (const width of [300, 390, 639, 640, 833, 1200]) {
+    const side = previewLayout('side', width);
+    const panelWidth = side.stacked ? width : (width - 1) / 2;
+    const panelHeight = side.stacked ? (side.height - 1) / 2 : side.height;
+    const fitted = fitSize(1280, 704, panelWidth, panelHeight);
+    assert.ok(Math.abs(fitted.width - panelWidth) < .00001);
+    assert.ok(Math.abs(fitted.height - panelHeight) < .00001);
+    assert.equal(side.stacked, width < 640);
+    if (width >= 640) assert.ok(side.height < previewLayout('slider', width).height);
   }
 });

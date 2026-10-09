@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "name": "lighttry-demo-assets-20261009.zip",
+  "distribution": "local-only; public output rights unverified",
+  "records": {
+    "source-records.json": {
+      "bytes": 19576,
+      "sha256": "7439422c643733051d74dda134d80cd7be5e9a497096cc6adbb7edc1f4132f37"
+    },
+    "ATTRIBUTION.txt": {
+      "bytes": 1699,
+      "sha256": "1b115b01d0886f6f976467a7b4be7d517a5b2952a527bfa074018594153a3294"
+    },
+    "LOCAL_ONLY.md": {
+      "bytes": 488,
+      "sha256": "0025fe86cb13110831283733d84446414633f97d14cd4fcfe893eacc95f8d142"
+    }
+  }
+}

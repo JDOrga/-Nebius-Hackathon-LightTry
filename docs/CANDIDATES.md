@@ -2,6 +2,8 @@
 
 此清单仅用于查看工程结构，不控制 Git 文件选择；文件选择由 .gitignore 管理。真实配置、认证、运行记录与临时诊断被忽略。
 
+2026-10-09 LightTry 独立本地演示新增/变更范围见 [候选交付文件](../project/docs/DELIVERY_FILES.md)，素材许可与包均单独管理；旧结构清单不代表图片已经纳入公开候选。
+
 ## (root)
 
 - .gitattributes

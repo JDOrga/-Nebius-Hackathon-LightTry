@@ -44,3 +44,14 @@ export function fitSize(width, height, availableWidth, availableHeight) {
   const scale = Math.min(availableWidth / width, availableHeight / height);
   return { width: width * scale, height: height * scale };
 }
+
+// At fit scale, each comparison panel uses its full width and complete image aspect.
+// Layout follows the available preview width, including a narrow desktop sidebar layout.
+export function previewLayout(mode, availableWidth, imageWidth = 1280, imageHeight = 704) {
+  const ratio = imageHeight / imageWidth;
+  if (mode === 'side') {
+    const stacked = availableWidth < 640;
+    return { stacked, height: stacked ? availableWidth * ratio * 2 + 1 : (availableWidth - 1) / 2 * ratio };
+  }
+  return { stacked: false, height: Math.min(620, Math.max(180, availableWidth * ratio)) };
+}
