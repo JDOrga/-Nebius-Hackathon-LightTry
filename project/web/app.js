@@ -1,20 +1,25 @@
-import { createState, reduce, selection, validateFile, validateDimensions, fitSize, previewLayout } from './state.js';
-import { sampleSource, disconnectedInference, serviceInference, decodeUpload } from './sources.js';
+import { createState, reduce, selection, recordedRegion, validateFile, validateDimensions, fitSize, previewLayout } from './state.js';
+import { sampleSource, disconnectedInference, serviceInference, recoverTask, decodeUpload } from './sources.js';
 
 const $ = id => document.getElementById(id);
 const escape = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let catalog, state, renderVersion = 0, uploadVersion = 0, renderedResult = null;
 let capabilities = { enabled: false }, uploadFile = null, pending = false, pollVersion = 0;
-let requestId = null;
+let requestId = null, restoring = false, fileSelectionRequested = false;
 const savedTaskKey = 'lighttry.lastTask';
 const requestKey = 'lighttry.pendingRequest';
-const active = () => pending || ['queued', 'running'].includes(state?.task?.status) || state?.task?.executionUncertain;
+const relatedKey = 'lighttry.relatedTasks';
+const active = () => restoring || pending || ['queued', 'running'].includes(state?.task?.status) || state?.task?.executionUncertain;
 const storageGet = key => { try { return localStorage.getItem(key); } catch { return null; } };
 const storageSet = (key, value) => { try { value === null ? localStorage.removeItem(key) : localStorage.setItem(key, value); } catch {} };
 const surface = $('preview-surface');
 
 function dispatch(event) {
   state = reduce(state, event);
+  if (['TASK', 'RESTORE_TASK', 'RELATED_TASK'].includes(event.type) && state.upload) {
+    storageSet(relatedKey, JSON.stringify({ inputId: state.upload.id,
+      taskIds: Object.values(state.tasks || {}).filter(t => /^[0-9a-f]{32}$/.test(t.taskId)).map(t => t.taskId) }));
+  }
   if (['VIEW', 'FIT'].includes(event.type)) return applyView();
   if (event.type === 'ERROR') return renderStatus();
   render();
@@ -30,15 +35,15 @@ function renderStatus() {
   const task = state.task;
   const titles = { queued: '任务已接收，等待执行端事件', running: '任务正在执行', succeeded: '本次光照结果已通过校验',
     failed: '任务失败', expired: '结果已过期', not_connected: '已载入，尚未连接推理服务' };
-  title.textContent = pending ? '正在提交本次任务…' : task ? titles[task.status] || '任务状态待核实' :
+  title.textContent = restoring ? '正在恢复上次任务…' : pending ? '正在提交本次任务…' : task ? titles[task.status] || '任务状态待核实' :
     state.upload ? capabilities.enabled ? '照片已载入，选择预设后提交' : '已载入，尚未连接推理服务' : '载入照片，在本机预览';
   const detail = document.createElement('span');
   const stages = { preflight: '执行端正在检查现有环境', weights: '执行端正在校验现有权重', inverse: '执行端正在运行光照分解',
     forward: '执行端正在运行所选光照', validating: '执行端正在校验输出', transferring: '正在取回本次结果' };
-  detail.textContent = task?.status === 'not_connected' ? '当前仅显示你的原图。真实推理默认关闭，不发送照片。' : task?.error?.message || (task?.status === 'running' ? stages[task.stage] || '等待执行端报告阶段，不推测百分比。' :
+  detail.textContent = task?.status === 'not_connected' ? (Object.keys(state.tasks || {}).length ? '此灯光尚未生成；连接并授权后仍需显式提交。真实推理默认关闭，不发送照片。' : '当前仅显示你的原图。真实推理默认关闭，不发送照片。') : task?.error?.message || (task?.status === 'running' ? stages[task.stage] || '等待执行端报告阶段，不推测百分比。' :
     task?.status === 'queued' ? '刷新后可恢复查询。没有执行端事件时不显示进度。' :
-    task?.status === 'succeeded' ? '可与实际模型输入比较和下载；视觉质量仍需你检查。' :
-    state.upload ? capabilities.enabled ? '提交后发送到本机任务后端，再由已授权的执行适配器处理。' : '当前仅显示你的原图。真实推理默认关闭，不发送照片。' : '选择一张 JPG、PNG 或 WebP。');
+    task?.status === 'succeeded' ? (task.result?.inverseReuse?.reused ? '本次复用了已校验的 G-buffer。' : '') + '可比较和下载；新灯光仍需显式生成，模型退出后需重新加载 forward。视觉质量仍需你检查。' :
+    state.upload ? capabilities.enabled ? '此灯光尚未生成；请显式提交。符合条件时复用 G-buffer；模型退出后仍需加载 forward，不承诺秒切。' : '当前仅显示你的原图。真实推理默认关闭，不发送照片。' : '选择一张 JPG、PNG 或 WebP。');
   if (capabilities.enabled && state.upload && !uploadFile && !task) detail.textContent = '刷新后原始文件不在浏览器内，请重新载入照片再提交新任务。';
   $('upload-status').append(title, detail);
   if (capabilities.developmentTestMode) {
@@ -62,6 +67,10 @@ async function render() {
   const generate = state.mode === 'generate';
   const hasResult = !!result;
   const originalOnly = generate && !hasResult;
+  const regionAvailable = generate && !!recordedRegion(state.upload);
+  const cropped = regionAvailable && state.region === 'photo';
+  $('region-controls').hidden = !regionAvailable;
+  document.querySelectorAll('[data-region]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.region === (cropped ? 'photo' : 'full'))));
   const displayName = sample?.name || input?.name || '照片';
   renderedResult = null;
   $('export').disabled = true;
@@ -71,10 +80,11 @@ async function render() {
   $('source-label').textContent = generate ? '我的照片 · ' + (hasResult ? '本次结果' : '本机预览') : '样例演示 · 历史实测';
   $('image-title').textContent = generate ? input?.name || '载入你的产品照片' : `${sample.name} / ${preset.name}`;
   $('image-size').textContent = input ? `${input.width} × ${input.height} px` : '';
-  $('canvas-note').textContent = generate && !state.task?.input?.canvas ? '本机原图预览 · 等比显示' : '完整画布 · 等比显示 · 保留灰色留白';
+  $('canvas-note').textContent = cropped ? '原照片区域 · 输入与结果按同一记录裁剪 · 不修复生成伪影' : generate && !state.task?.input?.canvas ? '本机原图预览 · 等比显示' : '完整画布 · 等比显示 · 保留灰色留白';
   $('sample-warning').hidden = !sample?.unstable;
   $('sample-warning').textContent = sample?.warning || '';
-  $('export-note').textContent = originalOnly ? '尚无本次有效结果，不能下载光照结果' : '下载校验后的实际 JPEG，保留完整画布';
+  $('export').textContent = cropped ? '↓ 下载原照片区域 PNG' : '↓ 下载完整光照结果 JPEG';
+  $('export-note').textContent = originalOnly ? '尚无本次有效结果，不能下载光照结果' : cropped ? '仅去除记录中的填充区 · 无缩放 · 不修复材质错误' : '下载校验后的实际 JPEG，保留完整画布';
   $('hdr-note').textContent = `环境文件：${preset.hdr}`;
   $('compact-light-label').textContent = generate ? '目标光照' : '光照方案';
   $('compact-preset-list').innerHTML = catalog.presets.map(p => `<button class="compact-preset" data-preset="${escape(p.id)}" aria-pressed="${p.id === preset.id}" aria-label="${escape(p.name)}">${escape(p.name)}</button>`).join('');
@@ -186,7 +196,8 @@ async function loadFile(file) {
 }
 
 async function disconnectedTask() {
-  const { input, preset } = selection(state, catalog);
+  const { preset } = selection(state, catalog);
+  const input = state.upload;
   if (!input || state.mode !== 'generate' || capabilities.enabled || active()) return;
   const task = await disconnectedInference.submit(input, preset);
   if (state.mode === 'generate' && state.upload?.id === input.id && state.presetId === preset.id) dispatch({ type: 'TASK', task });
@@ -213,17 +224,30 @@ async function pollTask(taskId, version) {
   }
 }
 async function restoreTask() {
+  const related = storageGet(relatedKey);
   if (active()) return;
   const id = storageGet(savedTaskKey);
   if (!id) return;
   const version = ++uploadVersion;
+  const poll = ++pollVersion;
+  restoring = true; dispatch({ type: 'RESTORE_START' });
   try {
-    const task = await serviceInference.getTask(id);
-    if (version !== uploadVersion) return;
+    const task = await recoverTask(id, () => version === uploadVersion);
+    if (!task || version !== uploadVersion) return;
     uploadFile = null; requestId = null;
     dispatch({ type: 'RESTORE_TASK', task });
-    pollTask(id, ++pollVersion);
-  } catch (error) { dispatch({ type: 'ERROR', message: '上次任务暂时不能恢复：' + error.message }); }
+    try {
+      const history = JSON.parse(related || 'null');
+      if (history?.inputId === task.input.id && Array.isArray(history.taskIds)) {
+        for (const otherId of history.taskIds.slice(0, 3)) {
+          if (otherId === task.taskId || version !== uploadVersion) continue;
+          try { dispatch({ type: 'RELATED_TASK', task: await serviceInference.getTask(otherId) }); } catch {}
+        }
+      }
+    } catch {}
+    pollTask(id, poll);
+  } catch (error) { if (version === uploadVersion) dispatch({ type: 'ERROR', message: '上次任务暂时不能恢复：' + error.message }); }
+  finally { restoring = false; renderStatus(); }
 }
 $('restore-task').onclick = restoreTask;
 $('view-upload-original').onclick = () => {
@@ -257,25 +281,32 @@ $('cancel-task').onclick = async () => {
   catch (error) { dispatch({ type: 'ERROR', message: error.message }); }
 };
 
-$('sample-mode').onclick = () => { if (active()) return; ++uploadVersion; ++pollVersion; dispatch({ type: 'MODE', mode: 'sample' }); };
-$('generate-mode').onclick = () => { if (active()) return; ++uploadVersion; dispatch({ type: 'MODE', mode: 'generate' }); disconnectedTask(); };
+$('sample-mode').onclick = () => { if (active() || state.mode === 'sample') return; ++uploadVersion; ++pollVersion; dispatch({ type: 'MODE', mode: 'sample' }); };
+$('generate-mode').onclick = () => { if (active() || state.mode === 'generate') return; ++uploadVersion; dispatch({ type: 'MODE', mode: 'generate' }); disconnectedTask(); };
 $('sample-list').onclick = event => {
   const button = event.target.closest('[data-sample]');
   if (button && !active()) { ++uploadVersion; ++pollVersion; dispatch({ type: 'SAMPLE', id: button.dataset.sample }); }
 };
 function selectPreset(event) {
   const button = event.target.closest('[data-preset]');
-  if (button && !active()) { ++pollVersion; requestId = null; dispatch({ type: 'PRESET', id: button.dataset.preset }); disconnectedTask(); }
+  if (button && !active()) {
+    ++pollVersion; requestId = null; dispatch({ type: 'PRESET', id: button.dataset.preset });
+    if (state.task && state.task.status !== 'not_connected') {
+      storageSet(savedTaskKey, state.task.taskId);
+      pollTask(state.task.taskId, pollVersion);
+    } else disconnectedTask();
+  }
 }
 $('preset-list').onclick = $('compact-preset-list').onclick = selectPreset;
 document.querySelectorAll('[data-comparison]').forEach(button => button.onclick = () => dispatch({ type: 'COMPARE', value: button.dataset.comparison }));
+document.querySelectorAll('[data-region]').forEach(button => button.onclick = () => dispatch({ type: 'REGION', value: button.dataset.region }));
 $('zoom-in').onclick = () => zoom(.25);
 $('zoom-out').onclick = () => zoom(-.25);
 $('fit').onclick = () => dispatch({ type: 'FIT' });
 $('compare-range').oninput = event => dispatch({ type: 'VIEW', value: { split: Number(event.target.value) } });
 $('export').onclick = () => {
   const { exportUrl, result } = selection(state, catalog);
-  if (!result || result !== renderedResult || !exportUrl) return;
+  if (!result || result.url !== renderedResult?.url || result.taskId !== renderedResult?.taskId || !exportUrl) return;
   const link = document.createElement('a'); link.href = exportUrl; link.download = ''; link.click();
 };
 $('view-original').onclick = () => {
@@ -288,9 +319,16 @@ $('view-original').onclick = () => {
 };
 $('close-original').onclick = () => $('original-dialog').close();
 $('original-dialog').onclick = event => { if (event.target === $('original-dialog')) $('original-dialog').close(); };
-$('drop-zone').onclick = () => { if (!active()) $('file-input').click(); };
-$('drop-zone').onkeydown = event => { if (!active() && ['Enter', ' '].includes(event.key)) { event.preventDefault(); $('file-input').click(); } };
-$('file-input').onchange = event => { const file = event.target.files[0]; event.target.value = ''; if (file) loadFile(file); };
+function chooseFile() { if (!active()) { fileSelectionRequested = true; $('file-input').value = ''; $('file-input').click(); } }
+$('drop-zone').onclick = chooseFile;
+$('drop-zone').onkeydown = event => { if (['Enter', ' '].includes(event.key)) { event.preventDefault(); chooseFile(); } };
+$('file-input').onchange = event => {
+  const requested = fileSelectionRequested; fileSelectionRequested = false;
+  const file = event.target.files[0]; event.target.value = '';
+  // Browser form restoration is not a new user selection and must not clear a restored task.
+  if (requested && file) loadFile(file);
+};
+$('file-input').oncancel = () => { fileSelectionRequested = false; };
 document.addEventListener('dragover', event => {
   event.preventDefault(); $('drop-zone').classList.add('dragover');
 });

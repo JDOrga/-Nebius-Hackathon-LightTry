@@ -29,6 +29,7 @@ known_hosts*
 .venv/
 venv/
 __pycache__/
+.inverse-cache/
 *.pyc
 node_modules/
 build/

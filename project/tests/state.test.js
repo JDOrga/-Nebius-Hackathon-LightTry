@@ -1,9 +1,39 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createState, reduce, selection, validateFile, validateDimensions, fitSize, previewLayout } from '../web/state.js';
-import { disconnectedInference, serviceInference } from '../web/sources.js';
+import { createState, reduce, selection, recordedRegion, validateFile, validateDimensions, fitSize, previewLayout } from '../web/state.js';
+import { disconnectedInference, serviceInference, recoverTask } from '../web/sources.js';
 const catalog = JSON.parse(readFileSync(new URL('../data/catalog.json', import.meta.url), 'utf8'));
+
+test('restored success survives selecting current mode and regions share one rectangle', () => {
+  const input={id:'one',name:'cup.png',width:1280,height:704,url:'/input',canvas:{width:1280,height:704,validRegion:[442,0,838,704]}};
+  const task={taskId:'a'.repeat(32),input,preset:catalog.presets[0],status:'succeeded',result:{taskId:'a'.repeat(32),inputId:'one',presetId:'sunny',width:1280,height:704,url:'/result',downloadUrl:'/download'}};
+  let state=reduce(createState(catalog),{type:'RESTORE_TASK',task});
+  assert.equal(reduce(state,{type:'MODE',mode:'generate'}),state);
+  state=reduce(state,{type:'REGION',value:'photo'});
+  const photo=selection(state,catalog);
+  assert.deepEqual([photo.input.width,photo.input.height],[396,704]);
+  assert.deepEqual([photo.result.width,photo.result.height],[396,704]);
+  assert.match(photo.input.url,/input-region$/);assert.match(photo.result.url,/result-region$/);assert.match(photo.exportUrl,/download-region$/);
+  state=reduce(state,{type:'REGION',value:'full'});assert.equal(selection(state,catalog).exportUrl,'/download');
+  assert.equal(recordedRegion({...input,canvas:{...input.canvas,validRegion:[0,0,1281,704]}}),null);
+  assert.equal(recordedRegion({...input,canvas:null}),null);
+});
+
+test('automatic recovery retries transient reads only and drops stale replies', async () => {
+  const original=serviceInference.getTask;
+  const delays=[];let calls=0,current=true;
+  const task={taskId:'a'.repeat(32),status:'succeeded'};
+  try {
+    serviceInference.getTask=async()=>{calls++;if(calls<3)throw new Error('temporary read');return task;};
+    assert.equal(await recoverTask(task.taskId,()=>current,async ms=>delays.push(ms)),task);
+    assert.equal(calls,3);assert.deepEqual(delays,[1000,2000]);
+    calls=0;serviceInference.getTask=async()=>{calls++;const e=new Error('missing');e.code='TASK_NOT_FOUND';throw e;};
+    await assert.rejects(recoverTask(task.taskId,()=>current,async()=>{}),/missing/);assert.equal(calls,1);
+    serviceInference.getTask=async()=>{current=false;return task;};
+    assert.equal(await recoverTask(task.taskId,()=>current,async()=>{}),null);
+  } finally {serviceInference.getTask=original;}
+});
 
 test('only matching current task success exposes a real download and expires cleanly', () => {
   const input = {id:'new-input',name:'new.png',kind:'upload',width:1280,height:704,url:'/input'};
@@ -90,6 +120,61 @@ test('new upload cannot inherit sample results, even after selecting a preset', 
   assert.equal(selection(state, catalog).sample, null);
   assert.equal(selection(state, catalog).result, null);
   assert.equal(selection(state, catalog).exportUrl, null);
+});
+
+test('same photo remembers generated presets without relabeling a result or submitting', () => {
+  const input = { id: 'same-photo', width: 1280, height: 704, url: '/input' };
+  const makeTask = (preset, taskId) => ({ taskId, input, preset, status: 'succeeded', expiresAt: Date.now() / 1000 + 60,
+    result: { taskId, inputId: input.id, presetId: preset.id, url: '/' + preset.id, downloadUrl: '/download/' + preset.id } });
+  const sunny = makeTask(catalog.presets[0], 'sunny-task'), sunrise = makeTask(catalog.presets[1], 'sunrise-task');
+  let state = reduce(createState(catalog), { type: 'RESTORE_TASK', task: sunny });
+  state = reduce(state, { type: 'PRESET', id: 'sunrise' });
+  assert.equal(selection(state, catalog).result, null);
+  assert.equal(selection(state, catalog).exportUrl, null);
+  state = reduce(state, { type: 'TASK', task: sunrise });
+  state = reduce(state, { type: 'PRESET', id: 'sunny' });
+  assert.equal(selection(state, catalog).result.taskId, sunny.taskId);
+  assert.equal(selection(state, catalog).exportUrl, '/download/sunny');
+  state = reduce(state, { type: 'PRESET', id: 'street' });
+  assert.equal(selection(state, catalog).result, null);
+  // Refresh restoration can collect only same-input tasks, through read-only GETs.
+  state = reduce(createState(catalog), { type: 'RESTORE_TASK', task: sunrise });
+  state = reduce(state, { type: 'RELATED_TASK', task: sunny });
+  state = reduce(state, { type: 'RELATED_TASK', task: { ...sunny, input: { ...input, id: 'different-photo' } } });
+  state = reduce(state, { type: 'PRESET', id: 'sunny' });
+  assert.equal(selection(state, catalog).result.taskId, sunny.taskId);
+  state = reduce(state, { type: 'UPLOAD', input: { ...input, id: 'new-photo' } });
+  assert.equal(selection(state, catalog).result, null);
+  assert.deepEqual(state.tasks, {});
+});
+
+test('expired remembered preset and failed preset never expose prior downloads', () => {
+  const input = { id: 'own', width: 1280, height: 704 };
+  const task = { taskId: 'own-task', input, preset: catalog.presets[0], status: 'succeeded', expiresAt: 1,
+    result: { taskId: 'own-task', inputId: 'own', presetId: 'sunny', url: '/result', downloadUrl: '/download' } };
+  let state = reduce(createState(catalog), { type: 'RESTORE_TASK', task });
+  assert.equal(selection(state, catalog).result, null);
+  state = reduce(state, { type: 'TASK', task: { ...task, status: 'failed', result: null } });
+  state = reduce(state, { type: 'PRESET', id: 'sunrise' });
+  state = reduce(state, { type: 'PRESET', id: 'sunny' });
+  assert.equal(selection(state, catalog).exportUrl, null);
+});
+
+test('ungenerated disconnected preset crops only the previous real input, never local task ID', () => {
+  const id = 'a'.repeat(32);
+  const input = { id:'cup',width:1280,height:704,url:`/api/tasks/${id}/input`,
+    canvas:{width:1280,height:704,validRegion:[442,0,838,704]} };
+  const task = {taskId:id,input,preset:catalog.presets[0],status:'succeeded',
+    result:{taskId:id,inputId:'cup',presetId:'sunny',url:`/api/tasks/${id}/result`}};
+  let state = reduce(createState(catalog),{type:'RESTORE_TASK',task});
+  state = reduce(state,{type:'REGION',value:'photo'});
+  state = reduce(state,{type:'PRESET',id:'sunrise'});
+  assert.equal(selection(state,catalog).input.url,`/api/tasks/${id}/input-region`);
+  state = reduce(state,{type:'TASK',task:{taskId:'local-uuid',input,preset:catalog.presets[1],status:'not_connected',result:null}});
+  assert.equal(selection(state,catalog).input.url,`/api/tasks/${id}/input-region`);
+  assert.equal(selection(state,catalog).input.width,396);
+  assert.equal(selection(state,catalog).result,null);
+  assert.equal(selection(state,catalog).exportUrl,null);
 });
 test('disconnected adapter produces a real local task identity without result or progress', async () => {
   const task = await disconnectedInference.submit({ id: 'upload' }, catalog.presets[0]);

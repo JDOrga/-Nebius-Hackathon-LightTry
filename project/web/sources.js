@@ -53,6 +53,19 @@ export const serviceInference = {
     }));
   },
 };
+export async function recoverTask(taskId, isCurrent = () => true, delay = ms => new Promise(resolve => setTimeout(resolve, ms))) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (!isCurrent()) return null;
+    try {
+      const task = await serviceInference.getTask(taskId);
+      return isCurrent() ? task : null;
+    } catch (error) {
+      if (!isCurrent()) return null;
+      if (attempt === 2 || ['TASK_NOT_FOUND', 'RESULT_EXPIRED'].includes(error.code)) throw error;
+      await delay(1000 * (attempt + 1));
+    }
+  }
+}
 export async function decodeUpload(file) {
   const url = URL.createObjectURL(file);
   try {

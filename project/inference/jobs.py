@@ -8,7 +8,7 @@ import time
 import uuid
 from pathlib import Path
 
-from .images import InputError, decode, digest, prepare, MAX_BYTES
+from .images import InputError, decode, digest, prepare, MAX_BYTES, crop_photo_region
 
 ID = re.compile(r'^[0-9a-f]{32}$')
 ACTIVE = {'queued', 'running'}
@@ -16,7 +16,8 @@ STAGES = {'preflight', 'weights', 'inverse', 'forward', 'validating', 'transferr
 RUN_CONFIG = {'model': 'Cosmos Diffusion Renderer',
     'upstreamCommit': '0f3e2dc435032ecbad654c2fc2153df85384b138',
     'width': 1280, 'height': 704, 'frames': 1, 'steps': 15, 'seed': 1000,
-    'guidance': 0.0, 'offload': False, 'execution': 'separate inverse then forward processes'}
+    'guidance': 0.0, 'offload': False,
+    'execution': 'bounded inverse process then one forward session; validated inverse may be reused'}
 
 
 class JobError(Exception):
@@ -155,7 +156,23 @@ class TaskStore:
             'originalSha256': task['original']['sha256'], 'runConfig': task['runConfig']}
         if any(receipt.get(k) != value for k, value in expected.items()):
             raise ValueError('RESULT_IDENTITY_MISMATCH')
-        if receipt.get('file') != 'result.jpg' or receipt.get('processExitCodes') != [0, 0]:
+        exits = receipt.get('processExitCodes')
+        if exits == [0, 0] and receipt.get('inverseReuse', {}).get('reused') is True:
+            raise ValueError('REUSED_INVERSE_HAS_FICTIONAL_PROCESS_EXIT')
+        if exits == [None, 0]:
+            from .reuse import identity, validate
+            workspace = Path(__file__).resolve().parents[2]
+            request = read(folder / 'request.json')
+            value = identity(request, (folder / 'inputs/photo.png').read_bytes(),
+                read(workspace / 'manifests/weights_manifest.json'), read(workspace / 'manifests/patch_manifest.json'))
+            provenance = validate(folder / 'remote-evidence/inverse', value)
+            reuse = receipt.get('inverseReuse', {})
+            if (reuse.get('reused') is not True or reuse.get('source') != provenance['source'] or
+                    reuse.get('key') != provenance['key'] or provenance['source']['taskId'] == task['taskId']):
+                raise ValueError('REUSED_INVERSE_PROVENANCE_MISMATCH')
+        elif exits != [0, 0]:
+            raise ValueError('RESULT_NOT_FROM_COMPLETED_EXECUTION')
+        if receipt.get('file') != 'result.jpg':
             raise ValueError('RESULT_NOT_FROM_COMPLETED_EXECUTION')
         result_path = folder / 'result.jpg'
         if result_path.is_symlink() or result_path.resolve().parent != folder or not result_path.is_file():
@@ -171,10 +188,14 @@ class TaskStore:
         from PIL import ImageStat
         if max(ImageStat.Stat(rgb).stddev) < 0.5:
             raise ValueError('RESULT_EFFECTIVELY_CONSTANT')
-        return {'url': f"/api/tasks/{task['taskId']}/result", 'downloadUrl': f"/api/tasks/{task['taskId']}/download",
+        result = {'url': f"/api/tasks/{task['taskId']}/result", 'downloadUrl': f"/api/tasks/{task['taskId']}/download",
             'width': 1280, 'height': 704, 'taskId': task['taskId'], 'inputId': task['input']['id'],
             'presetId': task['preset']['id'], 'sha256': meta['sha256'], 'bytes': meta['bytes'],
             'validation': 'current task identity, successful process exits, JPEG decode, size and SHA256; visual review pending'}
+        if 'inverseReuse' in receipt:
+            result['inverseReuse'] = {'reused': receipt['inverseReuse']['reused'],
+                'sourceTaskId': receipt['inverseReuse']['source']['taskId'], 'key': receipt['inverseReuse']['key']}
+        return result
 
     def _refresh(self, folder):
         task = read(folder / 'task.json')
@@ -259,10 +280,12 @@ class TaskStore:
         with self.mutex:
             folder = self.directory(task_id)
             task = self._refresh(folder)
+            region = kind in ('input-region', 'result-region', 'download-region')
+            source_kind = {'input-region': 'input', 'result-region': 'result', 'download-region': 'download'}.get(kind, kind)
             allowed = {'input': 'inputs/photo.png', 'original': 'original', 'result': 'result.jpg', 'download': 'result.jpg'}
-            if kind not in allowed:
+            if source_kind not in allowed:
                 raise JobError('FILE_NOT_FOUND', '文件不在允许范围内。', 404)
-            if kind in ('result', 'download'):
+            if source_kind in ('result', 'download'):
                 if task['status'] != 'succeeded':
                     raise JobError('RESULT_UNAVAILABLE', '本次任务没有可用且未过期的结果。', 410 if task['status'] == 'expired' else 409)
                 try:
@@ -271,14 +294,21 @@ class TaskStore:
                     task.update(status='failed', result=None, error={'code': 'RESULT_INVALID', 'message': '结果文件校验失败。'})
                     atomic(folder / 'task.json', task)
                     raise JobError('RESULT_INVALID', '结果文件校验失败。', 409)
-            path = folder / allowed[kind]
+            path = folder / allowed[source_kind]
             if path.is_symlink() or not path.resolve().is_relative_to(folder) or not path.is_file():
                 raise JobError('FILE_NOT_FOUND', '文件不在允许范围内。', 404)
-            mime = task['original']['mime'] if kind == 'original' else 'image/png' if kind == 'input' else 'image/jpeg'
-            filename = f"LightTry_{task_id}_{task['preset']['id']}.jpg" if kind == 'download' else None
+            mime = task['original']['mime'] if source_kind == 'original' else 'image/png' if source_kind == 'input' else 'image/jpeg'
+            filename = f"LightTry_{task_id}_{task['preset']['id']}.jpg" if source_kind == 'download' else None
             if path.stat().st_size > MAX_BYTES:
                 raise JobError('FILE_INVALID', '任务文件大小校验失败。', 409)
             payload = path.read_bytes()
-            if kind in ('input', 'original') and digest(payload) != (task['input'] if kind == 'input' else task['original'])['sha256']:
+            if source_kind in ('input', 'original') and digest(payload) != (task['input'] if source_kind == 'input' else task['original'])['sha256']:
                 raise JobError('FILE_INVALID', '任务输入文件身份校验失败。', 409)
+            if region:
+                try:
+                    payload = crop_photo_region(payload, task['input'].get('canvas'))
+                except (InputError, OSError, ImportError) as error:
+                    raise JobError('REGION_UNAVAILABLE', '原照片区域记录或图片不可用，不能裁剪导出。', 409) from error
+                mime = 'image/png'
+                filename = f"LightTry_{task_id}_{task['preset']['id']}_photo-region.png" if kind == 'download-region' else None
             return payload, mime, filename

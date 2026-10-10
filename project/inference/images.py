@@ -5,12 +5,43 @@ import warnings
 from pathlib import Path
 
 MAX_BYTES = 20 * 1024**2
+PREPROCESS_VERSION = 'exif-srgb-lanczos-centered-gray-v1'
 MAX_PIXELS = 40_000_000
 FORMATS = {'JPEG': 'image/jpeg', 'PNG': 'image/png', 'WEBP': 'image/webp'}
 
 
 class InputError(ValueError):
     pass
+
+
+def photo_region(canvas):
+    """Use only the recorded half-open rectangle; never infer it from pixels."""
+    if not isinstance(canvas, dict):
+        raise InputError('缺少预处理区域记录。')
+    width, height = canvas.get('width'), canvas.get('height')
+    box = canvas.get('validRegion')
+    if (type(width) is not int or type(height) is not int or width <= 0 or height <= 0 or
+            not isinstance(box, list) or len(box) != 4 or any(type(v) is not int for v in box)):
+        raise InputError('预处理区域记录无效。')
+    left, top, right, bottom = box
+    if not (0 <= left < right <= width and 0 <= top < bottom <= height):
+        raise InputError('预处理区域超出画布。')
+    return tuple(box)
+
+
+def crop_photo_region(payload, canvas):
+    import io
+    from PIL import Image
+    box = photo_region(canvas)
+    with Image.open(io.BytesIO(payload)) as image:
+        image.load()
+        if image.size != (canvas['width'], canvas['height']):
+            raise InputError('图片尺寸与预处理记录不一致。')
+        cropped = image.crop(box)
+        output = io.BytesIO()
+        # Lossless derivative: retain exactly the decoded pixels, with no resize.
+        cropped.save(output, format='PNG', icc_profile=image.info.get('icc_profile'))
+        return output.getvalue()
 
 
 def digest(data):
@@ -71,6 +102,7 @@ def prepare(data, target):
     payload = buffer.getvalue()
     Path(target).write_bytes(payload)
     return {'width': 1280, 'height': 704, 'sha256': digest(payload), 'bytes': len(payload),
+        'preprocessingVersion': PREPROCESS_VERSION, 'rgbSha256': digest(canvas.tobytes()),
         'validRegion': [x, y, x + nw, y + nh], 'paddingRGB': [127, 127, 127],
         'colorHandling': 'embedded ICC to sRGB, relative colorimetric' if profile else 'decoded RGB assumed sRGB',
         'orientationHandling': 'EXIF transpose', 'scaleXY': [nw / w, nh / h],

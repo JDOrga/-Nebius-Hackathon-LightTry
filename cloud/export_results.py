@@ -9,7 +9,7 @@ import tarfile
 def main(q):
     root=Path(q['root']).resolve();base=Path(q['data_root']).resolve()
     if not base.is_relative_to('/home/jovyan') or not root.is_relative_to(base):raise ValueError('RESULT_ROOT_OUTSIDE_DATA_ROOT')
-    paths=[p for p in root.rglob('*') if p.is_file() and p.suffix.lower() in ('.jpg','.png','.json','.log')]
+    paths=[p for p in root.rglob('*') if p.is_file() and p.suffix.lower() in ('.jpg','.png','.json','.jsonl','.log')]
     if sum(p.stat().st_size for p in paths)>512*1024**2:raise ValueError('RESULT_EXPORT_TOO_LARGE')
     with gzip.GzipFile(fileobj=sys.stdout.buffer,mode='wb',compresslevel=1) as z,tarfile.open(fileobj=z,mode='w|') as t:
         for p in sorted(paths):

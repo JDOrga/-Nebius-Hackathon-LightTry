@@ -73,4 +73,6 @@ worker 固定上游 commit 与独立 HDR patch，检查既有环境，inverse �
 
 ## 样例目录
 
+2026-10-09 同图复用扩展：完整规则及离线测试见 [REUSE_PREPARATION.md](REUSE_PREPARATION.md)。PNG 预处理记录增加 preprocessingVersion 与 RGB 像素哈希，复用仍先核对本次编码哈希。Result 可选 inverseReuse `{reused,sourceTaskId,key}`；真实复用 receipt 的 processExitCodes 为 `[null,0]`，必须同时校验历史来源和五通道原子完成记录。单任务 HTTP 提交契约不变，浏览器不提供自动多预设生成。受守护 worker 支持显式 presets 列表（1–3 项），各项状态和产物独立，部分失败保留阶段证据。默认生产仍不连接推理。
+
 catalog 的素材 allowlist 与样例下载路径不变。默认 demo-assets 是独立离线包，不读 controlled-tests 或其他历史目录；启动逐文件校验 20 张图片和来源记录。样例只代表对应历史任务，不能成为用户照片的结果。

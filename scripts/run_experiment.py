@@ -63,12 +63,16 @@ def validate_recovery(prior, current):
         raise ValueError('Forward recovery inputs or settings differ from prior inverse run')
 
 
-def run_bounded(command, repo, logfile, env, deadline):
+def run_bounded(command, repo, logfile, env, deadline, *, timing=None):
     check_time(deadline)
     kwargs = {"start_new_session": True} if os.name != "nt" else {}
     with logfile.open("w", encoding="utf-8") as output:
+        if timing:
+            timing.emit('process_spawn_start', log=logfile.name)
         process = subprocess.Popen(command, cwd=repo, env=env, stdout=output,
                                    stderr=subprocess.STDOUT, **kwargs)
+        if timing:
+            timing.emit('process_spawn_return', childPid=process.pid, log=logfile.name)
         try:
             process.wait(timeout=max(0.1, deadline - time.time()))
         except BaseException:
@@ -85,7 +89,11 @@ def run_bounded(command, repo, logfile, env, deadline):
                     process.kill()
             raise
     if process.returncode:
+        if timing:
+            timing.emit('process_exit', childPid=process.pid, exitCode=process.returncode)
         raise RuntimeError(f"Inference exited {process.returncode}; inspect {logfile}")
+    if timing:
+        timing.emit('process_exit', childPid=process.pid, exitCode=process.returncode)
 
 
 def commands(args):

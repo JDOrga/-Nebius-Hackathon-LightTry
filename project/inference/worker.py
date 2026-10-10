@@ -10,6 +10,7 @@ import sys
 import time
 
 PREP = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PREP / 'project'))
 sys.path.insert(0, str(PREP / 'scripts'))
 from run_experiment import commands, run_bounded
 from weights import parse_deadline, check_time, verify
@@ -52,8 +53,13 @@ def main():
     parser.add_argument('--request', type=Path, required=True)
     parser.add_argument('--runtime', type=Path, required=True)
     parser.add_argument('--receipt', type=Path, required=True)
+    parser.add_argument('--resume', action='store_true', help='Explicit same-request recovery, under current fixed guard window')
     args = parser.parse_args()
     job = json.loads(args.request.read_text())
+    from inference.jobs import RUN_CONFIG
+    if any(job['runConfig'].get(k) != RUN_CONFIG[k] for k in
+           ('upstreamCommit', 'width', 'height', 'frames', 'steps', 'seed', 'guidance', 'offload')):
+        raise ValueError('FIXED_MODEL_CONFIGURATION_REQUIRED')
     runtime = json.loads(args.runtime.read_text())
     budget = json.loads(args.receipt.read_text())
     deadline = parse_deadline(runtime['deadline_utc'])
@@ -69,7 +75,16 @@ def main():
         if not path.resolve().is_relative_to('/home/jovyan'):
             raise ValueError('PERSISTENT_LOCAL_PATH_REQUIRED')
     run = PREP / 'run'
-    run.mkdir()  # exclusive; never accept an old output directory
+    if args.resume:
+        prior_event = json.loads((run / 'execution.json').read_text())
+        prior_config = json.loads((run / 'configuration.json').read_text())
+        if (prior_event.get('status') != 'failed' or prior_event.get('executionStopped') is not True or prior_config['request'] != job or
+                prior_event.get('taskId') != job['taskId'] or prior_event.get('nonce') != job['nonce']):
+            raise ValueError('CONFIRMED_SAME_REQUEST_RESUME_REQUIRED')
+    else:
+        run.mkdir()  # exclusive; never accept an old output directory
+    from inference.timing import Timeline
+    timer = Timeline(run / 'worker-timing.jsonl', 'worker')
     event = {'taskId': job['taskId'], 'nonce': job['nonce'], 'status': 'running', 'executionStopped': False}
     def emit(stage, status='running', stopped=False):
         event.update(stage=stage, status=status, executionStopped=stopped, observedAt=time.time())
@@ -94,9 +109,16 @@ def main():
                                       capture_output=True, check=True, timeout=10).stdout
             if sha(repo / rel) != hashlib.sha256(original).hexdigest():
                 raise ValueError('MODEL_ENTRY_MODIFIED')
-        hdr = repo / 'asset/examples/hdri_examples' / job['preset']['hdr']
-        if hdr.parent.resolve() != (repo / 'asset/examples/hdri_examples').resolve() or sha(hdr) != job['preset']['sha256']:
-            raise ValueError('HDR_IDENTITY_MISMATCH')
+        hdr_names = ('sunny_vondelpark_2k.hdr', 'pink_sunrise_2k.hdr', 'street_lamp_2k.hdr')
+        presets = job.get('presets', [job['preset']])
+        if not presets or len(presets) > 3 or job['preset'] not in presets or len({p['index'] for p in presets}) != len(presets):
+            raise ValueError('INVALID_BATCH_SELECTION')
+        for preset in presets:
+            if preset['index'] not in (0, 1, 2) or preset['hdr'] != hdr_names[preset['index']]:
+                raise ValueError('HDR_INDEX_MISMATCH')
+            hdr = repo / 'asset/examples/hdri_examples' / preset['hdr']
+            if hdr.is_symlink() or hdr.parent.resolve() != (repo / 'asset/examples/hdri_examples').resolve() or sha(hdr) != preset['sha256']:
+                raise ValueError('HDR_IDENTITY_MISMATCH')
         input_image = PREP / 'inputs/photo.png'
         if sha(input_image) != job['input']['sha256']:
             raise ValueError('INPUT_IDENTITY_MISMATCH')
@@ -126,16 +148,20 @@ def main():
         command_args = argparse.Namespace(checkpoint_dir=checkpoints, input_dir=PREP / 'inputs',
             run_dir=run, height=704, width=1280, offload=False)
         inverse, forward = one_preset_commands(command_args, job['preset']['index'])
-        atomic(run / 'configuration.json', {'request': job, 'runtime': runtime,
-            'inverseArgv': inverse, 'forwardArgv': forward, 'weightContentHashesChecked': mode == 'full'})
-        emit('inverse')
-        run_bounded(inverse, repo, run / 'inverse.log', env, deadline)
+        configuration = {'request': job, 'runtime': runtime,
+            'inverseArgv': inverse, 'forwardArgv': forward, 'weightContentHashesChecked': mode == 'full'}
+        if not (run / 'configuration.json').exists():
+            atomic(run / 'configuration.json', configuration)
+        from inference.batch import execute
+        provenance = execute(job, input_image, run, manifest, patch, inverse, forward,
+            lambda argv, logfile: run_bounded(argv, repo, logfile, env, deadline, timing=timer),
+            inverse_source=PREP / 'reuse-inverse' if (PREP / 'reuse-inverse').exists() else None, emit=emit)
         channels = validate_inverse(run / 'inverse', 704, 1280)
         atomic(run / 'inverse_acceptance.json', channels)
-        emit('forward')  # inverse process has exited; both 7Bs never coexist
-        run_bounded(forward, repo, run / 'forward.log', env, deadline)
         emit('validating')
-        output_dir = run / 'forward' / f"relit_frames_{job['preset']['index']:04d}"
+        preset_root = run / 'presets' / str(job['preset']['index'])
+        completed = json.loads((preset_root / 'complete.json').read_text())
+        output_dir = preset_root / completed['attempt'] / f"relit_frames_{job['preset']['index']:04d}"
         paths = list(output_dir.rglob('*.jpg'))
         if len(paths) != 1 or paths[0].is_symlink() or not paths[0].resolve().is_relative_to(run):
             raise ValueError('UNIQUE_CURRENT_OUTPUT_REQUIRED')
@@ -146,7 +172,10 @@ def main():
             'presetId': job['preset']['id'], 'inputSha256': job['input']['sha256'],
             'originalSha256': job['original']['sha256'], 'runConfig': job['runConfig'],
             'file': 'result.jpg', 'sha256': records[0]['sha256'], 'bytes': records[0]['size'],
-            'processExitCodes': [0, 0], 'finishedAt': time.time(), 'outputValidation': records,
+            'processExitCodes': [None if provenance['source']['taskId'] != job['taskId'] else 0, 0],
+            'finishedAt': time.time(), 'outputValidation': records,
+            'inverseReuse': {'source': provenance['source'], 'key': provenance['key'],
+                             'reused': provenance['source']['taskId'] != job['taskId']},
             'gBuffers': [dict(record, channel=label,
                 relativePath=Path(record['path']).relative_to(run).as_posix())
                 for label, record in zip(('basecolor', 'normal', 'depth', 'roughness', 'metallic'), channels)],

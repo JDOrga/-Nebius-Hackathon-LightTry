@@ -22,7 +22,10 @@ BUNDLE_FILES = ['scripts/run_experiment.py', 'scripts/weights.py', 'scripts/vali
     'scripts/preflight.py', 'scripts/apply_hdr_patch.py', 'prototype/env_sampling.py',
     'patches/replace_hdr_sampling.patch', 'manifests/patch_manifest.json',
     'manifests/weights_manifest.json', 'manifests/upstream.json', 'third_party/Cosmos-LICENSE',
-    'project/inference/worker.py', 'project/inference/weights_reuse.py']
+    'project/inference/worker.py', 'project/inference/weights_reuse.py',
+    'project/inference/jobs.py', 'project/inference/images.py', 'project/inference/__init__.py',
+    'project/inference/reuse.py', 'project/inference/batch.py',
+    'project/inference/timing.py', 'project/inference/measured_entry.py']
 
 
 def authorization(config_path):
@@ -61,6 +64,25 @@ def build_bundle(job, run, config=None):
         raise FileExistsError('ONE_TASK_PER_AUTHORIZED_RUN_PRESERVE_EXISTING_BUNDLE')
     entries = []
     references = {}
+    from inference.reuse import identity, key, validate, safe_file
+    value = identity(request, payload, read(ROOT / 'manifests/weights_manifest.json'),
+                     read(ROOT / 'manifests/patch_manifest.json'))
+    cached = ROOT / 'project/.inverse-cache' / key(value)
+    reusable = None
+    if (config or {}).get('reuse_inverse', True) and cached.exists():
+        try:
+            reusable = validate(cached, value)
+        except (OSError, ValueError, KeyError):
+            reusable = None
+        if reusable:
+            references['reuse-inverse/inverse-complete.json'] = (cached / 'inverse-complete.json').read_bytes()
+            for item in reusable['artifacts']:
+                references['reuse-inverse/gbuffer_frames/' + item['path']] = safe_file(
+                    cached / 'gbuffer_frames', item['path']).read_bytes()
+    requirement = request.get('requiredInverseReuse')
+    if requirement is not None and (requirement.get('key') != key(value) or reusable is None or
+            reusable['source'] != requirement.get('source')):
+        raise ValueError('REQUIRED_INVERSE_REUSE_UNAVAILABLE_NO_COLD_FALLBACK')
     mode = (config or {}).get('weights_mode', 'full')
     if mode != request['runConfig'].get('weightVerification', 'full'):
         raise ValueError('WEIGHT_POLICY_CHANGED_RESTART_LOCAL_SERVER')
@@ -99,11 +121,68 @@ def build_bundle(job, run, config=None):
                                'sha256': digest(archive.read_bytes())})
 
 
+def bind_prepared_bundle(job, run, config):
+    """Bind a locally frozen reviewed package to a NEW approved run; no rebuild."""
+    import shutil
+    from inference.reuse import identity, key, validate, safe_file
+    from inference.weights_reuse import validate_reference
+    source = Path(config['prepared_bundle_directory']).resolve()
+    if not source.is_relative_to(ROOT / '.local'):
+        raise ValueError('LOCAL_PREPARED_PACKAGE_REQUIRED')
+    archive = safe_file(source, 'inference-code.tar.gz')
+    fingerprint = digest(archive.read_bytes())
+    if fingerprint != read(safe_file(source, 'bundle.json'))['sha256']:
+        raise ValueError('PREPARED_BUNDLE_HASH_MISMATCH')
+    request = read(job / 'request.json')
+    minimal = dict(request)
+    minimal['input'] = {k: v for k, v in request['input'].items() if k not in ('name', 'url', 'originalUrl')}
+    with tarfile.open(archive, 'r:gz') as tar:
+        members = tar.getmembers()
+        if (len({m.name for m in members}) != len(members) or sum(m.size for m in members) > 100 * 1024**2 or
+                any(not m.isfile() or PurePosixPath(m.name).is_absolute() or '..' in PurePosixPath(m.name).parts or
+                    ':' in m.name or '\\' in m.name for m in members)):
+            raise ValueError('UNSAFE_PREPARED_BUNDLE')
+        files = {m.name: tar.extractfile(m).read() for m in members}
+    listing = json.loads(files['bundle_contents.json'])['files']
+    if set(files) != {e['path'] for e in listing} | {'bundle_contents.json'} or any(
+            digest(files[e['path']]) != e['sha256'] for e in listing):
+        raise ValueError('PREPARED_CONTENTS_MISMATCH')
+    if json.loads(files['request.json']) != minimal or files['inputs/photo.png'] != (job / 'inputs/photo.png').read_bytes():
+        raise ValueError('PREPARED_TASK_INPUT_MISMATCH')
+    for name in BUNDLE_FILES:
+        if files.get(name) != (ROOT / name).read_bytes():
+            raise ValueError('PREPARED_CODE_CHANGED_REPREPARE_BEFORE_START')
+    paths = [Path(config[k]).resolve() for k in ('historical_weights_manifest', 'historical_weights_receipt', 'historical_weights_reference')]
+    validate_reference(ROOT / 'manifests/weights_manifest.json', *paths)
+    reference = read(paths[2])
+    reference = {k: reference[k] for k in ('weights_manifest_sha256', 'receipt_sha256', 'historical_run_id')}
+    if (config.get('weights_mode') != 'historical_metadata' or files['weight-reference/manifest.json'] != paths[0].read_bytes() or
+            files['weight-reference/receipt.json'] != paths[1].read_bytes() or json.loads(files['weight-reference/reference.json']) != reference):
+        raise ValueError('PREPARED_WEIGHT_POLICY_MISMATCH')
+    value = identity(request, files['inputs/photo.png'], read(ROOT / 'manifests/weights_manifest.json'), read(ROOT / 'manifests/patch_manifest.json'))
+    cached = ROOT / 'project/.inverse-cache' / key(value)
+    record = validate(cached, value)
+    requirement = request['requiredInverseReuse']
+    if requirement != {'key': key(value), 'source': record['source']} or json.loads(files['reuse-inverse/inverse-complete.json']) != record:
+        raise ValueError('PREPARED_REUSE_SOURCE_MISMATCH')
+    for item in record['artifacts']:
+        if digest(files['reuse-inverse/gbuffer_frames/' + item['path']]) != item['sha256']:
+            raise ValueError('PREPARED_GBUFFER_HASH_MISMATCH')
+    target = run / 'inference-code.tar.gz'
+    if target.exists() or (run / 'bundle.json').exists():
+        raise FileExistsError('PRESERVE_CURRENT_RUN_BUNDLE')
+    with archive.open('rb') as src, target.open('xb') as dst:
+        shutil.copyfileobj(src, dst)
+    atomic(run / 'bundle.json', {'archive': target.name, 'archive_path': str(target), 'sha256': fingerprint})
+
+
 def extract_result(archive, destination, *, require_gbuffers=False):
     # Never extract arbitrary paths or intermediate historical files. Fixed names only.
     expected = {'result.jpg', 'receipt.json', 'execution.json'}
     audit = {'configuration.json', 'weights_verification.json', 'inverse_acceptance.json',
-             'preflight.json', 'inverse.log', 'forward.log', 'preflight.log'}
+             'preflight.json', 'inverse.log', 'forward.log', 'preflight.log',
+             'inverse/inverse-complete.json', 'inverse-timing.jsonl', 'forward-timing.jsonl',
+             'orchestration-timing.jsonl', 'worker-timing.jsonl'}
     with tarfile.open(archive, 'r:gz') as tar:
         files = {}
         total = 0
@@ -136,6 +215,9 @@ def extract_result(archive, destination, *, require_gbuffers=False):
             if name in expected:
                 continue
             target = evidence.joinpath(*PurePosixPath(name).parts)
+            if (any(p.is_symlink() or getattr(p, 'is_junction', lambda: False)() for p in (target, *target.parents)) or
+                    not target.resolve().is_relative_to(destination.resolve())):
+                raise ValueError('UNSAFE_LOCAL_EVIDENCE_PATH')
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.exists():
                 if target.is_symlink() or target.read_bytes() != data:
@@ -165,7 +247,84 @@ def extract_result(archive, destination, *, require_gbuffers=False):
         return json.loads(files['execution.json'])
 
 
+def extract_stage_evidence(archive, destination, request):
+    """Retain completed stages even when a later forward failed. Never publish a result."""
+    from inference.reuse import identity, key, validate, copy_completed
+    fixed = {'configuration.json', 'weights_verification.json', 'inverse_acceptance.json',
+             'inverse/inverse-complete.json', 'preflight.json', 'preflight.log', 'inverse.log',
+             'inverse-timing.jsonl', 'forward-timing.jsonl', 'orchestration-timing.jsonl',
+             'presets/identities.json', 'worker-timing.jsonl'}
+    files = {}
+    total = 0
+    with tarfile.open(archive, 'r:gz') as tar:
+        for member in tar:
+            name = member.name; path = PurePosixPath(name); parts = path.parts
+            total += member.size
+            if (not member.isfile() or path.is_absolute() or '..' in parts or ':' in name or
+                    '\\' in name or total > 512 * 1024**2):
+                raise ValueError('UNSAFE_STAGE_ARCHIVE')
+            gbuffer = parts[:2] == ('inverse', 'gbuffer_frames') and name.endswith(tuple(
+                '.' + label + '.jpg' for label in ('basecolor', 'normal', 'depth', 'roughness', 'metallic')))
+            preset_state = len(parts) == 3 and parts[0] == 'presets' and parts[1] in ('0', '1', '2') and parts[2] in ('state.json', 'complete.json')
+            preset_frame = (len(parts) >= 5 and parts[0] == 'presets' and parts[1] in ('0', '1', '2') and
+                len(parts[2]) == 32 and all(c in '0123456789abcdef' for c in parts[2]) and
+                parts[3] == f'relit_frames_{int(parts[1]):04d}' and name.endswith('.jpg'))
+            timing_log = len(parts) == 1 and name.startswith('forward-') and name.endswith('.log')
+            if name in fixed or name == 'execution.json' or gbuffer or preset_state or preset_frame or timing_log:
+                if name in files or member.size > MAX_BYTES:
+                    raise ValueError('INVALID_STAGE_MEMBER')
+                files[name] = tar.extractfile(member).read()
+    event = json.loads(files['execution.json'])
+    if ((event.get('taskId'), event.get('nonce')) != (request['taskId'], request['nonce']) or
+            event.get('status') not in ('failed', 'succeeded') or event.get('executionStopped') is not True):
+        raise ValueError('STAGE_EXECUTION_IDENTITY_MISMATCH')
+    evidence = destination / 'remote-evidence'
+    for name, data in files.items():
+        if name == 'execution.json':
+            continue  # driver owns the local executor event
+        target = evidence.joinpath(*PurePosixPath(name).parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if any(p.is_symlink() for p in (target, *target.parents)) or not target.resolve().is_relative_to(destination.resolve()):
+            raise ValueError('UNSAFE_LOCAL_EVIDENCE_PATH')
+        if target.exists():
+            if target.read_bytes() != data:
+                raise ValueError('EXISTING_STAGE_EVIDENCE_DIFFERS')
+        else:
+            with target.open('xb') as stream:
+                stream.write(data)
+    source = evidence / 'inverse'
+    if (source / 'inverse-complete.json').exists():
+        value = identity(request, (destination / 'inputs/photo.png').read_bytes(),
+                         read(ROOT / 'manifests/weights_manifest.json'), read(ROOT / 'manifests/patch_manifest.json'))
+        record = validate(source, value)
+        target = ROOT / 'project/.inverse-cache' / key(value)
+        target.parent.mkdir(exist_ok=True)
+        if record['source']['taskId'] == request['taskId']:
+            if record['source']['nonce'] != request['nonce']:
+                raise ValueError('INVERSE_SOURCE_NONCE_MISMATCH')
+        elif not target.exists() or validate(target, value) != record:
+            raise ValueError('UNKNOWN_REUSED_INVERSE_SOURCE')
+        if target.exists():
+            try:
+                validate(target, value)
+            except (OSError, ValueError, KeyError):
+                pass  # reject an old broken cache; preserve it, do not overwrite history
+        else:
+            copy_completed(source, target, value)
+        return record
+    return None
+
+
 def run_driver(job, config_path):
+    from inference.timing import Timeline
+    timeline = Timeline(job / 'local-timing.jsonl', 'driver')
+    timeline.emit('submission_entry')
+    ready_presets = set()
+    def observe_presets(remote):
+        for index, item in remote.get('presets', {}).items():
+            if item.get('status') == 'succeeded' and index not in ready_presets:
+                ready_presets.add(index)
+                timeline.emit('preset_available_observed', presetIndex=int(index), remoteCompletedEpoch=item.get('completedEpoch'))
     request = read(job / 'request.json')
     event = {'taskId': request['taskId'], 'nonce': request['nonce'], 'status': 'queued', 'executionStopped': False}
     remote_may_be_running = False
@@ -178,7 +337,10 @@ def run_driver(job, config_path):
         run, config, settings, timing, deadline = authorization(config_path)
         authorized_run = run
         local_deadline = min(deadline, local_deadline)
-        build_bundle(job, run, config)
+        if config.get('prepared_bundle_directory'):
+            bind_prepared_bundle(job, run, config)
+        else:
+            build_bundle(job, run, config)
         transport = ROOT / 'cloud/Invoke-ScaleRemote.ps1'
         def call(operation, program=None, value=None, flag=None):
             authorization(config_path)  # no extension or automatic reauthorization
@@ -197,9 +359,11 @@ def run_driver(job, config_path):
                 argv.append(flag)
             # Existing transport has private Job cleanup and bounded SSH/SCP.
             # Keep the outer call alive until its own cleanup completes (up to 120s).
+            timeline.emit('transport_start', operation=operation)
             with (job / (operation + '-transport.log')).open('ab') as log:
                 result = subprocess.run(argv, stdout=log, stderr=subprocess.STDOUT,
                                         stdin=subprocess.DEVNULL, shell=False, timeout=120)
+            timeline.emit('transport_end', operation=operation, exitCode=result.returncode)
             if result.returncode:
                 raise RuntimeError('GUARDED_TRANSPORT_FAILED_' + operation)
             if program:
@@ -222,6 +386,7 @@ def run_driver(job, config_path):
             remote = call('inspect', ROOT / 'project/inference/remote_inspect.py', {'prep': prep})
             if (remote.get('taskId'), remote.get('nonce')) != (request['taskId'], request['nonce']):
                 raise ValueError('AMBIGUOUS_LAUNCH_PROCESS_STATE_UNRESOLVED')
+            observe_presets(remote)
             atomic(job / 'launch-recovery.json', {'reason': 'launch response failed',
                 'change': 'inspect same task without relaunch', 'observed': remote, 'utcEpoch': time.time()})
         while True:
@@ -231,8 +396,14 @@ def run_driver(job, config_path):
             if remote.get('status') != 'queued' or 'taskId' in remote:
                 if (remote.get('taskId'), remote.get('nonce')) != (request['taskId'], request['nonce']):
                     raise ValueError('REMOTE_EVENT_IDENTITY_MISMATCH')
+                observe_presets(remote)
                 if remote.get('status') == 'failed':
                     remote_may_be_running = not remote.get('executionStopped', False)
+                    if not remote_may_be_running:
+                        # Preserve stage evidence under the SAME deadline; no model relaunch.
+                        call('export_results', ROOT / 'cloud/export_results.py', {'root': prep + '/run', 'data_root': settings['container_data_dir']})
+                        call('download_results', flag='-DownloadResults')
+                        extract_stage_evidence(run / 'results.tar.gz', job, request)
                     raise RuntimeError('COSMOS_WORKER_FAILED')
                 if remote.get('status') == 'succeeded':
                     remote_may_be_running = False
@@ -246,6 +417,7 @@ def run_driver(job, config_path):
                 call('export_results', ROOT / 'cloud/export_results.py', {'root': prep + '/run', 'data_root': settings['container_data_dir']})
                 call('download_results', flag='-DownloadResults')
                 exported = extract_result(run / 'results.tar.gz', job, require_gbuffers=True)
+                extract_stage_evidence(run / 'results.tar.gz', job, request)
                 break
             except (KeyError, json.JSONDecodeError) as error:
                 # A known local field/JSON problem after confirmed worker exit:
@@ -277,6 +449,7 @@ def run_driver(job, config_path):
         if (exported.get('taskId'), exported.get('nonce'), exported.get('status')) != (request['taskId'], request['nonce'], 'succeeded'):
             raise ValueError('EXPORTED_EVENT_IDENTITY_MISMATCH')
         emit('succeeded', 'validating', True)
+        timeline.emit('results_local_validated', productBatchRegistration=False)
     except BaseException as error:
         (job / 'driver-failure.txt').write_text(type(error).__name__ + ': ' + str(error), encoding='utf-8')
         emit('failed', event.get('stage'), not remote_may_be_running)

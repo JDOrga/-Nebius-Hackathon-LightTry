@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch]$Execute,[switch]$Offline,[double]$ApprovedBudgetUsdIncludingTax=0,[string]$ApprovalReference,[string]$DeadlineUtc)
+param([switch]$Execute,[switch]$Offline,[double]$ApprovedBudgetUsdIncludingTax=0,[string]$ApprovalReference,[string]$DeadlineUtc,[ValidateRange(1,1800)][int]$StartupWaitSeconds=600)
 . (Join-Path $PSScriptRoot 'Common.ps1')
 if(!$Execute){@{mode='LOCAL_PLAN';clock_start='FIRST_INDEPENDENT_API_RUNNING';startup_time_limit=$null;work_minutes=18;stop_minutes=25;verification_target_minutes=27;cloud_calls=0}|ConvertTo-Json;exit 0}
 if(!$Offline -and ($ApprovedBudgetUsdIncludingTax -le 0 -or !$ApprovalReference)){throw 'EXPLICIT_BUDGET_AUTHORIZATION_REQUIRED'}
@@ -15,7 +15,7 @@ $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'));$run=Join-Path $roo
 New-Item -ItemType Directory $run|Out-Null
 $settings.cloud_stop_enabled=$true
 Write-AtomicJson (Join-Path $run 'live-settings.json') $settings
-Write-AtomicJson (Join-Path $run 'startup.json') @{created_utc=[DateTimeOffset]::UtcNow.ToString('o');offline=[bool]$Offline;single_run=$true;budget_usd_including_tax=$ApprovedBudgetUsdIncludingTax;approval_reference=$ApprovalReference;devlab_id=$settings.devlab_id;timing_policy='RUNNING_ANCHORED_18_25_27';absolute_deadline_utc=$DeadlineUtc;restart_limit=1;startup_wait_seconds=600}
+Write-AtomicJson (Join-Path $run 'startup.json') @{created_utc=[DateTimeOffset]::UtcNow.ToString('o');offline=[bool]$Offline;single_run=$true;budget_usd_including_tax=$ApprovedBudgetUsdIncludingTax;approval_reference=$ApprovalReference;devlab_id=$settings.devlab_id;timing_policy='RUNNING_ANCHORED_18_25_27';absolute_deadline_utc=$DeadlineUtc;restart_limit=1;startup_wait_seconds=$StartupWaitSeconds}
 if($Offline){Write-AtomicJson (Join-Path $run 'simulated-cloud.json') @{state='STOPPED';instances=@();verify_reads=0;stop_requests=0}}
 $exe=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
 $guard=Join-Path $PSScriptRoot 'TeaRunningGuard.ps1'

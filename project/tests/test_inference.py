@@ -31,6 +31,19 @@ def metadata():
 
 
 class ImageTests(unittest.TestCase):
+    def test_recorded_crop_is_exact_lossless_and_rejects_guesses(self):
+        from PIL import Image, ImageChops
+        from inference.images import crop_photo_region
+        payload = image_bytes((1280, 704))
+        canvas = {'width': 1280, 'height': 704, 'validRegion': [442, 0, 838, 704]}
+        with Image.open(io.BytesIO(payload)) as full, Image.open(io.BytesIO(crop_photo_region(payload, canvas))) as crop:
+            self.assertEqual(crop.size, (396, 704))
+            self.assertIsNone(ImageChops.difference(full.crop((442, 0, 838, 704)), crop).getbbox())
+        for bad in (None, {}, {**canvas, 'validRegion': [-1, 0, 838, 704]},
+                    {**canvas, 'validRegion': [442, 0, 1281, 704]},
+                    {**canvas, 'validRegion': [442, 0, 442, 704]},
+                    {**canvas, 'validRegion': [442.0, 0, 838, 704]}, {**canvas, 'width': 1279}):
+            with self.assertRaises(InputError): crop_photo_region(payload, bad)
     def test_supported_content_and_limits(self):
         for fmt, mime in [('PNG', 'image/png'), ('JPEG', 'image/jpeg'), ('WEBP', 'image/webp')]:
             self.assertEqual(decode(image_bytes(fmt=fmt), mime)[2]['mime'], mime)
@@ -287,6 +300,27 @@ class HTTPTests(unittest.TestCase):
         with urlopen(self.base + '/api/requests/' + self.meta['requestId']) as response: self.assertEqual(json.load(response)['taskId'], tid)
         for suffix in ('request.json', 'receipt.json', 'driver.log', '..%2F..%2Fconfig', 'download/anything'):
             with self.assertRaises(HTTPError): urlopen(self.base + f'/api/tasks/{tid}/' + suffix)
+
+    def test_region_routes_keep_full_result_and_share_recorded_rectangle(self):
+        from PIL import Image, ImageChops
+        with self.post(data=image_bytes((396, 704))) as response: task = json.load(response)
+        tid = task['taskId']; box = task['input']['canvas']['validRegion']
+        with self.assertRaises(HTTPError): urlopen(self.base + f'/api/tasks/{tid}/download-region')
+        self.executor.succeed(); self.store.get(tid)
+        for source, region in (('input', 'input-region'), ('result', 'result-region'), ('result', 'download-region')):
+            with urlopen(self.base + f'/api/tasks/{tid}/{source}') as response: full = response.read()
+            with urlopen(self.base + f'/api/tasks/{tid}/{region}') as response:
+                crop = response.read(); self.assertEqual(response.headers['Content-Type'], 'image/png')
+                if region == 'download-region': self.assertIn('_photo-region.png', response.headers['Content-Disposition'])
+            with Image.open(io.BytesIO(full)) as a, Image.open(io.BytesIO(crop)) as b:
+                self.assertEqual(b.size, (box[2] - box[0], box[3] - box[1]))
+                self.assertIsNone(ImageChops.difference(a.crop(tuple(box)), b).getbbox())
+        with urlopen(self.base + f'/api/tasks/{tid}/download') as response:
+            self.assertEqual(digest(response.read()), read(self.store.directory(tid) / 'receipt.json')['sha256'])
+        folder = self.store.directory(tid); damaged = read(folder / 'task.json')
+        damaged['input']['canvas']['validRegion'] = [0, 0, 1281, 704]; atomic(folder / 'task.json', damaged)
+        with self.assertRaises(HTTPError) as error: urlopen(self.base + f'/api/tasks/{tid}/input-region')
+        self.assertEqual(error.exception.code, 409)
 
     def test_csrf_host_origin_and_public_no_secrets(self):
         for extra in ({'X-LightTry-Token': 'bad'}, {'Origin': 'https://evil.example'}, {'Host': 'evil.example'}):
