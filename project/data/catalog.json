@@ -307,6 +307,111 @@
         "source_url": "https://commons.wikimedia.org/wiki/File:Glass_bottle.jpg",
         "color_handling": "Embedded sRGB to sRGB via LittleCMS relative colorimetric intent; no tonal enhancement"
       }
+    },
+    {
+      "id": "05_white_blue_mug",
+      "name": "白蓝杯 · 10月10日真实历史样例",
+      "material": "瓷杯",
+      "date": "2026-10-10",
+      "runId": "01725f1eeab34d899ad7ba02a9124745",
+      "taskId": "e7ca7776b5094aba8ea1008c8421f456",
+      "canvas": {
+        "width": 1280,
+        "height": 704,
+        "sha256": "1a7b31e4bbf0ca4478534552c63f2159ec992540d8709fe1283aaf4aae295051",
+        "bytes": 404140,
+        "preprocessingVersion": "exif-srgb-lanczos-centered-gray-v1",
+        "rgbSha256": "c5c63421e8c93a11d08cf54a74174659dd8e79eae1738e8109009c44c219bf24",
+        "validRegion": [
+          442,
+          0,
+          838,
+          704
+        ],
+        "paddingRGB": [
+          127,
+          127,
+          127
+        ],
+        "colorHandling": "decoded RGB assumed sRGB",
+        "orientationHandling": "EXIF transpose",
+        "scaleXY": [
+          0.13253012048192772,
+          0.13253012048192772
+        ],
+        "resize": "LANCZOS; nearest-pixel rounding; centered padding; no crop",
+        "original": {
+          "width": 2988,
+          "height": 5312,
+          "mime": "image/png",
+          "sha256": "9b01bfe7afd72e56c0b1ff95de93e78594aa82d743a2baa120e151e1ca913028",
+          "bytes": 18364866,
+          "exifOrientation": 1
+        }
+      },
+      "unstable": false,
+      "warning": "已完成的真实历史生成样例；不是当前在线生成。仅 sunny / sunrise，第三灯光本批未生成。",
+      "credit": {
+        "title": "White-blue mug.jpg",
+        "creator": "Aoziwe",
+        "license": "CC BY-SA 4.0",
+        "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+        "source_url": "https://commons.wikimedia.org/wiki/File:White-blue_mug.jpg",
+        "color_handling": "既有原照为方向处理后的 PNG；实际输入 EXIF transpose、RGB assumed sRGB、LANCZOS 等比缩小及灰色留白；结果 Cosmos 生成式重打光，不暗示作者背书。"
+      },
+      "original": {
+        "assetId": "05_white_blue_mug-original",
+        "url": "/assets/05_white_blue_mug-original",
+        "width": 2988,
+        "height": 5312,
+        "sha256": "9b01bfe7afd72e56c0b1ff95de93e78594aa82d743a2baa120e151e1ca913028"
+      },
+      "input": {
+        "assetId": "05_white_blue_mug-input",
+        "url": "/assets/05_white_blue_mug-input",
+        "width": 1280,
+        "height": 704,
+        "sha256": "1a7b31e4bbf0ca4478534552c63f2159ec992540d8709fe1283aaf4aae295051"
+      },
+      "results": {
+        "sunny": {
+          "assetId": "05_white_blue_mug-sunny",
+          "url": "/assets/05_white_blue_mug-sunny",
+          "width": 1280,
+          "height": 704,
+          "sha256": "080bb85e9d13cabdfefc6037276552bebba1dfb38ff43373ee0aba65053b5668"
+        },
+        "sunrise": {
+          "assetId": "05_white_blue_mug-sunrise",
+          "url": "/assets/05_white_blue_mug-sunrise",
+          "width": 1280,
+          "height": 704,
+          "sha256": "8a36f406aa5ac867ba52d11ea4eea097948e41542c9a037a125d2ba650eba1f2"
+        }
+      },
+      "regionResults": {
+        "sunny": {
+          "assetId": "05_white_blue_mug-sunny-region",
+          "url": "/assets/05_white_blue_mug-sunny-region",
+          "width": 396,
+          "height": 704,
+          "sha256": "f776e04998fa2b4bf35b6df0b8ef73009382441a19b198a37f2ac3c02fbc7358"
+        },
+        "sunrise": {
+          "assetId": "05_white_blue_mug-sunrise-region",
+          "url": "/assets/05_white_blue_mug-sunrise-region",
+          "width": 396,
+          "height": 704,
+          "sha256": "35af405836d3c9af8fbdf63be04e40c80295e1192abb67170bb809c86f7240e8"
+        }
+      },
+      "regionInput": {
+        "assetId": "05_white_blue_mug-input-region",
+        "url": "/assets/05_white_blue_mug-input-region",
+        "width": 396,
+        "height": 704,
+        "sha256": "a40ee905179ec9950cad6f99274fcc345370eebd86d95b68f686903e5abded90"
+      }
     }
   ],
   "assets": {
@@ -449,6 +554,55 @@
       "bytes": 45407,
       "width": 1280,
       "height": 704
+    },
+    "05_white_blue_mug-original": {
+      "path": "originals/05_white_blue_mug-original.png",
+      "sha256": "9b01bfe7afd72e56c0b1ff95de93e78594aa82d743a2baa120e151e1ca913028",
+      "bytes": 18364866,
+      "width": 2988,
+      "height": 5312
+    },
+    "05_white_blue_mug-input": {
+      "path": "inputs/05_white_blue_mug-input.png",
+      "sha256": "1a7b31e4bbf0ca4478534552c63f2159ec992540d8709fe1283aaf4aae295051",
+      "bytes": 404140,
+      "width": 1280,
+      "height": 704
+    },
+    "05_white_blue_mug-sunny": {
+      "path": "results/05_white_blue_mug-sunny.jpg",
+      "sha256": "080bb85e9d13cabdfefc6037276552bebba1dfb38ff43373ee0aba65053b5668",
+      "bytes": 38520,
+      "width": 1280,
+      "height": 704
+    },
+    "05_white_blue_mug-sunny-region": {
+      "path": "results/05_white_blue_mug-sunny-region.png",
+      "sha256": "f776e04998fa2b4bf35b6df0b8ef73009382441a19b198a37f2ac3c02fbc7358",
+      "bytes": 146710,
+      "width": 396,
+      "height": 704
+    },
+    "05_white_blue_mug-sunrise": {
+      "path": "results/05_white_blue_mug-sunrise.jpg",
+      "sha256": "8a36f406aa5ac867ba52d11ea4eea097948e41542c9a037a125d2ba650eba1f2",
+      "bytes": 38854,
+      "width": 1280,
+      "height": 704
+    },
+    "05_white_blue_mug-sunrise-region": {
+      "path": "results/05_white_blue_mug-sunrise-region.png",
+      "sha256": "35af405836d3c9af8fbdf63be04e40c80295e1192abb67170bb809c86f7240e8",
+      "bytes": 138410,
+      "width": 396,
+      "height": 704
+    },
+    "05_white_blue_mug-input-region": {
+      "path": "inputs/05_white_blue_mug-input-region.png",
+      "sha256": "a40ee905179ec9950cad6f99274fcc345370eebd86d95b68f686903e5abded90",
+      "bytes": 363186,
+      "width": 396,
+      "height": 704
     }
   },
   "provenance": {
@@ -463,5 +617,6 @@
     "note": "Full-frame forward JPEG only. Later tea basecolor, local-scale crops and CPU fusion candidates are excluded. Historical final acceptance process failed; forward generation completed, hashes verified.",
     "packRecord": "source-records.json",
     "runtimeSource": "Independent demo-assets; historical locations are audit references only, never runtime lookup paths."
-  }
+  },
+  "preferredSample": "05_white_blue_mug"
 }

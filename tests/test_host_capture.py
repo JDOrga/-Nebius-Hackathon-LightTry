@@ -45,6 +45,14 @@ $mode=$config.api_modes[[Math]::Min($i,$config.api_modes.Count-1)]
 if($mode -eq 'invalidjson'){Write-Output 'NOT_JSON';exit 2}
 if($mode -eq 'badfields'){@{ok=$true;target=@{vm_id='missing-identity-fields'}}|ConvertTo-Json -Compress;exit 0}
 if($mode -eq 'stderr') {[Console]::Error.WriteLine('token=PRIVATE_MUST_NOT_BE_LOGGED');exit 7}
+if($mode -eq 'transition'){
+ $t=@{id='devlab-synthetic';vm_id='computeinstance-synthetic';ip='192.0.2.10';ssh_user='nebius';
+   host_alias='nebius-devlab-synthetic-computeinstance-synthetic';image='synthetic-image';state='IMAGE_PULLING'}
+ @{ok=$false;category='STARTUP_STATE_TRANSITION';retryable=$true;exception_type='SyntheticApiError';
+   validation_reads=@(@{before=@{state='IMAGE_PULLING'};after=@{state='RUNNING'};
+     differences=@(@{field='state';before='IMAGE_PULLING';after='RUNNING'});
+     classification='STARTUP_STATE_TRANSITION';validated_target=$t})}|ConvertTo-Json -Depth 10 -Compress;exit 2
+}
 if($mode -ne 'success' -and $mode -ne 'mapping' -and $mode -ne 'changed'){
  @{ok=$false;category=$mode;retryable=$true;exception_type='SyntheticApiError'} | ConvertTo-Json -Compress;exit 2
 }
@@ -122,6 +130,8 @@ def main():
         assert all('remaining_window_ms' in e for e in events if e.get('event') in ('start','end'))
     check('API transient then recovery, real PS5.1/native argv',lambda:success_case('api-recovery',['API_TRANSIENT','success'],['success']))
     check('VM information pending then recovery',lambda:success_case('vm-pending',['VM_INFO_PENDING','success'],['success']))
+    check('Startup status transition revalidates same VM without stop',lambda:success_case('state-transition',['transition','success'],['success']))
+    check('After-scan transition discards candidate and revalidates/rescans',lambda:success_case('after-scan-transition',['success','success','transition','success'],['success']))
     check('Scan empty then success, same VM and no restart',lambda:success_case('empty-recovery',['success'],['empty','success']))
     check('Native scan timeout recorded then recovery',lambda:success_case('timeout',['success'],['timeout','success'],'native_keyscan','timeout'))
     check('Native nonzero exit9 recorded then recovery',lambda:success_case('nonzero',['success'],['nonzero','success'],'native_keyscan',9))

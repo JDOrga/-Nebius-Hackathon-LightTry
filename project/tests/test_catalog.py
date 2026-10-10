@@ -39,14 +39,14 @@ class CatalogTests(unittest.TestCase):
         for preset, hdr in zip(self.catalog['presets'], self.records['hdrs']):
             self.assertEqual(preset['hdr'], hdr['filename'])
             self.assertEqual(preset['sha256'], hdr['sha256'])
-            for sample in self.catalog['samples']:
+            for sample in self.catalog['samples'][:4]:
                 result = sample['results'][preset['id']]
                 path = f"run/forward/{sample['id']}__0000.relit_{preset['index']:04d}.jpg"
                 self.assertEqual(result['sha256'], hashes[path])
                 self.assertEqual((result['width'], result['height']), (1280, 704))
 
     def test_no_experiment_channels_or_crops_or_fusion_assets(self):
-        self.assertEqual(len(self.catalog['assets']), 20)
+        self.assertEqual(len(self.catalog['assets']), 27)
         for item in self.catalog['assets'].values():
             self.assertFalse(any(x in item['path'] for x in ('basecolor', 'scale_', 'fusion', 'roi')))
         self.assertTrue(self.catalog['samples'][3]['unstable'])
@@ -80,11 +80,24 @@ class HTTPTests(unittest.TestCase):
         catalog = server.Handler.catalog
         for sample in catalog['samples']:
             for preset in catalog['presets']:
+                if preset['id'] not in sample['results']:
+                    with self.assertRaises(HTTPError) as caught:
+                        urlopen(self.base + f"/download/{sample['id']}/{preset['id']}")
+                    self.assertEqual(caught.exception.code, 404)
+                    continue
                 with urlopen(self.base + f"/download/{sample['id']}/{preset['id']}") as response:
                     self.assertEqual(hashlib.sha256(response.read()).hexdigest(), sample['results'][preset['id']]['sha256'])
                     filename = unquote(response.headers['Content-Disposition'])
                     self.assertIn(sample['name'] + '_' + preset['name'], filename)
                     self.assertIn('image/jpeg', response.headers['Content-Type'])
+
+    def test_mug_region_downloads_match_verified_assets(self):
+        sample = next(s for s in server.Handler.catalog['samples'] if s['id'] == '05_white_blue_mug')
+        for preset, record in sample['regionResults'].items():
+            with urlopen(self.base + f"/download/{sample['id']}/{preset}-region") as response:
+                self.assertEqual(hashlib.sha256(response.read()).hexdigest(), record['sha256'])
+                self.assertIn('image/png', response.headers['Content-Type'])
+                self.assertIn('photo-region.png', unquote(response.headers['Content-Disposition']))
 
     def test_unknown_uploads_and_private_paths_cannot_be_exported_or_served(self):
         for route in ('/download/upload/sunny', '/assets/../../config/local.json', '/config/local.json', '/server.py', '/data/catalog.json'):

@@ -128,6 +128,7 @@ test('each sample selects its own three forward results and exact HDR mapping', 
   for (const sample of catalog.samples) for (const preset of catalog.presets) {
     const state = reduce(reduce(createState(catalog), { type: 'SAMPLE', id: sample.id }), { type: 'PRESET', id: preset.id });
     const selected = selection(state, catalog);
+    if (!sample.results[preset.id]) { assert.equal(selected.result, undefined); continue; }
     assert.equal(selected.result.assetId, `${sample.id}-${preset.id}`);
     assert.equal(selected.input.assetId, `${sample.id}-input`);
     assert.equal(selected.exportUrl, `/download/${sample.id}/${preset.id}`);
@@ -228,7 +229,7 @@ test('sample and real modes are explicit; switching back restores only sample id
   state = reduce(state, { type: 'TASK', task: { status: 'not_connected' } });
   state = reduce(state, { type: 'MODE', mode: 'sample' });
   assert.equal(state.task, null);
-  assert.equal(selection(state, catalog).input.assetId, catalog.samples[0].input.assetId);
+  assert.equal(selection(state, catalog).input.assetId, catalog.samples.find(s=>s.id===(catalog.preferredSample || catalog.samples[0].id)).input.assetId);
   state = reduce(state, { type: 'MODE', mode: 'generate' });
   assert.equal(selection(state, catalog).input.id, 'own');
   assert.equal(selection(state, catalog).result, null);
@@ -260,4 +261,10 @@ test('side comparison fills two wide panels or two stacked narrow panels with co
     assert.equal(side.stacked, width < 640);
     if (width >= 640) assert.ok(side.height < previewLayout('slider', width).height);
   }
+});
+
+test('historical mug region uses recorded assets and never lends third light a result', () => {
+ let state=createState(catalog); state=reduce(state,{type:'REGION',value:'photo'});
+ for(const id of ['sunny','sunrise']) { state=reduce(state,{type:'PRESET',id}); const v=selection(state,catalog); assert.equal(v.result.width,396); assert.equal(v.input.height,704); assert.equal(v.exportUrl,`/download/05_white_blue_mug/${id}-region`); }
+ state=reduce(state,{type:'PRESET',id:'street'}); assert.equal(selection(state,catalog).result,undefined); assert.equal(selection(state,catalog).exportUrl,null);
 });

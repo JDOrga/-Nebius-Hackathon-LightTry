@@ -10,4 +10,4 @@ if __name__ == '__main__':
         catalog = load_catalog(args.assets_dir)
     except (ValueError, OSError) as error:
         parser.exit(2, str(error) + '\n')
-    print(f"Verified {len(catalog['samples'])} samples / 12 results / 20 images + provenance. No HDR needed.")
+    print(f"Verified {len(catalog['samples'])} samples / {sum(len(s['results']) for s in catalog['samples'])} results / {len(catalog['assets'])} images + provenance. No HDR needed.")

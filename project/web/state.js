@@ -1,7 +1,7 @@
 // Pure state transitions shared by the UI and small node:test regression suite.
 export const EMPTY_VIEW = Object.freeze({ zoom: 1, panX: 0, panY: 0, split: 50 });
 export function createState(catalog) {
-  return { mode: 'sample', sampleId: catalog.samples[0].id, presetId: catalog.presets[0].id,
+  return { mode: 'sample', sampleId: catalog.preferredSample || catalog.samples[0].id, presetId: catalog.presets[0].id,
     upload: null, task: null, tasks: {}, plannedPresets: [catalog.presets[0].id], region: 'full', comparison: 'slider', view: { ...EMPTY_VIEW }, error: null };
 }
 export function reduce(state, event) {
@@ -60,6 +60,7 @@ export function selection(state, catalog) {
     return { sample: null, preset, input: state.upload, result, exportUrl: result?.downloadUrl || null };
   }
   const sample = catalog.samples.find(s => s.id === state.sampleId);
+  if (state.region === 'photo' && sample?.regionInput) return { sample, preset, input:sample.regionInput, result:sample.regionResults?.[preset?.id], exportUrl:sample.regionResults?.[preset?.id] ? `/download/${sample.id}/${preset.id}-region` : null };
   return { sample, preset, input: sample?.input, result: sample?.results[preset?.id],
     exportUrl: sample && preset ? `/download/${sample.id}/${preset.id}` : null };
 }

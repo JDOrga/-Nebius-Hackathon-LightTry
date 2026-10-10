@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from inference.jobs import TaskStore, JobError
 from inference.images import MAX_BYTES
-INSTALL_HINT = ('请在代码根目录安装单独提供的 lighttry-demo-assets-20261009.zip：'
+INSTALL_HINT = ('请在代码根目录安装单独提供的 lighttry-demo-assets-20261010-candidate.zip：'
                 'python -X utf8 -B project/install_demo_assets.py "<素材包路径>"。'
                 '默认位置为 project/demo-assets；外部位置用 --assets-dir 或 LIGHTTRY_DEMO_ASSETS。'
                 '详见 project/docs/LOCAL_DEMO_MIGRATION.md；不会替换图片或连接云端。')
@@ -164,11 +164,17 @@ class Handler(BaseHTTPRequestHandler):
             if len(pieces) != 4:
                 return self.send_error(404)
             sample = next((s for s in self.catalog['samples'] if s['id'] == pieces[2]), None)
-            preset = next((p for p in self.catalog['presets'] if p['id'] == pieces[3]), None)
+            region = pieces[3].endswith('-region')
+            preset_id = pieces[3].removesuffix('-region')
+            preset = next((p for p in self.catalog['presets'] if p['id'] == preset_id), None)
             if not sample or not preset:
                 return self.send_error(404)
-            key = sample['results'][preset['id']]['assetId']
-            filename = f"{sample['name']}_{preset['name']}_AI光照预览.jpg"
+            result = sample.get('regionResults' if region else 'results', {}).get(preset_id)
+            if not result:
+                return self.send_error(404)
+            key = result['assetId']
+            suffix = 'photo-region.png' if region else 'full.jpg'
+            filename = f"{sample['name']}_{preset['name']}_AI光照预览_{suffix}"
             return self.send_file(asset_path(self.assets_dir, self.catalog['assets'][key]), filename)
         # Explicit allowlist prevents serving configs, history, sources or arbitrary paths.
         allowed = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/state.js': 'state.js',

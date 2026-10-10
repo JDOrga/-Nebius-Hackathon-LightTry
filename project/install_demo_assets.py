@@ -54,7 +54,7 @@ def main():
         destination = install(args.archive, args.assets_dir)
     except (ValueError, OSError, zipfile.BadZipFile) as error:
         parser.exit(2, str(error) + '\n')
-    print('20 张原始字节图片及来源记录已校验并安装：' + str(destination))
+    print('素材图片及来源记录已校验并安装：' + str(destination))
 
 
 if __name__ == '__main__':

@@ -17,6 +17,7 @@ const surface = $('preview-surface');
 
 function dispatch(event) {
   state = reduce(state, event);
+  if (state.mode === 'sample') storageSet('lighttry.sampleView', JSON.stringify({sampleId:state.sampleId,presetId:state.presetId,region:state.region,comparison:state.comparison}));
   if (['TASK', 'RESTORE_TASK', 'RELATED_TASK'].includes(event.type) && state.upload) {
     storageSet(relatedKey, JSON.stringify({ inputId: state.upload.id,
       taskIds: Object.values(state.tasks || {}).filter(t => /^[0-9a-f]{32}$/.test(t.taskId)).map(t => t.taskId) }));
@@ -84,8 +85,8 @@ async function render() {
   const { sample, preset, input, result } = selection(state, catalog);
   const generate = state.mode === 'generate';
   const hasResult = !!result;
-  const originalOnly = generate && !hasResult;
-  const regionAvailable = generate && !!recordedRegion(state.upload);
+  const originalOnly = !hasResult;
+  const regionAvailable = generate ? !!recordedRegion(state.upload) : !!sample?.regionInput;
   const cropped = regionAvailable && state.region === 'photo';
   $('region-controls').hidden = !regionAvailable;
   document.querySelectorAll('[data-region]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.region === (cropped ? 'photo' : 'full'))));
@@ -99,7 +100,7 @@ async function render() {
   $('image-title').textContent = generate ? `${input?.name || '载入你的产品照片'} / ${preset.name}` : `${sample.name} / ${preset.name}`;
   $('image-size').textContent = input ? `${input.width} × ${input.height} px` : '';
   $('canvas-note').textContent = cropped ? '原照片区域 · 输入与结果按同一记录裁剪 · 不修复生成伪影' : generate && !state.task?.input?.canvas ? '本机原图预览 · 等比显示' : '完整画布 · 等比显示 · 保留灰色留白';
-  $('sample-warning').hidden = !sample?.unstable;
+  $('sample-warning').hidden = !sample?.warning;
   $('sample-warning').textContent = sample?.warning || '';
   $('export').textContent = cropped ? '↓ 下载原照片区域 PNG' : '↓ 下载完整光照结果 JPEG';
   $('export-note').textContent = originalOnly ? '尚无此灯光有效结果，不能下载光照结果' : cropped ? '按记录裁剪 · 不再增加有损编码，不恢复 JPEG 已丢失信息' : '下载校验后的实际 JPEG 原字节，保留完整画布';
@@ -115,8 +116,8 @@ async function render() {
   });
   $('slider-controls').hidden = originalOnly || state.comparison !== 'slider';
   $('preset-list').innerHTML = catalog.presets.map(p => {
-    const thumbnail = generate ? `<span class="environment environment-${p.id}" aria-hidden="true">☼</span>` : `<img src="${sample.results[p.id].url}" alt="">`;
-    return `<button class="preset" data-preset="${escape(p.id)}" aria-pressed="${p.id === preset.id}" aria-label="${escape(p.name)}">${thumbnail}<span><strong>${escape(p.name)}</strong><small>${escape(p.description)}</small></span>${p.id === preset.id ? '<span class="tick" aria-hidden="true">✓</span>' : ''}</button>`;
+    const thumbnail = generate ? `<span class="environment environment-${p.id}" aria-hidden="true">☼</span>` : `<img src="${(sample.results[p.id] || sample.input).url}" alt="">`;
+    return `<button class="preset" data-preset="${escape(p.id)}" aria-pressed="${p.id === preset.id}" aria-label="${escape(p.name)}">${thumbnail}<span><strong>${escape(p.name)}</strong><small>${escape(!generate && !sample.results[p.id] ? '本批未生成 · 仅查看输入' : p.description)}</small></span>${p.id === preset.id ? '<span class="tick" aria-hidden="true">✓</span>' : ''}</button>`;
   }).join('');
   $('sample-list').innerHTML = catalog.samples.map(s => `<button class="sample-button ${s.unstable ? 'unstable' : ''}" data-sample="${escape(s.id)}" aria-pressed="${s.id === state.sampleId}" aria-label="${escape(s.name)}${s.unstable ? '，效果不稳定' : ''}"><img src="${s.original.url}" alt=""><span>${escape(s.name)}</span></button>`).join('');
   renderStatus();
@@ -403,6 +404,9 @@ new ResizeObserver(applyView).observe(surface);
 try {
   catalog = await sampleSource.catalog();
   state = createState(catalog);
+  try { const saved = JSON.parse(storageGet('lighttry.sampleView') || 'null');
+    if (saved && catalog.samples.some(s=>s.id===saved.sampleId) && catalog.presets.some(p=>p.id===saved.presetId)) state = {...state, ...saved, mode:'sample'};
+  } catch {}
   try { capabilities = await serviceInference.capabilities(); }
   catch { capabilities = { enabled: false }; }
   $('generate-mode').querySelector('span').textContent = capabilities.developmentTestMode ? '离线测试' : capabilities.enabled ? '推理已配置' : '推理默认关闭';

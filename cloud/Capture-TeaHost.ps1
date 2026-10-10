@@ -137,6 +137,9 @@ function GetTarget([string]$Purpose) {
     if ($null -eq $answer -or $answer.PSObject.Properties.Name -notcontains 'ok' -or $answer.ok -isnot [bool]) {
         $details.category='API_ENVELOPE_INVALID'; FinishStage $began $details; throw 'API_ENVELOPE_INVALID'
     }
+    if ($answer.PSObject.Properties.Name -contains 'validation_reads') {
+        $details.validation_reads=@($answer.validation_reads)
+    }
     if (!$answer.ok) {
         if ($answer.PSObject.Properties.Name -notcontains 'category' -or $answer.PSObject.Properties.Name -notcontains 'exception_type') {
             $details.category='API_ENVELOPE_INVALID'; FinishStage $began $details; throw 'API_ENVELOPE_INVALID'
@@ -154,9 +157,24 @@ function GetTarget([string]$Purpose) {
             ($null -eq $answer.cli_exit_code -or $answer.cli_exit_code -is [int])) {
             $details.cli_exit_code=$answer.cli_exit_code
         }
+        if($label -eq 'STARTUP_STATE_TRANSITION') {
+            # Bind the first fully validated identity even while startup status
+            # is unstable; the next attempt must revalidate THAT same VM.
+            $reads=@($answer.validation_reads)
+            if($reads.Count -ne 1){throw 'TRANSITION_EVIDENCE_INVALID'}
+            $hint=$reads[0].validated_target
+            if($hint.id -ne $settings.devlab_id -or $hint.vm_id -notmatch '^computeinstance-[a-z0-9]+$' -or
+               $hint.ip -notmatch '^[0-9a-fA-F:.]+$' -or $hint.ssh_user -notmatch '^[a-z_][a-z0-9_-]{0,31}$' -or
+               $hint.host_alias -ne ('nebius-'+$hint.id+'-'+$hint.vm_id) -or !$hint.image){throw 'TRANSITION_EVIDENCE_INVALID'}
+            if($null -ne $locked -and ($hint.vm_id -ne $locked.vm_id -or $hint.ip -ne $locked.ip -or
+               $hint.ssh_user -ne $locked.ssh_user -or $hint.host_alias -ne $locked.host_alias -or $hint.image -ne $locked.image)){
+                FinishStage $began $details;throw 'VM_IDENTITY_CHANGED'
+            }
+            $script:locked=$hint
+        }
         FinishStage $began $details
         # Only an explicit allowlist may retry, even if a faulty worker says otherwise.
-        return @{ok=$false;category=$label;retryable=($label -in @('API_TRANSIENT','API_TIMEOUT','DEVLAB_NOT_READY','VM_INFO_PENDING'))}
+        return @{ok=$false;category=$label;retryable=($label -in @('API_TRANSIENT','API_TIMEOUT','DEVLAB_NOT_READY','VM_INFO_PENDING','STARTUP_STATE_TRANSITION'))}
     }
     if ($api.ExitCode -ne 0 -or $api.Truncated) {
         $details.category='API_ENVELOPE_INVALID'; FinishStage $began $details; throw 'API_ENVELOPE_INVALID'
