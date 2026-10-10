@@ -38,3 +38,7 @@
   .segmented button{padding:8px 6px}
   .preview-heading{gap:6px}
 }
+#batch-plan{border:1px solid #ddd;border-radius:12px;padding:12px;margin:12px 0;min-width:0}
+#batch-options{display:flex;flex-wrap:wrap;gap:12px}
+#batch-options label{font-size:13px;display:flex;align-items:center;gap:5px}
+.connection-status span{overflow-wrap:anywhere}

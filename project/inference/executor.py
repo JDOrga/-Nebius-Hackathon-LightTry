@@ -34,6 +34,24 @@ class GuardedCosmosExecutor:
                 stdout=output, stderr=subprocess.STDOUT, shell=False)
         self.children.append(child)
 
+    def prepare_request(self, folder, request):
+        """Apply operator restrictions before persisting or dispatching a web job."""
+        from .jobs import read
+        config = read(self.config_path)
+        requirement = config.get('required_inverse_reuse')
+        if requirement is None:
+            return
+        if [p['id'] for p in request['presets']] != config.get('required_preset_ids'):
+            raise ValueError('AUTHORIZED_BATCH_PRESETS_REQUIRED')
+        from .driver import ROOT
+        from .reuse import identity, key, validate
+        value = identity(request, (folder / 'inputs/photo.png').read_bytes(),
+                         read(ROOT / 'manifests/weights_manifest.json'), read(ROOT / 'manifests/patch_manifest.json'))
+        record = validate(ROOT / 'project/.inverse-cache' / key(value), value)
+        if requirement != {'key': key(value), 'source': record['source']}:
+            raise ValueError('REQUIRED_INVERSE_REUSE_UNAVAILABLE_NO_COLD_FALLBACK')
+        request['requiredInverseReuse'] = requirement
+
     def check_ready(self):
         from .driver import authorization
         authorization(self.config_path)

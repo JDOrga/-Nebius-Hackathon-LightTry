@@ -5,6 +5,33 @@ import { createState, reduce, selection, recordedRegion, validateFile, validateD
 import { disconnectedInference, serviceInference, recoverTask } from '../web/sources.js';
 const catalog = JSON.parse(readFileSync(new URL('../data/catalog.json', import.meta.url), 'utf8'));
 
+test('batch switching binds each result, third preset never inherits, and stale responses are ignored',()=>{
+  const id='a'.repeat(32),input={id:'photo',url:`/api/tasks/${id}/input`,width:1280,height:704,canvas:{width:1280,height:704,validRegion:[100,0,900,704]}};
+  const items=Object.fromEntries(catalog.presets.slice(0,2).map(p=>[p.id,{preset:p,status:'succeeded',error:null,result:{taskId:id,inputId:input.id,presetId:p.id,url:`/${p.id}`,downloadUrl:`/${p.id}/full`,regionUrl:`/${p.id}/region`,regionDownloadUrl:`/${p.id}/png`}}]));
+  const task={taskId:id,input,preset:catalog.presets[0],presetResults:items,status:'succeeded',updatedAt:20};
+  let state=reduce(createState(catalog),{type:'RESTORE_TASK',task});
+  state=reduce(state,{type:'PRESET',id:'sunrise'});assert.equal(selection(state,catalog).result.url,'/sunrise');
+  state=reduce(state,{type:'REGION',value:'photo'});assert.equal(selection(state,catalog).exportUrl,'/sunrise/png');
+  assert.equal(selection(state,catalog).input.width,800);
+  state=reduce(state,{type:'PRESET',id:'street'});assert.equal(selection(state,catalog).result,null);
+  assert.equal(reduce(state,{type:'TASK',task:{...task,updatedAt:10,status:'running'}}),state);
+  assert.equal(reduce(state,{type:'TASK',task:{...task,input:{...input,id:'old'}}}),state);
+  const failed={...task,presetResults:{...items,sunrise:{...items.sunrise,status:'failed',result:null}}};
+  state=reduce(state,{type:'TASK',task:failed});state=reduce(state,{type:'PRESET',id:'sunrise'});
+  assert.equal(selection(state,catalog).exportUrl,null);
+});
+
+test('one batch adapter request with frozen deduplicated preset list',async()=>{
+  const original=global.fetch;const calls=[];
+  try{
+    global.fetch=async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>({taskId:'batch'})};};
+    await serviceInference.submit({id:'one',name:'photo'},[catalog.presets[0],catalog.presets[1],catalog.presets[0]],{type:'image/png'},'req');
+    assert.equal(calls.length,1);
+    const metadata=JSON.parse(Buffer.from(calls[0].options.headers['X-LightTry-Request'],'base64').toString());
+    assert.deepEqual(metadata.presetIds,['sunny','sunrise']);
+  }finally{global.fetch=original;}
+});
+
 test('restored success survives selecting current mode and regions share one rectangle', () => {
   const input={id:'one',name:'cup.png',width:1280,height:704,url:'/input',canvas:{width:1280,height:704,validRegion:[442,0,838,704]}};
   const task={taskId:'a'.repeat(32),input,preset:catalog.presets[0],status:'succeeded',result:{taskId:'a'.repeat(32),inputId:'one',presetId:'sunny',width:1280,height:704,url:'/result',downloadUrl:'/download'}};

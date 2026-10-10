@@ -34,7 +34,10 @@ export const serviceInference = {
   },
   async submit(input, preset, file, requestId) {
     if (!file) throw new Error('刷新后原始文件不在浏览器内，请重新载入照片再提交新任务。');
-    const bytes = new TextEncoder().encode(JSON.stringify({ inputId: input.id, presetId: preset.id, name: input.name, requestId }));
+    const selected = Array.isArray(preset) ? preset : [preset];
+    const metadata={inputId:input.id,presetId:selected[0].id,name:input.name,requestId};
+    if(Array.isArray(preset)) metadata.presetIds=[...new Set(selected.map(p=>p.id))];
+    const bytes = new TextEncoder().encode(JSON.stringify(metadata));
     return responseJSON(await fetch('/api/tasks', { method: 'POST', headers: {
       'Content-Type': file.type, 'X-LightTry-Token': this.token, 'X-LightTry-Request': btoa(String.fromCharCode(...bytes)),
     }, body: file }));

@@ -1,5 +1,19 @@
 # LightTry 推理适配器接口
 
+## 2026-10-10 正式多灯光接入
+
+继续使用原 TaskStore、POST `/api/tasks`、driver/worker/batch；一个照片任务可含 `presets: Preset[]`（1–3项）及 `presetResults: {[presetId]: {preset,status,result,error}}`。原 `preset/result` 保留为首项兼容视图。批次终态增加 `partial`；每项分别保存 `queued/pending/running/succeeded/failed/expired`。未取回的项只表示等待完成记录，不根据整批 stage 或经过时间声称正在生成或成功。
+
+POST 元数据可用 `presetIds: string[]`，服务器去重并从 catalog 确定 HDR/index/hash。仍支持旧 `presetId`；若两者同时给出，presetId 必须等于列表首项。列表原始长度须1–3，未知预设拒绝。相同 requestId、输入和有序预设返回同任务；改内容409。整个列表一次传给 executor，再经同一 request.json 进入已有批量执行入口，前端不拆单。
+
+每项新增 GET `/api/tasks/<taskId>/presets/<presetId>/{result,download,result-region,download-region}`，只接受 catalog 预设及固定文件种类。旧 result/download 路径读取首项。每次读结果验证对应 SHA256、大小、完整解码和尺寸；部分成功仍可下载完成项，失效或缺文件只使对应项不可用。裁剪从该任务 input.canvas.validRegion 读取，完整 JPEG 保持源字节，裁剪 PNG 不增加有损编码但不恢复 JPEG 丢失的信息。文件名含 taskId、presetId 与 full/photo-region。
+
+本地 CLI `scripts/register_lighttry_results.py --job <workspace/.local 下相对目录> --run <runId> --original-task <原照来源任务>` 是正式历史登记入口，不提供浏览器登记端点。它校验 run归档哈希及归档request、launch目标run、task/nonce/input/原照/配置、catalog映射、五通道inverse来源、每项完成标记及输出哈希/尺寸/解码/非恒定；保留实际生成时间、原task/run和inverse来源。只在未发布 staging 内复制受控证据，再原子发布到原任务目录；同taskId已存在须登记身份、状态/生成来源和内容一致，不覆盖；重复登记不延长结果期限。失败批次可登记已完成项，未完成/失败项保留各自状态。任务与历史文件不自动清理。
+
+页面区分上方“切换查看”和“勾选准备生成”；只有生成按钮发一个批次。运行中勾选锁定，查看可切换；重复点击由 pending 与服务端requestId双重保护。默认未连接仍禁用提交。恢复只保存任务/预设引用并重新查服务端，结果事实不保存在浏览器。当前执行端整批结束后取回结果，不支持首张流式出现，不宣称6秒网页出图或常驻模型。成功批次退出后新预设仍可能重新加载forward。
+
+真实结果登记与本地验收见 [PRODUCT_BATCH_ACCEPTANCE_20261010.md](PRODUCT_BATCH_ACCEPTANCE_20261010.md)。下文2026-10-09单任务说明为旧兼容契约；新的每项结果在partial时仍可用。
+
 2026-10-09：扩展既有 InputImage / Preset / Result / PreviewTask、sources.js 适配器和 state.js 状态管理，没有建立第二套产品协议。样例来源只读 catalog；未连接适配器仍返回 not_connected、result=null，不上传图片。真实服务默认关闭。
 
 ## 数据契约

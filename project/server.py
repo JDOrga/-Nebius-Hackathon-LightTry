@@ -135,6 +135,9 @@ class Handler(BaseHTTPRequestHandler):
                 if len(pieces) == 5:
                     payload, mime, filename = self.task_store.file(pieces[3], pieces[4])
                     return self.send_bytes(payload, mime, filename)
+                if len(pieces) == 7 and pieces[4]=='presets':
+                    payload, mime, filename = self.task_store.file(pieces[3],pieces[6],pieces[5])
+                    return self.send_bytes(payload,mime,filename)
                 raise JobError('TASK_NOT_FOUND', '任务不存在。', 404)
             except JobError as error:
                 return self.job_error(error)

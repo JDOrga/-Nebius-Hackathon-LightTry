@@ -2,24 +2,27 @@
 export const EMPTY_VIEW = Object.freeze({ zoom: 1, panX: 0, panY: 0, split: 50 });
 export function createState(catalog) {
   return { mode: 'sample', sampleId: catalog.samples[0].id, presetId: catalog.presets[0].id,
-    upload: null, task: null, tasks: {}, region: 'full', comparison: 'slider', view: { ...EMPTY_VIEW }, error: null };
+    upload: null, task: null, tasks: {}, plannedPresets: [catalog.presets[0].id], region: 'full', comparison: 'slider', view: { ...EMPTY_VIEW }, error: null };
 }
 export function reduce(state, event) {
   switch (event.type) {
     case 'SAMPLE': return { ...state, mode: 'sample', sampleId: event.id, task: null, error: null, view: { ...EMPTY_VIEW } };
     case 'MODE': return state.mode === event.mode ? state : { ...state, mode: event.mode, task: null, region: 'full', error: null, view: { ...EMPTY_VIEW } };
     case 'PRESET': return { ...state, presetId: event.id,
-      task: state.tasks?.[event.id]?.input?.id === state.upload?.id ? state.tasks[event.id] : null, error: null };
+      task: state.task?.presetResults ? state.task : state.tasks?.[event.id]?.input?.id === state.upload?.id ? state.tasks[event.id] : null, error: null };
+    case 'PLAN_PRESETS': return { ...state, plannedPresets: [...new Set(event.ids)].slice(0,3) };
     case 'UPLOAD_START': return { ...state, mode: 'generate', upload: null, task: null, tasks: {}, error: null, view: { ...EMPTY_VIEW } };
     case 'UPLOAD': return { ...state, mode: 'generate', upload: event.input, task: null, tasks: {}, error: null, view: { ...EMPTY_VIEW } };
     case 'TASK': {
       const task = event.task;
-      if (state.mode !== 'generate' || task.input?.id !== state.upload?.id || task.preset?.id !== state.presetId ||
+      if (state.mode !== 'generate' || task.input?.id !== state.upload?.id || (!task.presetResults && task.preset?.id !== state.presetId) ||
           (state.task && state.task.status !== 'not_connected' && state.task.taskId !== task.taskId)) return state;
+      if (state.task?.updatedAt && task.updatedAt < state.task.updatedAt) return state;
       return { ...state, task, error: null, upload: task.status === 'not_connected' ? state.upload : task.input,
         tasks: task.status === 'not_connected' ? state.tasks : { ...state.tasks, [task.preset.id]: task } };
     }
     case 'RESTORE_TASK': return { ...state, mode: 'generate', upload: event.task.input,
+      plannedPresets: (event.task.presets || [event.task.preset]).map(p=>p.id),
       presetId: event.task.preset.id, task: event.task,
       tasks: { ...(state.upload?.id === event.task.input.id ? state.tasks : {}), [event.task.preset.id]: event.task },
       error: null, view: { ...EMPTY_VIEW } };
@@ -38,7 +41,7 @@ export function reduce(state, event) {
 export function selection(state, catalog) {
   const preset = catalog.presets.find(p => p.id === state.presetId);
   if (state.mode === 'generate') {
-    const task = state.task;
+    const task = currentTask(state);
     const candidate = task?.result;
     const result = task?.status === 'succeeded' && (!task.expiresAt || task.expiresAt * 1000 > Date.now()) && task.input.id === state.upload?.id && task.preset.id === preset?.id &&
       candidate?.taskId === task.taskId && candidate.inputId === state.upload.id && candidate.presetId === preset.id ? candidate : null;
@@ -51,14 +54,21 @@ export function selection(state, catalog) {
       const dims = { width: box[2] - box[0], height: box[3] - box[1] };
       const base = `/api/tasks/${realTaskId}`;
       return { sample: null, preset, input: { ...state.upload, ...dims, url: base + '/input-region' },
-        result: result ? { ...result, ...dims, url: base + '/result-region' } : null,
-        exportUrl: result ? base + '/download-region' : null };
+        result: result ? { ...result, ...dims, url: result.regionUrl || base + '/result-region' } : null,
+        exportUrl: result ? result.regionDownloadUrl || base + '/download-region' : null };
     }
     return { sample: null, preset, input: state.upload, result, exportUrl: result?.downloadUrl || null };
   }
   const sample = catalog.samples.find(s => s.id === state.sampleId);
   return { sample, preset, input: sample?.input, result: sample?.results[preset?.id],
     exportUrl: sample && preset ? `/download/${sample.id}/${preset.id}` : null };
+}
+export function currentTask(state) {
+  const batch = state.task;
+  if (!batch?.presetResults) return batch;
+  const item = batch.presetResults[state.presetId];
+  return item ? { ...batch, preset:item.preset,status:['failed','expired'].includes(batch.status)?batch.status:item.status,
+    result:['failed','expired'].includes(batch.status)?null:item.result,error:['failed','expired'].includes(batch.status)?batch.error:item.error } : null;
 }
 export function recordedRegion(input) {
   const canvas = input?.canvas, box = canvas?.validRegion;

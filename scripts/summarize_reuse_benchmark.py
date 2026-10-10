@@ -28,7 +28,10 @@ def summarize(job):
     if configuration['request'] != minimal:
         raise ValueError('BENCHMARK_REQUEST_CONFIGURATION_MISMATCH')
     weights = read(safe_file(evidence, 'weights_verification.json'))
-    if weights.get('mode') != 'historical_metadata' or weights.get('content_verified_this_run') is not False:
+    if (weights.get('mode') != 'reuse_historical_without_content_scan' or
+            weights.get('content_verified_this_run') is not False or
+            weights.get('checkpoint_content_bytes_read') != 0 or
+            weights.get('all_present_expected_size') is not True):
         raise ValueError('BENCHMARK_WEIGHT_POLICY_MISMATCH')
     forward = lines(evidence/'forward-timing.jsonl')
     worker = lines(evidence/'worker-timing.jsonl')

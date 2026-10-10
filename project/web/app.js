@@ -1,4 +1,4 @@
-import { createState, reduce, selection, recordedRegion, validateFile, validateDimensions, fitSize, previewLayout } from './state.js';
+import { createState, reduce, selection, currentTask, recordedRegion, validateFile, validateDimensions, fitSize, previewLayout } from './state.js';
 import { sampleSource, disconnectedInference, serviceInference, recoverTask, decodeUpload } from './sources.js';
 
 const $ = id => document.getElementById(id);
@@ -9,6 +9,7 @@ let requestId = null, restoring = false, fileSelectionRequested = false;
 const savedTaskKey = 'lighttry.lastTask';
 const requestKey = 'lighttry.pendingRequest';
 const relatedKey = 'lighttry.relatedTasks';
+const viewedKey = 'lighttry.viewedPreset';
 const active = () => restoring || pending || ['queued', 'running'].includes(state?.task?.status) || state?.task?.executionUncertain;
 const storageGet = key => { try { return localStorage.getItem(key); } catch { return null; } };
 const storageSet = (key, value) => { try { value === null ? localStorage.removeItem(key) : localStorage.setItem(key, value); } catch {} };
@@ -32,11 +33,12 @@ function renderStatus() {
   $('upload-status').hidden = !generate;
   $('upload-status').replaceChildren();
   const title = document.createElement('strong');
-  const task = state.task;
-  const titles = { queued: '任务已接收，等待执行端事件', running: '任务正在执行', succeeded: '本次光照结果已通过校验',
-    failed: '任务失败', expired: '结果已过期', not_connected: '已载入，尚未连接推理服务' };
+  const task = currentTask(state);
+  const titles = { queued: '已提交，等待此灯光完成记录', running: '该灯光正在执行', succeeded: '本次光照结果已通过校验',
+    failed: '该灯光失败', expired: '结果已过期', pending: '该灯光尚未完成', partial: '部分灯光完成', not_connected: '已载入，尚未连接推理服务' };
   title.textContent = restoring ? '正在恢复上次任务…' : pending ? '正在提交本次任务…' : task ? titles[task.status] || '任务状态待核实' :
     state.upload ? capabilities.enabled ? '照片已载入，选择预设后提交' : '已载入，尚未连接推理服务' : '载入照片，在本机预览';
+  if(state.task?.status==='running' && !pending && !restoring) title.textContent='批次正在执行；各灯光完成状态待取回确认';
   const detail = document.createElement('span');
   const stages = { preflight: '执行端正在检查现有环境', weights: '执行端正在校验现有权重', inverse: '执行端正在运行光照分解',
     forward: '执行端正在运行所选光照', validating: '执行端正在校验输出', transferring: '正在取回本次结果' };
@@ -45,20 +47,36 @@ function renderStatus() {
     task?.status === 'succeeded' ? (task.result?.inverseReuse?.reused ? '本次复用了已校验的 G-buffer。' : '') + '可比较和下载；新灯光仍需显式生成，模型退出后需重新加载 forward。视觉质量仍需你检查。' :
     state.upload ? capabilities.enabled ? '此灯光尚未生成；请显式提交。符合条件时复用 G-buffer；模型退出后仍需加载 forward，不承诺秒切。' : '当前仅显示你的原图。真实推理默认关闭，不发送照片。' : '选择一张 JPG、PNG 或 WebP。');
   if (capabilities.enabled && state.upload && !uploadFile && !task) detail.textContent = '刷新后原始文件不在浏览器内，请重新载入照片再提交新任务。';
+  if(!task && state.upload && state.task?.presetResults) detail.textContent='此灯光尚未生成；勾选仅准备，必须点击生成按钮显式提交。默认未连接时不能提交，不发送照片。';
+  if(state.task?.status==='running') detail.textContent=(stages[state.task.stage] || '等待执行端报告阶段。')+' 整批结束取回后确认各灯光结果，不根据经过时间推测完成。';
   $('upload-status').append(title, detail);
   if (capabilities.developmentTestMode) {
     const badge = document.createElement('strong'); badge.textContent = '离线测试替身 · 非 GPU 结果';
     $('upload-status').prepend(badge);
   }
   $('submit-task').hidden = !generate;
-  $('submit-task').disabled = !capabilities.enabled || !state.upload || !uploadFile || active() || task?.status === 'succeeded';
-  $('submit-task').textContent = ['failed', 'expired'].includes(task?.status) ? '重新提交（新任务）' : '提交光照任务';
+  const plannedAlreadyComplete=state.plannedPresets.length>0 && state.plannedPresets.every(id=>state.task?.presetResults?.[id]?.status==='succeeded');
+  $('submit-task').disabled = !capabilities.enabled || !state.upload || !uploadFile || active() || !state.plannedPresets.length || plannedAlreadyComplete;
+  $('submit-task').textContent = `生成勾选的 ${state.plannedPresets.length} 种灯光（提交一批）`;
+  $('batch-plan').hidden = !generate;
+  $('batch-options').innerHTML = catalog.presets.map(p=>`<label><input type="checkbox" data-plan="${escape(p.id)}" ${state.plannedPresets.includes(p.id)?'checked':''} ${active()?'disabled':''}> ${escape(p.name)}</label>`).join('');
+  if (state.task?.presetResults) {
+    const summary = document.createElement('span');
+    summary.textContent = '批次：'+Object.values(state.task.presetResults).map(i=>`${i.preset.name}：${titles[i.status] || i.status}`).join('；') + '。整批结束并取回校验后可显示；未完成项不会自动重试。';
+    $('upload-status').append(summary);
+    const provenance = task?.result?.source;
+    if (provenance) {
+      const source=document.createElement('span');
+      source.textContent=`来源任务 ${provenance.taskId} · run ${provenance.runId} · 实际生成 ${new Date(task.result.generatedAt*1000).toLocaleString()}${state.task.registeredAt?' · 已登记历史真实结果':''}`;
+      $('upload-status').append(source);
+    }
+  }
   $('cancel-task').hidden = !generate || !['queued', 'running'].includes(task?.status);
   $('restore-task').hidden = !storageGet(savedTaskKey) || storageGet(savedTaskKey) === task?.taskId;
   $('view-upload-original').hidden = !generate || !state.upload;
   $('sample-mode').disabled = $('generate-mode').disabled = !!active();
   // Keep the displayed selection bound to the submitted task until it ends.
-  document.querySelectorAll('[data-preset]').forEach(button => { button.disabled = generate && active(); });
+  document.querySelectorAll('[data-preset]').forEach(button => { button.disabled = false; });
 }
 
 async function render() {
@@ -77,14 +95,14 @@ async function render() {
   $('sample-mode').setAttribute('aria-pressed', String(!generate));
   $('generate-mode').setAttribute('aria-pressed', String(generate));
   $('samples-panel').hidden = generate;
-  $('source-label').textContent = generate ? '我的照片 · ' + (hasResult ? '本次结果' : '本机预览') : '样例演示 · 历史实测';
-  $('image-title').textContent = generate ? input?.name || '载入你的产品照片' : `${sample.name} / ${preset.name}`;
+  $('source-label').textContent = generate ? '我的照片 · ' + (hasResult ? state.task?.registeredAt ? '已登记历史真实结果' : '本次结果' : '本机预览') : '样例演示 · 历史实测';
+  $('image-title').textContent = generate ? `${input?.name || '载入你的产品照片'} / ${preset.name}` : `${sample.name} / ${preset.name}`;
   $('image-size').textContent = input ? `${input.width} × ${input.height} px` : '';
   $('canvas-note').textContent = cropped ? '原照片区域 · 输入与结果按同一记录裁剪 · 不修复生成伪影' : generate && !state.task?.input?.canvas ? '本机原图预览 · 等比显示' : '完整画布 · 等比显示 · 保留灰色留白';
   $('sample-warning').hidden = !sample?.unstable;
   $('sample-warning').textContent = sample?.warning || '';
   $('export').textContent = cropped ? '↓ 下载原照片区域 PNG' : '↓ 下载完整光照结果 JPEG';
-  $('export-note').textContent = originalOnly ? '尚无本次有效结果，不能下载光照结果' : cropped ? '仅去除记录中的填充区 · 无缩放 · 不修复材质错误' : '下载校验后的实际 JPEG，保留完整画布';
+  $('export-note').textContent = originalOnly ? '尚无此灯光有效结果，不能下载光照结果' : cropped ? '按记录裁剪 · 不再增加有损编码，不恢复 JPEG 已丢失信息' : '下载校验后的实际 JPEG 原字节，保留完整画布';
   $('hdr-note').textContent = `环境文件：${preset.hdr}`;
   $('compact-light-label').textContent = generate ? '目标光照' : '光照方案';
   $('compact-preset-list').innerHTML = catalog.presets.map(p => `<button class="compact-preset" data-preset="${escape(p.id)}" aria-pressed="${p.id === preset.id}" aria-label="${escape(p.name)}">${escape(p.name)}</button>`).join('');
@@ -209,10 +227,10 @@ async function pollTask(taskId, version) {
       const task = await serviceInference.getTask(taskId);
       if (version !== pollVersion) return;
       const previous = state.task;
-      if (JSON.stringify([previous?.status, previous?.stage, previous?.result, previous?.error, previous?.executionUncertain]) !==
-          JSON.stringify([task.status, task.stage, task.result, task.error, task.executionUncertain])) dispatch({ type: 'TASK', task });
-      if (!['queued', 'running', 'succeeded'].includes(task.status) && !task.executionUncertain) return;
-      if (task.status === 'succeeded') {
+      if (JSON.stringify([previous?.status, previous?.stage, previous?.result, previous?.error, previous?.executionUncertain,previous?.presetResults]) !==
+          JSON.stringify([task.status, task.stage, task.result, task.error, task.executionUncertain,task.presetResults])) dispatch({ type: 'TASK', task });
+      if (!['queued', 'running', 'succeeded','partial'].includes(task.status) && !task.executionUncertain) return;
+      if (['succeeded','partial'].includes(task.status)) {
         await new Promise(resolve => setTimeout(resolve, Math.max(100, Math.min(30000, (task.expiresAt * 1000 - Date.now())))));
         continue;
       }
@@ -236,6 +254,8 @@ async function restoreTask() {
     if (!task || version !== uploadVersion) return;
     uploadFile = null; requestId = null;
     dispatch({ type: 'RESTORE_TASK', task });
+    const viewed=storageGet(viewedKey);
+    if(catalog.presets.some(p=>p.id===viewed)) dispatch({type:'PRESET',id:viewed});
     try {
       const history = JSON.parse(related || 'null');
       if (history?.inputId === task.input.id && Array.isArray(history.taskIds)) {
@@ -260,13 +280,18 @@ $('view-upload-original').onclick = () => {
 };
 $('submit-task').onclick = async () => {
   if (!capabilities.enabled || !uploadFile || !state.upload || active()) return;
-  if (['failed', 'expired'].includes(state.task?.status)) { dispatch({ type: 'NEW_TASK' }); requestId = null; }
-  const { input, preset } = selection(state, catalog);
+  const input = state.upload;
+  const presets = catalog.presets.filter(p=>state.plannedPresets.includes(p.id));
+  if(!presets.length) return;
+  if(state.task && ['succeeded','partial','failed','expired'].includes(state.task.status)) requestId=null;
+  dispatch({ type: 'NEW_TASK' });
   requestId ||= crypto.randomUUID().replaceAll('-', '');
-  storageSet(requestKey, JSON.stringify({ inputId: input.id, presetId: preset.id, requestId }));
+  storageSet(requestKey, JSON.stringify({ inputId: input.id, presetIds: presets.map(p=>p.id), requestId }));
   pending = true; renderStatus();
   try {
-    const task = await serviceInference.submit(input, preset, uploadFile, requestId);
+    const submissionVersion=uploadVersion;
+    const task = await serviceInference.submit(input, presets, uploadFile, requestId);
+    if(submissionVersion!==uploadVersion || state.upload?.id!==input.id) return;
     storageSet(savedTaskKey, task.taskId); storageSet(requestKey, null);
     if (state.mode !== 'generate') dispatch({ type: 'RESTORE_TASK', task });
     else dispatch({ type: 'TASK', task });
@@ -289,15 +314,23 @@ $('sample-list').onclick = event => {
 };
 function selectPreset(event) {
   const button = event.target.closest('[data-preset]');
-  if (button && !active()) {
-    ++pollVersion; requestId = null; dispatch({ type: 'PRESET', id: button.dataset.preset });
+  if (button && !pending && !restoring) {
+    const wasActive=active();
+    if(!wasActive) ++pollVersion;
+    storageSet(viewedKey,button.dataset.preset);
+    dispatch({ type: 'PRESET', id: button.dataset.preset });
     if (state.task && state.task.status !== 'not_connected') {
       storageSet(savedTaskKey, state.task.taskId);
-      pollTask(state.task.taskId, pollVersion);
+      if(!wasActive) pollTask(state.task.taskId, pollVersion);
     } else disconnectedTask();
   }
 }
 $('preset-list').onclick = $('compact-preset-list').onclick = selectPreset;
+$('batch-options').onchange = event => {
+  if(active() || !event.target.dataset.plan) return;
+  requestId=null;
+  dispatch({type:'PLAN_PRESETS',ids:[...$('batch-options').querySelectorAll('input:checked')].map(i=>i.dataset.plan)});
+};
 document.querySelectorAll('[data-comparison]').forEach(button => button.onclick = () => dispatch({ type: 'COMPARE', value: button.dataset.comparison }));
 document.querySelectorAll('[data-region]').forEach(button => button.onclick = () => dispatch({ type: 'REGION', value: button.dataset.region }));
 $('zoom-in').onclick = () => zoom(.25);
@@ -376,6 +409,8 @@ try {
   render();
   if (capabilities.developmentTestMode) document.querySelector('.local-badge').textContent = '离线测试替身 · 非 GPU';
   const pendingRequest = storageGet(requestKey);
+  const linkedTask = new URLSearchParams(location.search).get('task');
+  if (/^[0-9a-f]{32}$/.test(linkedTask || '')) storageSet(savedTaskKey,linkedTask);
   if (pendingRequest) {
     try {
       const task = await serviceInference.getRequest(JSON.parse(pendingRequest).requestId);

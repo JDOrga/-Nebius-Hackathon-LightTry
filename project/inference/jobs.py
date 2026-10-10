@@ -70,12 +70,14 @@ class TaskStore:
 
     def capabilities(self):
         return {'enabled': self.executor is not None, 'developmentTestMode': False,
-                'message': '推理服务已配置；只允许一个任务串行执行。' if self.executor else '已载入，尚未连接推理服务',
-                'cancelRunning': False, 'maxBytes': MAX_BYTES}
+                'message': '推理服务已配置；只允许一个照片批次串行执行。' if self.executor else '已载入，尚未连接推理服务',
+                'cancelRunning': False, 'maxBytes': MAX_BYTES, 'maxPresets': 3,
+                'resultDelivery': '整批结束并取回校验后发布；不支持首张流式展示'}
 
     def public(self, task):
         fields = ('taskId', 'input', 'preset', 'status', 'stage', 'result', 'error',
-                  'createdAt', 'updatedAt', 'expiresAt', 'executionUncertain', 'runConfig')
+                  'createdAt', 'updatedAt', 'expiresAt', 'executionUncertain', 'runConfig',
+                  'presets', 'presetResults', 'registeredAt', 'registration')
         return copy.deepcopy({key: task[key] for key in fields if key in task})
 
     def submit(self, data, metadata, mime):
@@ -85,7 +87,13 @@ class TaskStore:
             try:
                 input_id = metadata['inputId']
                 key = metadata['requestId']
-                preset = self.presets[metadata['presetId']]
+                ids = metadata.get('presetIds', [metadata.get('presetId')])
+                if not isinstance(ids,list) or not 1 <= len(ids) <= 3 or any(not isinstance(x,str) for x in ids):
+                    raise ValueError()
+                ids = list(dict.fromkeys(ids))
+                presets = [self.presets[x] for x in ids]
+                preset = presets[0]
+                if metadata.get('presetId',preset['id']) != preset['id']: raise ValueError()
                 if not all(isinstance(x, str) and ID.fullmatch(x) for x in (input_id, key)):
                     raise ValueError()
                 name = metadata.get('name', '照片')
@@ -97,7 +105,7 @@ class TaskStore:
                 raise JobError('INVALID_IMAGE', '只接受 JPG、PNG、WebP。')
             # Idempotency survives server restarts. Same key with altered data is a conflict.
             identity = digest(data)
-            fingerprint = digest(json.dumps([input_id, preset['id'], identity], separators=(',', ':')).encode())
+            fingerprint = digest(json.dumps([input_id, ids if len(ids)>1 else preset['id'], identity], separators=(',', ':')).encode())
             existing = []
             for folder in self.root.iterdir():
                 if ID.fullmatch(folder.name) and folder.is_dir() and not folder.is_symlink() and (folder / 'task.json').is_file():
@@ -138,8 +146,16 @@ class TaskStore:
                 'nonce': uuid.uuid4().hex, 'runConfig': RUN_CONFIG.copy(), 'executionUncertain': False}
             task['runConfig'].update(self.executor.run_config() if hasattr(self.executor, 'run_config') else
                                      {'weightVerification': 'full', 'weightContentHashesChecked': True})
-            atomic(folder / 'task.json', task)
+            task['presets'] = presets
+            task['presetResults'] = {p['id']:{'preset':p,'status':'queued','result':None,'error':None} for p in presets}
             request = {k: task[k] for k in ('taskId', 'nonce', 'input', 'preset', 'original', 'runConfig')}
+            request['presets'] = presets
+            if hasattr(self.executor, 'prepare_request'):
+                try:
+                    self.executor.prepare_request(folder, request)
+                except (OSError, ValueError, KeyError):
+                    raise JobError('REQUIRED_REUSE_INVALID', '本轮指定的历史复用或批次校验失败；未上传或执行，不会重算 inverse。', 422)
+            atomic(folder / 'task.json', task)
             # No paths, original names or client commands are used as execution arguments.
             atomic(folder / 'request.json', request)
             try:
@@ -218,11 +234,22 @@ class TaskStore:
                             # A late result is retained as evidence but cannot reverse timeout.
                             if now > task['deadline']:
                                 raise TimeoutError()
-                            task['result'] = self._check_result(folder, task, read(folder / 'receipt.json'))
+                            if len(task.get('presets',[])) > 1:
+                                self._merge_batch(folder,task)
+                                if not all(i['status']=='succeeded' for i in task['presetResults'].values()):
+                                    raise ValueError('BATCH_NOT_ALL_SUCCEEDED')
+                            else:
+                                task['result'] = self._check_result(folder, task, read(folder / 'receipt.json'))
+                                if 'presetResults' in task:
+                                    task['presetResults'][task['preset']['id']].update(status='succeeded',result=task['result'],error=None)
                             task.update(status='succeeded', expiresAt=now + self.retention, executionUncertain=False)
                         elif status == 'failed':
                             task.update(status='failed', result=None, error={'code': 'EXECUTION_FAILED', 'message': 'Cosmos 执行失败，请查看本地执行日志。'},
                                         executionUncertain=not event.get('executionStopped', False))
+                            if (folder/'remote-evidence/presets').exists() and event.get('executionStopped'):
+                                self._merge_batch(folder,task)
+                                if any(i['status']=='succeeded' for i in task['presetResults'].values()):
+                                    task.update(status='partial',expiresAt=now+self.retention)
                         else:
                             if not (task['status'] == 'running' and status == 'queued'):
                                 task['status'] = status
@@ -246,17 +273,46 @@ class TaskStore:
                     task['error']['message'] += ' 本次资源已由独立 API 确认 STOPPED；本次任务仍为失败。'
             task['updatedAt'] = now
             atomic(folder / 'task.json', task)
-        if task['status'] == 'succeeded' and now >= task['expiresAt']:
+        if task['status'] in ('succeeded','partial') and now >= task['expiresAt']:
             task.update(status='expired', result=None, updatedAt=now, error={'code': 'RESULT_EXPIRED', 'message': '结果已过期，不能继续展示或下载。'})
+            for item in task.get('presetResults',{}).values():
+                item.update(status='expired',result=None)
             atomic(folder / 'task.json', task)
-        elif task['status'] == 'succeeded':
+        elif task['status'] in ('succeeded','partial'):
             try:
-                self._check_result(folder, task, read(folder / 'receipt.json'))
+                if task.get('registration') or len(task.get('presets',[]))>1:
+                    from .product_results import verify_product_file
+                    for item in task['presetResults'].values():
+                        if item['status']=='succeeded':
+                            try: verify_product_file(folder,item)
+                            except (OSError,ValueError,KeyError,InputError):
+                                item.update(status='failed',result=None,error={'code':'RESULT_INVALID','message':'此灯光结果缺失或校验失败。'})
+                    good = [i for i in task['presetResults'].values() if i['status']=='succeeded']
+                    task['status'] = 'succeeded' if len(good)==len(task['presetResults']) else 'partial' if good else 'failed'
+                    task['result'] = task['presetResults'][task['preset']['id']]['result']
+                    atomic(folder/'task.json',task)
+                else:
+                    self._check_result(folder, task, read(folder / 'receipt.json'))
             except (OSError, ValueError, KeyError, InputError):
                 task.update(status='failed', result=None, updatedAt=now,
                             error={'code': 'RESULT_INVALID', 'message': '结果文件身份校验失败；不能继续展示或下载。'})
                 atomic(folder / 'task.json', task)
+        if task['status']=='failed':
+            for item in task.get('presetResults',{}).values():
+                if item['status'] in ('queued','running'):
+                    item.update(status='failed',result=None,error=task.get('error'))
+            atomic(folder/'task.json',task)
         return task
+
+    def _merge_batch(self,folder,task):
+        from .product_results import evidence_items
+        binding = read(folder/'runtime-binding.json')
+        task['presetResults'] = evidence_items(folder,read(folder/'request.json'),self.presets,binding['guardRunId'])
+        task['result'] = task['presetResults'][task['preset']['id']]['result']
+
+    def register_execution(self,relative_job,run_id,original_task_id):
+        from .product_results import register_local
+        return register_local(self,relative_job,run_id,original_task_id)
 
     def get(self, task_id):
         with self.mutex:
@@ -276,20 +332,32 @@ class TaskStore:
         self.get(task_id)
         raise JobError('CANCEL_UNSUPPORTED', '当前适配器不能保证终止远端进程；任务未取消。独立守护和固定截止仍生效。', 409)
 
-    def file(self, task_id, kind):
+    def file(self, task_id, kind, preset_id=None):
         with self.mutex:
             folder = self.directory(task_id)
             task = self._refresh(folder)
+            if preset_id is not None and (preset_id not in self.presets or kind not in ('result','download','result-region','download-region')):
+                raise JobError('FILE_NOT_FOUND','预设或文件类型不在允许范围内。',404)
+            item = task.get('presetResults',{}).get(preset_id or task['preset']['id'])
+            if preset_id is not None and ((task.get('presetResults') is not None and item is None) or
+                    (task.get('presetResults') is None and preset_id != task['preset']['id'])):
+                raise JobError('RESULT_UNAVAILABLE','此灯光未提交或尚无结果。',409)
             region = kind in ('input-region', 'result-region', 'download-region')
             source_kind = {'input-region': 'input', 'result-region': 'result', 'download-region': 'download'}.get(kind, kind)
             allowed = {'input': 'inputs/photo.png', 'original': 'original', 'result': 'result.jpg', 'download': 'result.jpg'}
             if source_kind not in allowed:
                 raise JobError('FILE_NOT_FOUND', '文件不在允许范围内。', 404)
             if source_kind in ('result', 'download'):
-                if task['status'] != 'succeeded':
+                if task['status'] not in ('succeeded','partial') or (item is not None and item['status']!='succeeded'):
                     raise JobError('RESULT_UNAVAILABLE', '本次任务没有可用且未过期的结果。', 410 if task['status'] == 'expired' else 409)
                 try:
-                    self._check_result(folder, task, read(folder / 'receipt.json'))
+                    if item and (task.get('registration') or len(task.get('presets',[]))>1):
+                        from .product_results import verify_product_file
+                        verify_product_file(folder,item)
+                        allowed[source_kind]=f"results/{item['preset']['id']}.jpg"
+                    else:
+                        if preset_id and preset_id != task['preset']['id']: raise ValueError('PRESET_NOT_AVAILABLE')
+                        self._check_result(folder, task, read(folder / 'receipt.json'))
                 except (OSError, ValueError, KeyError, InputError):
                     task.update(status='failed', result=None, error={'code': 'RESULT_INVALID', 'message': '结果文件校验失败。'})
                     atomic(folder / 'task.json', task)
@@ -298,7 +366,8 @@ class TaskStore:
             if path.is_symlink() or not path.resolve().is_relative_to(folder) or not path.is_file():
                 raise JobError('FILE_NOT_FOUND', '文件不在允许范围内。', 404)
             mime = task['original']['mime'] if source_kind == 'original' else 'image/png' if source_kind == 'input' else 'image/jpeg'
-            filename = f"LightTry_{task_id}_{task['preset']['id']}.jpg" if source_kind == 'download' else None
+            selected_id = preset_id or task['preset']['id']
+            filename = f"LightTry_{task_id}_{selected_id}_full.jpg" if source_kind == 'download' else None
             if path.stat().st_size > MAX_BYTES:
                 raise JobError('FILE_INVALID', '任务文件大小校验失败。', 409)
             payload = path.read_bytes()
@@ -310,5 +379,5 @@ class TaskStore:
                 except (InputError, OSError, ImportError) as error:
                     raise JobError('REGION_UNAVAILABLE', '原照片区域记录或图片不可用，不能裁剪导出。', 409) from error
                 mime = 'image/png'
-                filename = f"LightTry_{task_id}_{task['preset']['id']}_photo-region.png" if kind == 'download-region' else None
+                filename = f"LightTry_{task_id}_{selected_id}_photo-region.png" if kind == 'download-region' else None
             return payload, mime, filename

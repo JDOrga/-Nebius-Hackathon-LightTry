@@ -301,6 +301,17 @@ class HTTPTests(unittest.TestCase):
         for suffix in ('request.json', 'receipt.json', 'driver.log', '..%2F..%2Fconfig', 'download/anything'):
             with self.assertRaises(HTTPError): urlopen(self.base + f'/api/tasks/{tid}/' + suffix)
 
+    def test_batch_http_one_dispatch_and_preset_route_allowlist(self):
+        meta={**self.meta,'presetIds':['sunny','sunrise','sunny']}
+        with self.post(meta=meta) as response:task=json.load(response)
+        with self.post(meta=meta) as response:self.assertEqual(json.load(response)['taskId'],task['taskId'])
+        self.assertEqual(len(self.executor.calls),1)
+        self.assertEqual([p['id'] for p in self.executor.calls[0][1]['presets']],['sunny','sunrise'])
+        for path in ('presets/sunrise/download','presets/street/download','presets/../../original','presets/sunny/request.json'):
+            with self.assertRaises(HTTPError):urlopen(self.base+f"/api/tasks/{task['taskId']}/"+path)
+        with self.assertRaises(HTTPError) as error:self.post(meta={**meta,'presetIds':['../sunny']})
+        self.assertEqual(error.exception.code,400)
+
     def test_region_routes_keep_full_result_and_share_recorded_rectangle(self):
         from PIL import Image, ImageChops
         with self.post(data=image_bytes((396, 704))) as response: task = json.load(response)
