@@ -1,0 +1,4 @@
+.tasks/
+qa/
+*.local.json
+__pycache__/

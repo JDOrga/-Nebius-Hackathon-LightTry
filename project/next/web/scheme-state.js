@@ -1,0 +1,51 @@
+// Pure versioned plan/identity transitions. No image effects or GPU calls.
+export function canonical(value) {
+  if (Array.isArray(value)) return '['+value.map(canonical).join(',')+']';
+  if (value && typeof value==='object') return '{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+canonical(value[k])).join(',')+'}';
+  if(typeof value==='number'&&!Number.isFinite(value)) throw Error('参数不是有限数字');
+  return JSON.stringify(value);
+}
+export const uid=()=>crypto.randomUUID().replaceAll('-','');
+export const digest=async value=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(canonical(value))))).map(b=>b.toString(16).padStart(2,'0')).join('');
+export function allowed(parameters,policy) {
+  const {offsetDeg:o,strength:s,environmentId:e}=parameters;
+  return typeof o==='number'&&Number.isFinite(o)&&typeof s==='number'&&Number.isFinite(s)&&
+    ((o===0&&s===1)||(policy.approvedVariants?.[e]||[]).some(p=>p[0]===o&&p[1]===s));
+}
+export function createScheme(environmentId,name='新方案',inputId=null) {
+  return {schemaVersion:1,planId:uid(),version:1,name,parameters:{environmentId,offsetDeg:0,strength:1},inputId,parentVersion:null};
+}
+export function revise(scheme,parameters,name=scheme.name,existing=[]) {
+  const latest=Math.max(scheme.version,...existing.filter(s=>s.planId===scheme.planId).map(s=>s.version));
+  return {...structuredClone(scheme),version:latest+1,parentVersion:scheme.version,
+    parameters:{...parameters},name:name.trim()||scheme.name};
+}
+export function variant(scheme,name) {
+  return {...structuredClone(scheme),planId:uid(),version:1,parentVersion:null,name:(name.trim()||scheme.name+' 副本').slice(0,60)};
+}
+export function sameParameters(a,b) {return canonical(a)===canonical(b);}
+export function matchingTask(task,inputId,parameters,now=Date.now()) {
+  if(task.input?.id!==inputId || task.status!=='succeeded' || task.executionUncertain ||
+    task.expiresAt*1000<=now) return null;
+  const p=task.preset;
+  const actual=p.parameters?{environmentId:p.environmentId,offsetDeg:p.parameters.offsetDeg,strength:p.parameters.strength}:
+    {environmentId:p.id,offsetDeg:0,strength:1};
+  const r=task.result;
+  if(p.parameters && (!p.recipeKey || r?.recipeKey!==p.recipeKey || !sameParameters(r?.parameters,p.parameters))) return null;
+  return sameParameters(actual,parameters)&&r?.taskId===task.taskId&&r.inputId===inputId&&r.presetId===p.id?r:null;
+}
+export function validateLibrary(value,environments) {
+  if(!Array.isArray(value)||value.length>200) return [];
+  return value.filter(s=>s&&s.schemaVersion===1&&/^[0-9a-f]{32}$/.test(s.planId)&&
+    Number.isInteger(s.version)&&s.version>0&&s.version<=1000&&typeof s.name==='string'&&s.name.length<=60&&
+    environments.includes(s.parameters?.environmentId)&&typeof s.parameters.offsetDeg==='number'&&
+    Number.isFinite(s.parameters.offsetDeg)&&typeof s.parameters.strength==='number'&&Number.isFinite(s.parameters.strength)&&
+    (s.inputId===null||/^[0-9a-f]{32}$/.test(s.inputId)));
+}
+export const referenceKey=(s,inputId)=>canonical({planId:s.planId,version:s.version,parameters:s.parameters,inputId});
+export function restoreInputStub(s){
+  if(!s||!/^[0-9a-f]{32}$/.test(s.id)||!/^[0-9a-f]{64}$/.test(s.originalSha)||
+    !Number.isInteger(s.width)||!Number.isInteger(s.height)||Math.min(s.width,s.height)<32||
+    Math.max(s.width,s.height)>16384||s.width*s.height>40000000)return null;
+  return {id:s.id,name:typeof s.name==='string'?s.name.slice(0,100):'我的照片',width:s.width,height:s.height,originalSha:s.originalSha,needsFile:true};
+}

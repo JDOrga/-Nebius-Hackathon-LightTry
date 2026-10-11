@@ -1,0 +1,16 @@
+{
+  "revision": "sunny-bounded-approximate-preview-v1",
+  "approvedVariants": {"sunny": [[0, 0.7], [45, 1]]},
+  "evidence": {
+    "actualControlledFrames": 12,
+    "materials": ["matte terracotta", "glossy metal"],
+    "hdr": "sunny",
+    "sampling": "1280x704, one frame, steps15, seed1000, guidance0; unchanged inverse per image",
+    "repeat": "baseline repeat byte-identical for both materials",
+    "lowerMultiplier": "ordered darker response observed in both; user saw slight preference for baseline over lower on terracotta",
+    "high1_4": "withheld: user did not perceive benefit over baseline on terracotta",
+    "minus45": "withheld: very dark terracotta surface; discernibility alone is not practical usefulness",
+    "plus45": "fixed approximate direction recipe: visible different lighting/highlights in both; assistant visual observation, human direction acceptance pending"
+  },
+  "limitations": ["not EV", "not a physical lamp location", "not continuous control", "no colour/material/texture preservation guarantee", "other HDRs retain nominal defaults only"]
+}
