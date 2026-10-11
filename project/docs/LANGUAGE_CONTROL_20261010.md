@@ -1,8 +1,14 @@
 # LightTry 文字灯光方案：本地交付，2026-10-10
 
+**当前配置（用户后续明确要求）：输出上限40960，thinking on，默认60秒超时。** 服务仍默认关闭；原40次/$0.10总验收授权不变，最新显式入口为 `--thinking-suite`（最多6次），详见协议调查最新段落。旧off/1000/4096与25秒等待均为阶段历史。后续本机服务器启用时需更新原终端已有环境变量，否则旧变量优先。
+
+**2026-10-11 最新结论：真实文字验收未通过，暂停付费重跑。** 累计预留最多 8 次；原 20 个用例只有 3 个独立用例被尝试，其余 17 项未执行。存在多工具、截断及明确选择不遵循问题，1000 token 下仍截断。手动选光和默认关闭服务继续可用，不能把离线交付写成真实 Nemotron 推荐已稳定。详见下面链接的最新结论；其中后续命令为阶段历史，当前不要重复运行。
+
 2026-10-11 已获得小规模 Token Factory 费用授权，并进行首项真实请求；返回无效输出后按计划停止。当前结果与下一步诊断见 [LANGUAGE_REAL_ACCEPTANCE_20261011.md](LANGUAGE_REAL_ACCEPTANCE_20261011.md)。下文“未授权、未执行”及离线交付范围是 10 月 10 日的历史记录，不代表新验收已通过。
 
 最新长度边界：理由 60 字符、澄清问题 100 字符，schema/服务端/前端均收紧；下文 180 字符是原离线交付的历史上限。真实验收默认关 Lightning thinking、禁用并行工具调用；普通产品输出 token 默认仍 600，独立 `--bounded-suite` 验收入口显式 1000，累计请求预算按此前记录扣除。
+
+用户后续要求提高输出预算：适配器现在允许128–4096 tokens，未运行的 `--auto-suite` 显式4096/20秒/不重试；原40次/$0.10总授权不变。envelope硬上限现64KiB，方案JSON仍4096字符，理由/问题限制不放宽。下文旧1000/32KiB为历史限制，最新定位记录说明影响与费用预留。
 
 本轮在 `C:\Project\Nebius` 当前代码上继续开发，开始时 Git 干净，未找到仓库或上级适用的 AGENTS.md。已阅读根/产品 README、DEVELOPMENT、架构、INFERENCE_INTERFACE、DEMO_HANDOFF、交付边界及最新批次说明；没有按历史交接重做迁移。未安装依赖、读取现有秘密、调用收费 API、启动云机/GPU、充值、创建 Key、修改权限、提交或推送。
 
@@ -64,11 +70,12 @@ python -X utf8 -B project/tests/serve_language_fixture.py --port 8788 --tasks-di
 |LIGHTTRY_LANGUAGE_MODEL|程序默认为空；候选填 `nvidia/Nemotron-3_5-Lightning`|
 |LIGHTTRY_LANGUAGE_ENDPOINT|`https://api.tokenfactory.nebius.com/v1/chat/completions`；仅 HTTPS，无凭据/query/fragment，禁止重定向|
 |LIGHTTRY_TOKEN_FACTORY_KEY|操作者私下设置现有服务端凭据；无默认值|
-|LIGHTTRY_LANGUAGE_TIMEOUT|默认 `12` 秒，允许 1–20 秒，整个推荐/格式修复共享预算|
-|LIGHTTRY_LANGUAGE_MAX_TOKENS|默认 `600`，允许 128–1000，每次调用硬输出 token 上限|
+|LIGHTTRY_LANGUAGE_TIMEOUT|默认 `60` 秒，允许 1–60 秒，整个推荐/格式修复共享预算|
+|LIGHTTRY_LANGUAGE_MAX_TOKENS|默认 `40960`，允许 128–40960，每次调用硬输出 token 上限|
 |LIGHTTRY_LANGUAGE_REPAIRS|默认 `1`，仅允许 0 或 1；总请求最多 2 次|
 |LIGHTTRY_LANGUAGE_OUTPUT_MODE|默认 `tool`，或显式 `json_schema`|
-|LIGHTTRY_LANGUAGE_THINKING|默认 `auto`：准确 Lightning 模型 ID 发送 enable_thinking false；其他模型省略。可显式 off/on，真实兼容性参见 10 月 11 日记录|
+|LIGHTTRY_LANGUAGE_THINKING|默认 `on`：明确发送 enable_thinking true；可显式 off。auto省略模板参数、沿用模型默认|
+|LIGHTTRY_LANGUAGE_TOOL_CHOICE|默认 fixed，或显式 auto；两者均只允许一个固定数据函数，仍严格拒绝其他/多个调用。auto 的完整能力验收尚未通过|
 
 授权后启用文字服务的启动形式为 `python -X utf8 -B project/server.py --assets-dir <目录> --language-service`；没有 `--inference-config` 时图片推理仍关闭。文字推荐只有按钮动作才发送，启动/刷新不会调用。模板不是授权，也不是已验证模型连接。
 

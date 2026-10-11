@@ -119,7 +119,7 @@ $('recommend-plan').onclick = async () => {
   const controller = recommendationController;
   const token = crypto.randomUUID();
   plan=beginRecommendation(plan,token);renderStatus();
-  const timer=setTimeout(()=>controller.abort(),25000);
+  const timer=setTimeout(()=>controller.abort(),65000);
   try {
     const value=await languageService.recommend(text,{presetIds:plan.ids,excludedIds:plan.excluded},$('compare-three').checked,controller.signal);
     const next=applyRecommendation(plan,token,value,catalog.presets.map(p=>p.id));

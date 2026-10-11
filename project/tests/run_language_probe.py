@@ -4,6 +4,7 @@ One request, no repair. Does not start a server, GPU, task, or image operation.
 The 2026-10-11 HTTP attempt already reserves two of the authorized 40 calls.
 """
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -35,12 +36,15 @@ def case_check(case, plan):
     return False
 
 
-def direct_suite(single_tool=False, bounded=False):
+def direct_suite(single_tool=False, bounded=False, reviewed=False, auto_suite=False, thinking_suite=False):
     """One initial protocol case, then the other 19 only if protocol succeeds."""
-    output = ROOT / ('qa/language-real-20261011/bounded-suite.json' if bounded else
+    output = ROOT / ('qa/language-real-20261011/thinking-suite.json' if thinking_suite else
+                     'qa/language-real-20261011/auto-suite.json' if auto_suite else
+                     'qa/language-real-20261011/reviewed-suite.json' if reviewed else
+                     'qa/language-real-20261011/bounded-suite.json' if bounded else
                      'qa/language-real-20261011/single-tool-suite.json' if single_tool else
                      'qa/language-real-20261011/direct-suite.json')
-    prior_file = output.with_name('single-tool-suite.json' if bounded else 'direct-suite.json' if single_tool else 'protocol-probe.json')
+    prior_file = output.with_name('reviewed-suite.json' if auto_suite or thinking_suite else 'protocol-matrix.json' if reviewed else 'single-tool-suite.json' if bounded else 'direct-suite.json' if single_tool else 'protocol-probe.json')
     if output.exists():
         print('Suite already recorded; do not delete reports to repeat paid requests.')
         return 2
@@ -48,22 +52,34 @@ def direct_suite(single_tool=False, bounded=False):
         print('Missing prior probe ledger; stop.')
         return 2
     prior = json.loads(prior_file.read_text(encoding='utf-8'))
-    if bounded:
+    if auto_suite or thinking_suite:
+        if thinking_suite and output.with_name('auto-suite.json').exists():
+            print('Another paid run was recorded after this budget baseline; review it first.')
+            return 2
         previous_cases = prior.get('cases', [])
-        reviewed = (prior.get('totalRequestsReserved') == 7 and prior.get('requestsThisRun') == 2 and
+        reviewed_ok = (prior.get('totalRequestsReserved') == 17 and prior.get('requestsThisRun') == 3 and
+                       prior.get('status') == 'stopped-on-error' and len(previous_cases) == 3 and
+                       previous_cases[-1].get('errorCode') == 'LANGUAGE_OUTPUT_TRUNCATED')
+    elif reviewed:
+        reviewed_ok = (prior.get('totalRequestsReserved') == 14 and prior.get('requestsThisRun') == 6 and
+                       prior.get('status') == 'comparison-completed-requires-review' and
+                       len(prior.get('cases', [])) == 6 and all(c.get('status') == 'valid' for c in prior['cases']))
+    elif bounded:
+        previous_cases = prior.get('cases', [])
+        reviewed_ok = (prior.get('totalRequestsReserved') == 7 and prior.get('requestsThisRun') == 2 and
                     prior.get('status') == 'stopped-on-error' and len(previous_cases) == 2 and
                     previous_cases[-1].get('errorCode') == 'LANGUAGE_OUTPUT_TRUNCATED')
     elif single_tool:
         previous_cases = prior.get('cases', [])
-        reviewed = (prior.get('totalRequestsReserved') == 5 and prior.get('requestsThisRun') == 2 and
+        reviewed_ok = (prior.get('totalRequestsReserved') == 5 and prior.get('requestsThisRun') == 2 and
                     prior.get('status') == 'stopped-on-error' and len(previous_cases) == 2 and
                     previous_cases[-1].get('protocol', {}).get('toolCallCount') == 2)
     else:
-        reviewed = prior.get('totalRequestsReserved') == 3 and prior.get('protocol', {}).get('finishReason') == 'length'
-    if not reviewed:
+        reviewed_ok = prior.get('totalRequestsReserved') == 3 and prior.get('protocol', {}).get('finishReason') == 'length'
+    if not reviewed_ok:
         print('Prior report differs from the reviewed diagnosis; stop.')
         return 2
-    prior_count = 7 if bounded else 5 if single_tool else 3
+    prior_count = 17 if auto_suite or thinking_suite else 14 if reviewed else 7 if bounded else 5 if single_tool else 3
     presets = json.loads((ROOT / 'data/catalog.json').read_text(encoding='utf-8'))['presets']
     adapter = LanguageAdapter.from_env(presets)
     if not adapter.enabled:
@@ -71,13 +87,22 @@ def direct_suite(single_tool=False, bounded=False):
         return 2
     if (adapter.model != 'nvidia/Nemotron-3_5-Lightning' or
             adapter.endpoint != 'https://api.tokenfactory.nebius.com/v1/chat/completions' or
-            adapter.output_mode != 'tool' or adapter.max_tokens > (1000 if bounded else 600) or adapter.thinking_mode == 'on'):
+            adapter.output_mode != 'tool' or adapter.max_tokens > (40960 if thinking_suite else 4096 if auto_suite else 1000 if bounded or reviewed else 600) or (not thinking_suite and adapter.thinking_mode == 'on')):
         print('Configuration differs from the authorized direct-answer plan; stop.')
         return 2
     adapter.repair_attempts = 0
-    if bounded:
+    if bounded or reviewed or auto_suite:
         # Explicit evaluation mode only; normal product default remains 600.
         adapter.max_tokens = 1000
+    if auto_suite:
+        adapter.tool_selection = 'auto'
+        adapter.max_tokens = 4096
+        adapter.timeout = 20
+    if thinking_suite:
+        adapter.tool_selection = 'auto'
+        adapter.thinking_mode = 'on'
+        adapter.max_tokens = 40960
+        adapter.timeout = 60
     cases = json.loads((ROOT / 'tests/language_cases.json').read_text(encoding='utf-8'))
     if len(cases) != 20:
         print('Expected exactly 20 reviewed cases; stop.')
@@ -86,10 +111,19 @@ def direct_suite(single_tool=False, bounded=False):
         # Keep the accepted Chinese result; probe the failed English case first,
         # then evaluate the 18 cases not yet sent. Avoid paying to repeat success.
         cases = cases[1:]
+    if thinking_suite:
+        wanted = ('explicit-en', 'mood-zh', 'mood-en', 'negation-zh', 'remove-en', 'precision-zh')
+        cases = [next(c for c in cases if c['id'] == key) for key in wanted]
     reserve = (15000 * .06 + adapter.max_tokens * .24) / 1000000
-    report = {'date': '2026-10-11', 'model': adapter.model, 'thinking': False,
+    # Conservative reserve for prior calls under the earlier <=4096 budget;
+    # do not multiply already-completed calls by the newly increased cap.
+    prior_reserve = prior_count * (15000 * .06 + 4096 * .24) / 1000000 if thinking_suite else prior_count * reserve
+    report = {'date': '2026-10-11', 'model': adapter.model, 'thinking': adapter.thinking_mode == 'on',
               'gpuEnabled': False, 'parallelToolCalls': False, 'maxTokens': adapter.max_tokens,
+              'toolChoice': adapter.tool_selection,
+              'timeoutSeconds': adapter.timeout,
               'priorRequestsReserved': prior_count, 'requestsThisRun': 0,
+              'priorPlanningCostReservedUSD': round(prior_reserve, 8),
               'totalRequestsReserved': prior_count, 'reportedTokenCostEstimateThisRunUSD': 0,
               'status': 'started', 'cases': []}
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -99,13 +133,13 @@ def direct_suite(single_tool=False, bounded=False):
     original = adapter.transport
     def counted(payload, remaining):
         # Guard immediately before each outbound request; never log payload/key.
-        if (report['totalRequestsReserved'] >= 40 or
-                (report['totalRequestsReserved'] + 1) * reserve > .10 or
+        if (report['totalRequestsReserved'] >= 40 or (thinking_suite and report['requestsThisRun'] >= 6) or
+                prior_reserve + (report['requestsThisRun'] + 1) * reserve > .10 or
                 len(json.dumps(payload, ensure_ascii=False).encode('utf-8')) > 10000):
             raise LanguageError('ACCEPTANCE_BUDGET_STOP', '验收预算边界，停止调用。')
         report['requestsThisRun'] += 1
         report['totalRequestsReserved'] += 1
-        report['planningCostReservedUSD'] = round(report['totalRequestsReserved'] * reserve, 8)
+        report['planningCostReservedUSD'] = round(prior_reserve + report['requestsThisRun'] * reserve, 8)
         save()  # Persist reservation before calling, including timeout/crash cases.
         return original(payload, remaining)
     adapter.transport = counted
@@ -120,6 +154,10 @@ def direct_suite(single_tool=False, bounded=False):
                 'compareThree': case['check'] == 'three'})
             item.update(status='valid', plan=plan, constraintCheck=case_check(case, plan),
                         explanationReview='pending-human-review')
+            explanation = ' '.join(plan['reasons'] + [plan['question']]).strip()
+            expected_chinese = bool(re.search(r'[\u4e00-\u9fff]', case['text']))
+            item['languageShapeCheck'] = (not explanation or
+                bool(re.search(r'[\u4e00-\u9fff]', explanation)) == expected_chinese)
         except LanguageError as error:
             item.update(status='failed', errorCode=error.code)
         item['elapsedSeconds'] = round(time.monotonic() - started, 3)
@@ -150,8 +188,14 @@ def main():
         return direct_suite(single_tool=True)
     if sys.argv[1:] == ['--bounded-suite']:
         return direct_suite(bounded=True)
+    if sys.argv[1:] == ['--reviewed-suite']:
+        return direct_suite(reviewed=True)
+    if sys.argv[1:] == ['--auto-suite']:
+        return direct_suite(auto_suite=True)
+    if sys.argv[1:] == ['--thinking-suite']:
+        return direct_suite(thinking_suite=True)
     if sys.argv[1:]:
-        print('Usage: run_language_probe.py [--direct-suite | --single-tool-suite | --bounded-suite]')
+        print('Usage: run_language_probe.py [--direct-suite | --single-tool-suite | --bounded-suite | --reviewed-suite | --auto-suite | --thinking-suite]')
         return 2
     output = ROOT / 'qa/language-real-20261011/protocol-probe.json'
     if output.exists():

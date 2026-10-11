@@ -21,6 +21,26 @@ BODY = {'text':'想要温暖一点', 'currentPlan':{'presetIds':['sunny'], 'excl
 
 
 class AdapterTests(unittest.TestCase):
+    def test_configured_40960_budget_and_hard_maximum(self):
+        calls = []
+        adapter = self.adapter(lambda payload, _: calls.append(payload) or json.dumps(PLAN),
+                               max_tokens=40960, timeout=60)
+        adapter.recommend(BODY)
+        self.assertEqual(calls[0]['max_tokens'], 40960)
+        with self.assertRaises(LanguageError):
+            self.adapter(lambda *_: '', max_tokens=40961)
+
+    def test_auto_tool_choice_still_offers_only_the_fixed_data_function(self):
+        calls = []
+        adapter = self.adapter(lambda payload, _: calls.append(payload) or json.dumps(PLAN), tool_selection='auto')
+        self.assertEqual(adapter.recommend(BODY), PLAN)
+        self.assertEqual(calls[0]['tool_choice'], 'auto')
+        self.assertEqual(len(calls[0]['tools']), 1)
+        self.assertEqual(calls[0]['tools'][0]['function']['name'], 'propose_lighting_plan')
+        self.assertFalse(calls[0]['parallel_tool_calls'])
+        with self.assertRaises(LanguageError):
+            self.adapter(lambda *_: '', tool_selection='arbitrary-tool')
+
     def test_short_reasons_and_question_limits(self):
         valid = copy.deepcopy(PLAN)
         valid['reasons'] = ['x' * 60, 'y']
@@ -36,14 +56,14 @@ class AdapterTests(unittest.TestCase):
             validate_plan(question, ['sunny'])
 
     def test_lightning_direct_answer_keeps_token_cap(self):
-        for model, mode, expected in [('nvidia/Nemotron-3_5-Lightning', 'auto', False),
+        for model, mode, expected in [('nvidia/Nemotron-3_5-Lightning', 'auto', None),
                                        ('test-model', 'auto', None), ('test-model', 'off', False),
                                        ('test-model', 'on', True)]:
             calls = []
             adapter = LanguageAdapter(PRESETS, enabled=True, key='SYNTHETIC_PRIVATE_KEY',
                 model=model, thinking_mode=mode, transport=lambda payload, _: calls.append(payload) or json.dumps(PLAN))
             adapter.recommend(BODY)
-            self.assertEqual(calls[0]['max_tokens'], 600)
+            self.assertEqual(calls[0]['max_tokens'], 40960)
             if expected is None:
                 self.assertNotIn('chat_template_kwargs', calls[0])
             else:
@@ -83,7 +103,8 @@ class AdapterTests(unittest.TestCase):
             return json.dumps(PLAN)
         self.assertEqual(self.adapter(transport).recommend(BODY), PLAN)
         payload=calls[0]
-        self.assertEqual(set(json.loads(payload['messages'][1]['content'])), {'text','currentPlan','maximum'})
+        self.assertEqual(set(json.loads(payload['messages'][1]['content'])), {'text','currentPlan','maximum','responseLanguage'})
+        self.assertEqual(json.loads(payload['messages'][1]['content'])['responseLanguage'], 'Chinese')
         self.assertNotIn('SYNTHETIC_PRIVATE_KEY', json.dumps(payload))
         self.assertEqual(len(payload['tools']),1)
         self.assertEqual(payload['tools'][0]['function']['name'],'propose_lighting_plan')
