@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / 'tests'))
 from language import LanguageAdapter, LanguageError
-from run_language_probe import case_check
+from acceptance_checks import case_check, dimensions, verdict, failure_dimensions
 
 
 def run(remaining=False):
@@ -53,6 +53,9 @@ def run(remaining=False):
         unknown = completion['unknownCostReserveUSD']
     presets = json.loads((ROOT / 'data/catalog.json').read_text(encoding='utf-8'))['presets']
     adapter = LanguageAdapter.from_env(presets)
+    if adapter._real_transport:
+        print('Original authorization exhausted; legacy paid entry disabled.')
+        return 2
     if not adapter.enabled:
         print('LANGUAGE_NOT_CONFIGURED: use the privately configured PowerShell.')
         return 2
@@ -109,13 +112,11 @@ def run(remaining=False):
         started = time.monotonic()
         try:
             plan = adapter.recommend({'text': case['text'], 'currentPlan': {
-                'presetIds': case['current'], 'excludedIds': []}, 'compareThree': case['check'] == 'three'})
-            text = ' '.join(plan['reasons'] + [plan['question']]).strip()
+                'presetIds': case['current'], 'excludedIds': []}, 'compareThree': case['check'] == 'three', 'responseLanguage': 'zh' if case['id'].endswith('-zh') else 'en'})
             item.update(status='valid', plan=plan, constraintCheck=case_check(case, plan),
-                languageShapeCheck=not text or bool(re.search(r'[\u4e00-\u9fff]', text)) == bool(re.search(r'[\u4e00-\u9fff]', case['text'])),
-                explanationReview='pending-human-review')
+                explanationReview='pending-human-review', checks=dimensions(case, plan))
         except LanguageError as error:
-            item.update(status='failed', errorCode=error.code)
+            item.update(status='failed', errorCode=error.code, checks=failure_dimensions(adapter, error))
         item['elapsedSeconds'] = round(time.monotonic() - started, 3)
         item['protocol'] = adapter.last_response_audit
         usage = item['protocol'].get('usage', {})
@@ -136,10 +137,13 @@ def run(remaining=False):
             break
     else:
         report['status'] = 'completed-requires-human-review'
+    report['executionCompleted'] = report['status'].startswith('completed')
+    report['acceptance'], exit_code = verdict(report['cases'], len(selected))
+    report['exitCode'] = exit_code
     save()
     print('Report:', output)
     print('Reserved request count:', report['totalRequestsReserved'], '/40; GPU disabled.')
-    return 0 if report['status'].startswith('completed') else 1
+    return exit_code
 
 
 if __name__ == '__main__':

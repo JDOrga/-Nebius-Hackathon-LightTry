@@ -14,26 +14,7 @@ sys.path.insert(0, str(ROOT))
 from language import LanguageAdapter, LanguageError
 
 
-def case_check(case, plan):
-    selected = plan['presetIds']
-    check = case['check']
-    if check == 'sunny':
-        return plan['status'] == 'ready' and selected == ['sunny']
-    if check == 'bounded':
-        return True  # Schema passed; subjective reasons require human review.
-    if check == 'clarification':
-        return plan['status'] == 'clarification'
-    if check == 'no-night':
-        return plan['status'] == 'ready' and 'street' not in selected and 'street' in plan['excludedIds']
-    if check == 'first-only':
-        return selected == case['current'][:1]
-    if check == 'different':
-        return plan['status'] == 'ready' and bool(selected) and not set(selected) & set(case['current'])
-    if check == 'three':
-        return plan['status'] == 'ready' and set(selected) == {'sunny', 'sunrise', 'street'}
-    if check in ('precision', 'unrelated'):
-        return check in plan['unsupported']
-    return False
+from acceptance_checks import case_check, dimensions, verdict, failure_dimensions
 
 
 def direct_suite(single_tool=False, bounded=False, reviewed=False, auto_suite=False, thinking_suite=False):
@@ -82,6 +63,9 @@ def direct_suite(single_tool=False, bounded=False, reviewed=False, auto_suite=Fa
     prior_count = 17 if auto_suite or thinking_suite else 14 if reviewed else 7 if bounded else 5 if single_tool else 3
     presets = json.loads((ROOT / 'data/catalog.json').read_text(encoding='utf-8'))['presets']
     adapter = LanguageAdapter.from_env(presets)
+    if adapter._real_transport:
+        print('Original 40-call authorization exhausted. Legacy paid entry disabled; use a newly authorized frozen candidate.')
+        return 2
     if not adapter.enabled:
         print('LANGUAGE_NOT_CONFIGURED: use the same privately configured PowerShell.')
         return 2
@@ -151,15 +135,12 @@ def direct_suite(single_tool=False, bounded=False, reviewed=False, auto_suite=Fa
         try:
             plan = adapter.recommend({'text': case['text'], 'currentPlan': {
                 'presetIds': case['current'], 'excludedIds': []},
-                'compareThree': case['check'] == 'three'})
+                'compareThree': case['check'] == 'three', 'responseLanguage': 'zh' if case['id'].endswith('-zh') else 'en'})
             item.update(status='valid', plan=plan, constraintCheck=case_check(case, plan),
                         explanationReview='pending-human-review')
-            explanation = ' '.join(plan['reasons'] + [plan['question']]).strip()
-            expected_chinese = bool(re.search(r'[\u4e00-\u9fff]', case['text']))
-            item['languageShapeCheck'] = (not explanation or
-                bool(re.search(r'[\u4e00-\u9fff]', explanation)) == expected_chinese)
+            item['checks'] = dimensions(case, plan)
         except LanguageError as error:
-            item.update(status='failed', errorCode=error.code)
+            item.update(status='failed', errorCode=error.code, checks=failure_dimensions(adapter, error))
         item['elapsedSeconds'] = round(time.monotonic() - started, 3)
         item['protocol'] = adapter.last_response_audit
         usage = item['protocol'].get('usage', {})
@@ -175,10 +156,13 @@ def direct_suite(single_tool=False, bounded=False, reviewed=False, auto_suite=Fa
             break
     else:
         report['status'] = 'completed-requires-human-review'
+    report['executionCompleted'] = report['status'].startswith('completed')
+    report['acceptance'], exit_code = verdict(report['cases'], len(cases))
+    report['exitCode'] = exit_code
     save()
     print('Report:', output)
     print('Reserved requests:', report['totalRequestsReserved'], '/ 40; GPU remains disabled.')
-    return 0 if report['status'].startswith('completed') else 1
+    return exit_code
 
 
 def main():
@@ -207,6 +191,9 @@ def main():
     except LanguageError as error:
         print(error.code)
         return 2
+    if adapter._real_transport:
+        print('Original 40-call authorization exhausted. Legacy paid entry disabled; use a newly authorized frozen candidate.')
+        return 2
     if not adapter.enabled:
         print('LANGUAGE_NOT_CONFIGURED: run in the shell where the server key was privately configured.')
         return 2
@@ -234,6 +221,8 @@ def main():
     except LanguageError as error:
         report['status'] = 'failed'
         report['errorCode'] = error.code
+    report['executionCompleted'] = True
+    report['modelAcceptance'] = 'not-evaluated-protocol-probe-only'
     report['elapsedSeconds'] = round(time.monotonic() - started, 3)
     report['protocol'] = adapter.last_response_audit
     usage = report['protocol'].get('usage', {})

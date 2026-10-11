@@ -1,6 +1,6 @@
 import { createState, reduce, selection, currentTask, recordedRegion, validateFile, validateDimensions, fitSize, previewLayout } from './state.js';
 import { sampleSource, disconnectedInference, serviceInference, languageService, recoverTask, decodeUpload } from './sources.js';
-import { createPlan, changePlan, undoPlan, invalidatePlan, beginRecommendation, applyRecommendation, failRecommendation, missingPresets } from './plan.js';
+import { createPlan, changePlan, undoPlan, invalidatePlan, beginRecommendation, applyRecommendation, failRecommendation, missingPresets, requestedLanguage } from './plan.js';
 
 const $ = id => document.getElementById(id);
 const escape = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -64,10 +64,10 @@ function renderStatus() {
   }
   $('submit-task').hidden = !generate;
   const missing=missingPresets(state,state.plannedPresets);
-  $('submit-task').disabled = !capabilities.enabled || !state.upload || !uploadFile || active() || plan?.busy || !missing.length;
+  $('submit-task').disabled = !capabilities.enabled || !state.upload || !uploadFile || active() || plan?.busy || !!plan?.error || !missing.length;
   $('submit-task').textContent = missing.length ? `确认生成 ${missing.length} 种灯光（提交一批）` : '所选灯光已有有效结果';
   $('batch-plan').hidden = false;
-  $('batch-options').innerHTML = catalog.presets.map(p=>`<label><input type="checkbox" data-plan="${escape(p.id)}" ${state.plannedPresets.includes(p.id)?'checked':''} ${active()?'disabled':''}> ${escape(p.name)}</label>`).join('');
+  $('batch-options').innerHTML = catalog.presets.map(p=>`<label><input type="checkbox" data-plan="${escape(p.id)}" ${state.plannedPresets.includes(p.id)?'checked':''} ${active() || plan?.excluded.includes(p.id)?'disabled':''}> ${escape(p.name)}</label>`).join('');
   if (state.task?.presetResults) {
     const summary = document.createElement('span');
     summary.textContent = '批次：'+Object.values(state.task.presetResults).map(i=>`${i.preset.name}：${titles[i.status] || i.status}`).join('；') + '。整批结束并取回校验后可显示；未完成项不会自动重试。';
@@ -95,16 +95,34 @@ function renderPlan() {
   $('language-capability').textContent = languageCapabilities.developmentTestMode ? '离线文字测试替身 · 固定脚本，非 Nemotron 回答' : languageCapabilities.message || '文字服务未配置；仍可手动选择灯光。';
   $('recommend-plan').disabled = !languageCapabilities.enabled || active() || plan.busy;
   $('recommend-status').textContent = plan.busy ? '正在推荐…（尚未提交生成）' : plan.question || (plan.replyStatus==='unsupported' ? '当前需求无法满足；保留原方案，未提交生成。' : plan.source==='language' ? '方案已更新，可修改；确认生成前不会提交照片。' : '当前方案由手动选择，可用于另一张照片。');
-  $('recommend-error').hidden = !plan.error; $('recommend-error').textContent = plan.error;
+  $('recommend-error').hidden = !plan.error; $('recommend-error').textContent = plan.error ? '系统提示：'+plan.error : '';
   $('undo-plan').disabled = !plan.previous || active();
   $('plan-detail').replaceChildren();
+  if(plan.reasons.length && plan.reasonLanguage) {
+    const note=document.createElement('p');note.className='small muted';
+    note.textContent=`当前选择的理由来自${plan.replyStatus==='ready'?'最近一次成功推荐':'上一次方案'}（${plan.reasonLanguage==='en'?'English':'中文'}）；语言设置影响下次回复。`;
+    $('plan-detail').append(note);
+  }
   plan.ids.forEach((id,index)=> {
     const p = document.createElement('p');
     p.textContent = `${index+1}. ${catalog.presets.find(p=>p.id===id)?.name || id} — ${plan.reasons[index] || '手动选择；以对应预设的实际效果为准。'}`;
     $('plan-detail').append(p);
   });
-  for (const item of plan.unsupported) { const p=document.createElement('p');p.textContent=unsupportedText[item];$('plan-detail').append(p); }
+  for (const item of plan.unsupported) { const p=document.createElement('p');p.textContent='系统能力说明：'+unsupportedText[item];$('plan-detail').append(p); }
   if(plan.excluded.length) { const p=document.createElement('p');p.textContent='本方案排除：'+plan.excluded.map(id=>catalog.presets.find(p=>p.id===id)?.name).join('、');$('plan-detail').append(p); }
+  $('exclusion-controls').replaceChildren();
+  for(const preset of catalog.presets) {
+    const button=document.createElement('button');button.type='button';
+    const excluded=plan.excluded.includes(preset.id);
+    button.textContent=(excluded?'解除排除：':'持续排除：')+preset.name;
+    button.disabled=active();button.dataset.exclusion=preset.id;
+    button.onclick=()=>{
+      recommendationController?.abort();
+      const next=excluded?plan.excluded.filter(id=>id!==preset.id):[...plan.excluded,preset.id];
+      plan=changePlan(plan,plan.ids,{excluded:next,source:'manual'});syncPlan();
+    };
+    $('exclusion-controls').append(button);
+  }
 }
 function syncPlan() {
   requestId=null;
@@ -118,14 +136,15 @@ $('recommend-plan').onclick = async () => {
   recommendationController = new AbortController();
   const controller = recommendationController;
   const token = crypto.randomUUID();
+  const replyLanguage=requestedLanguage(text,$('reply-language').value);
   plan=beginRecommendation(plan,token);renderStatus();
   const timer=setTimeout(()=>controller.abort(),65000);
   try {
-    const value=await languageService.recommend(text,{presetIds:plan.ids,excludedIds:plan.excluded},$('compare-three').checked,controller.signal);
-    const next=applyRecommendation(plan,token,value,catalog.presets.map(p=>p.id));
+    const value=await languageService.recommend(text,{presetIds:plan.ids,excludedIds:plan.excluded},$('compare-three').checked,controller.signal,$('reply-language').value);
+    const next=applyRecommendation(plan,token,value,catalog.presets.map(p=>p.id),replyLanguage);
     if(next===plan) return;
     plan=next;
-    if(value.status==='ready' && !plan.error) syncPlan();
+    if(!plan.error) syncPlan();
   } catch(error) { plan=failRecommendation(plan,token,error.name==='AbortError'?'文字请求已取消或超时；方案未修改。':error.message); }
   finally { clearTimeout(timer);renderStatus(); }
 };
@@ -139,6 +158,7 @@ function cancelChangedRequest() {
 }
 $('lighting-request').oninput = cancelChangedRequest;
 $('compare-three').onchange = cancelChangedRequest;
+$('reply-language').onchange = cancelChangedRequest;
 
 async function render() {
   const version = ++renderVersion;
@@ -342,7 +362,7 @@ $('view-upload-original').onclick = () => {
 $('submit-task').onclick = async () => {
   if (!capabilities.enabled || !uploadFile || !state.upload || active()) return;
   const input = state.upload;
-  if (plan?.busy) return;
+  if (plan?.busy || plan?.error) return;
   const wanted = missingPresets(state,state.plannedPresets);
   const presets = wanted.map(id=>catalog.presets.find(p=>p.id===id)).filter(Boolean);
   if(!presets.length) return;

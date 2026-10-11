@@ -103,12 +103,12 @@ class AdapterTests(unittest.TestCase):
             return json.dumps(PLAN)
         self.assertEqual(self.adapter(transport).recommend(BODY), PLAN)
         payload=calls[0]
-        self.assertEqual(set(json.loads(payload['messages'][1]['content'])), {'text','currentPlan','maximum','responseLanguage'})
+        self.assertEqual(set(json.loads(payload['messages'][1]['content'])), {'text','currentPlan','maximum','responseLanguage','serverConstraints'})
         self.assertEqual(json.loads(payload['messages'][1]['content'])['responseLanguage'], 'Chinese')
         self.assertNotIn('SYNTHETIC_PRIVATE_KEY', json.dumps(payload))
         self.assertEqual(len(payload['tools']),1)
         self.assertEqual(payload['tools'][0]['function']['name'],'propose_lighting_plan')
-        self.assertEqual(payload['tool_choice']['function']['name'],'propose_lighting_plan')
+        self.assertEqual(payload['tool_choice'],'auto')
         self.assertIs(payload['parallel_tool_calls'], False)
 
     def test_schema_rejects_fields_ids_duplicates_counts_and_lengths(self):
@@ -150,7 +150,7 @@ class AdapterTests(unittest.TestCase):
 
     def test_total_deadline(self):
         adapter=self.adapter(lambda *a:json.dumps(PLAN),timeout=1)
-        with patch('language.time.monotonic',side_effect=[0,0,2]):
+        with patch('language.time.monotonic',side_effect=[0,0,2,2]):
             with self.assertRaises(LanguageError) as error:adapter.recommend(BODY)
         self.assertEqual(error.exception.code,'LANGUAGE_TIMEOUT')
 

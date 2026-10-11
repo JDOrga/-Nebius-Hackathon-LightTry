@@ -1,6 +1,6 @@
 # Cosmos 灯光预览工程
 
-2026-10-10 在当前产品中接回 Nemotron 文字灯光方案，沿用 Cosmos 与现有任务后端。默认仍关闭文字与图片推理，真实文字调用未验收。配置、离线测试入口、实际验收及下一轮费用计划见 [本轮文字方案交付](project/docs/LANGUAGE_CONTROL_20261010.md)。
+2026-10-11 Nemotron文字选光已完成预算内真实调用，20个原始用例均尝试，最新结果19/20合法；重复工具调用、中文理由语言与删除排除仍需修正，完整质量验收未通过。保守计数40次授权已到，停止收费调用，GPU始终关闭。配置保持thinking on、40960上限，普通演示仍关闭文字/图片推理。见[真实验收总结](project/docs/LANGUAGE_REAL_SUMMARY_20261011.md)与[文字方案交付](project/docs/LANGUAGE_CONTROL_20261010.md)。
 
 LightTry 本地样例演示入口在 [project/README.md](project/README.md)。普通演示只需 Python 3.11 和单独提供的本地素材包，无需云认证、SSH、GPU 或历史目录。WJC 的最短接手步骤见 [本地候选交付](project/docs/DEMO_HANDOFF_20261010.md)。2026-10-10 当前 main/HEAD 为 93c23724ec85addfcd2f5bad971aef329bd6d502；真实 sunny/sunrise 网页批次已验收并停机，本轮只整理未提交的本地候选。origin 已按用户确认改为 JDOrga/-Nebius-Hackathon-LightTry，没有拉取或推送。
 

@@ -219,8 +219,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Security-Policy', "default-src 'self'; img-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
         if filename:
             self.send_header('Content-Disposition', "attachment; filename=preview.jpg; filename*=UTF-8''" + quote(filename))
-        self.end_headers()
-        self.wfile.write(payload)
+        try:
+            self.end_headers()
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # A canceled browser recommendation may finish after disconnect.
+            # Do not turn it into a second HTTP error write or a traceback.
+            self.close_connection = True
 
 
 def main():

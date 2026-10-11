@@ -1,5 +1,9 @@
 # 本轮候选公开文件与本地材料
 
+2026-10-11 本地收尾 R2：启动文字适配器还需新增 `project/language_contract.py`，不能只复制 `language.py`。新增候选冻结/离线验收文件见 `tests/freeze_language_candidate.py`、`run_candidate_offline.py`、`acceptance_checks.py`、`test_language_candidate.py`、`language_regressions.json`、`language_browser_cases.json`；当前配置及文件哈希见 [LANGUAGE_CANDIDATE_20261011_R2.json](LANGUAGE_CANDIDATE_20261011_R2.json)，交付与复现见 [本地收尾](LANGUAGE_LOCAL_CLOSEOUT_20261011.md)，收费范围见 [新的真实复验计划](LANGUAGE_NEXT_ACCEPTANCE_20261011.md)。早期无 R2 后缀的本地冻结记录为历史；本次真实请求为 0，不代表真实复验通过。
+
+2026-10-11 真实文字增量还包括 `tests/run_language_probe.py`、`diagnose_language_protocol.py`、`finish_language_acceptance.py`、对应`test_language_acceptance_runner.py`/`test_language_protocol.py`/`test_language_finish.py`，以及`LANGUAGE_REAL_ACCEPTANCE_20261011.md`、`LANGUAGE_PROTOCOL_INVESTIGATION_20261011.md`、`LANGUAGE_REAL_SUMMARY_20261011.md`。paid入口必须显式执行，旧报告存在即禁止重复；本轮40次预算已到，不继续运行。真实脱敏用量/模型方案/复核记录在忽略的`project/qa/language-real-20261011`，不包含Key或推理正文。
+
 2026-10-10 文字选光候选增量：`project/language.py`、`language.example.json`、`web/plan.js`、`tests/test_language.py`、`tests/plan.test.js`、`tests/language_cases.json`、`tests/serve_language_fixture.py` 及两份 `LANGUAGE_*_20261010.md`。调整 server 和既有 app/state/sources/index/styles；README/DEVELOPMENT/接口/架构文档更新。无新增依赖，测试入口不能由产品参数选用。截图/合成任务/日志均在忽略的 `project/qa/language-20261010/`；没有复制密钥、HDR、云任务证据或历史结果进入 Git。下列旧列表保留为上一轮历史范围。
 
 本轮没有暂存、提交或推送。候选代码包只复制下列 `project/` 文件，不复制整个工作区。它适合后续入库审核；自有代码未因第三方代码许可证自动取得新的总体许可。

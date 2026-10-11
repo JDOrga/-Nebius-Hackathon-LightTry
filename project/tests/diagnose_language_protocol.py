@@ -34,7 +34,7 @@ def payloads(adapter):
         transport=lambda payload, _: captured.append(copy.deepcopy(payload)) or json.dumps({
             'status': 'ready', 'presetIds': ['sunny'], 'reasons': ['Offline construction only.'],
             'excludedIds': [], 'unsupported': [], 'question': ''}))
-    builder.recommend({'text': 'sunny', 'currentPlan': {'presetIds': [], 'excludedIds': []}, 'compareThree': False})
+    builder.recommend({'text': 'sunny', 'currentPlan': {'presetIds': [], 'excludedIds': []}, 'compareThree': False, 'responseLanguage': 'en'})
     full = captured[0]
     full['store'] = False
     cases = []
@@ -73,6 +73,9 @@ def run():
         return 2
     presets = json.loads((ROOT / 'data/catalog.json').read_text(encoding='utf-8'))['presets']
     adapter = LanguageAdapter.from_env(presets)
+    if adapter._real_transport:
+        print('Original authorization exhausted; legacy paid entry disabled.')
+        return 2
     if not adapter.enabled:
         print('LANGUAGE_NOT_CONFIGURED: run in the same privately configured PowerShell.')
         return 2

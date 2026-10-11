@@ -58,10 +58,10 @@ export const serviceInference = {
 };
 export const languageService = {
   async capabilities() { return responseJSON(await fetch('/api/language')); },
-  async recommend(text, currentPlan, compareThree, signal) {
+  async recommend(text, currentPlan, compareThree, signal, responseLanguage = 'zh', operation) {
     return responseJSON(await fetch('/api/language/recommend', { method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-LightTry-Token': serviceInference.token },
-      body: JSON.stringify({ text, currentPlan, compareThree }), signal }));
+      body: JSON.stringify({ text, currentPlan, compareThree, responseLanguage, ...(operation ? {operation} : {}) }), signal }));
   },
 };
 export async function recoverTask(taskId, isCurrent = () => true, delay = ms => new Promise(resolve => setTimeout(resolve, ms))) {

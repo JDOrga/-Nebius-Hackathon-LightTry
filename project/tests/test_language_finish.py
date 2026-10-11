@@ -13,6 +13,7 @@ sys.path.insert(0, str(PRODUCT))
 sys.path.insert(0, str(PRODUCT / 'tests'))
 from language import LanguageAdapter
 import finish_language_acceptance as finish
+from serve_language_fixture import ScriptedLanguage
 
 
 class FinishTests(unittest.TestCase):
@@ -62,13 +63,12 @@ class FinishTests(unittest.TestCase):
                 self.assertEqual(payload['max_tokens'], 40960)
                 calls.append(1)
                 adapter.last_response_audit = {'usage': {} if missing else {'prompt_tokens': 1000, 'completion_tokens': 1200}}
-                return json.dumps({'status': 'ready', 'presetIds': ['sunny'], 'reasons': ['Daylight.'],
-                                   'excludedIds': [], 'unsupported': [], 'question': ''})
+                return ScriptedLanguage(presets).script(payload, remaining)
             presets = json.loads((root / 'data/catalog.json').read_text(encoding='utf-8'))['presets']
             adapter = LanguageAdapter(presets, enabled=True, model='nvidia/Nemotron-3_5-Lightning',
                                       key='SYNTHETIC_SECRET', transport=transport)
             with patch.object(finish, 'ROOT', root), patch.object(finish.LanguageAdapter, 'from_env', return_value=adapter), contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(finish.run(remaining=remaining), 1 if missing else 0)
+                self.assertEqual(finish.run(remaining=remaining), 3)
                 self.assertEqual(finish.run(remaining=remaining), 2)
             report = json.loads((folder / filename).read_text(encoding='utf-8'))
             expected = 1 if missing else 7 if remaining else 17

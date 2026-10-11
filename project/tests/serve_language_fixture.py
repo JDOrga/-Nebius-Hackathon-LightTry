@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import server
 from language import LanguageAdapter, LanguageError
+from language_contract import exact_operation, constraints
 from serve_fixture import FixtureStore
 from batch_fixture import BatchFixtureExecutor
 
@@ -31,7 +32,11 @@ class ScriptedLanguage(LanguageAdapter):
         if text in ('error', '测试失败'):
             raise LanguageError('LANGUAGE_RATE_LIMIT', '离线替身模拟限流；非真实 API 错误。')
         if text in ('slow', '测试慢响应'):
-            threading.Event().wait(2)
+            threading.Event().wait(8)
+        if text in ('timeout', '测试超时'):
+            raise LanguageError('LANGUAGE_TIMEOUT', '离线替身模拟超时；计数保留，方案未修改。')
+        if text == 'client-timeout':
+            raise LanguageError('OFFLINE_RESPONSE_LOST', '离线替身模拟 HTTP 响应丢失。')
         if text in ('不要夜景', 'no night'):
             excluded = ['street']; chosen = [i for i in current['presetIds'] if i != 'street'] or ['sunny']
         elif text in ('把第二个去掉', 'remove the second'):
@@ -48,9 +53,25 @@ class ScriptedLanguage(LanguageAdapter):
             status, chosen, unsupported = 'unsupported', [], ['unrelated']
         elif text in ('sunny', '晴日公园'):
             chosen = ['sunny']
+        required = data['serverConstraints']
+        excluded = required['excludedIds']
+        if 'presetIds' in required:
+            chosen = required['presetIds']
+            if not chosen:
+                status, question = 'clarification', '已删除选择，请选择新的灯光。'
         chosen = [i for i in chosen if i not in excluded]
+        if status == 'ready' and not chosen:
+            chosen = [i for i in self.allowed if i not in excluded][:1]
+            if not chosen:
+                status, question = 'clarification', '全部预设均被排除，是否解除一个排除条件？'
+        english = data['responseLanguage'] == 'English'
+        if english and question:
+            question = 'Do you prefer daylight, sunrise or street-lamp mood?'
+        reasons = {'sunny': 'Offline script: natural daylight.', 'sunrise': 'Offline script: pink sunrise, warmth not guaranteed.',
+                   'street': 'Offline script: night street lamps.'} if english else {
+                   'sunny': '离线脚本示例：自然日光氛围。', 'sunrise': '离线脚本示例：粉色晨光近似，不保证暖色。', 'street': '离线脚本示例：夜间街灯氛围。'}
         return json.dumps({'status':status, 'presetIds':chosen, 'excludedIds':excluded, 'unsupported':unsupported,
-                           'question':question, 'reasons':['离线脚本示例：'+server.Handler.catalog['presets'][self.allowed.index(i)]['description'] for i in chosen]}, ensure_ascii=False)
+                           'question':question, 'reasons':[reasons[i] for i in chosen]}, ensure_ascii=False)
 
 
 class AutoBatch(BatchFixtureExecutor):
@@ -58,6 +79,15 @@ class AutoBatch(BatchFixtureExecutor):
         super().submit(folder, request)
         # Synthetic completion only; never changes historical task evidence.
         threading.Thread(target=self.finish_batch, args=('success',), daemon=True).start()
+
+
+class OfflineHandler(server.Handler):
+    def json_response(self, value, status=200):
+        if isinstance(value, dict) and value.get('error', {}).get('code') == 'OFFLINE_RESPONSE_LOST':
+            # Transport-only fixture: withhold a response beyond the actual
+            # frontend's 65s timer. No provider inference or retry is running.
+            threading.Event().wait(70)
+        return super().json_response(value, status)
 
 
 if __name__ == '__main__':
@@ -69,8 +99,10 @@ if __name__ == '__main__':
     catalog = server.load_catalog(args.assets_dir)
     server.Handler.catalog = catalog
     store = FixtureStore(args.tasks_dir, catalog['presets'], AutoBatch())
-    handler = type('OfflineLanguageHandler', (server.Handler,), {'catalog':catalog, 'task_store':store,
-        'assets_dir':server.resolve_assets_dir(args.assets_dir), 'language_service':ScriptedLanguage(catalog['presets'])})
+    language = ScriptedLanguage(catalog['presets'])
+    language.audit_path = args.tasks_dir.parent / 'offline-language-audit.jsonl'
+    handler = type('OfflineLanguageHandler', (OfflineHandler,), {'catalog':catalog, 'task_store':store,
+        'assets_dir':server.resolve_assets_dir(args.assets_dir), 'language_service':language})
     try:
         with ThreadingHTTPServer(('127.0.0.1', args.port), handler) as http:
             print(f'OFFLINE SCRIPT ONLY, NOT NEMOTRON / GPU http://127.0.0.1:{args.port}', flush=True)

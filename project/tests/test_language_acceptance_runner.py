@@ -12,6 +12,7 @@ PRODUCT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PRODUCT))
 sys.path.insert(0, str(PRODUCT / 'tests'))
 from language import LanguageAdapter, LanguageError
+from serve_language_fixture import ScriptedLanguage
 import run_language_probe as runner
 
 
@@ -46,8 +47,7 @@ class RunnerTests(unittest.TestCase):
             calls.append(1)
             if fail:
                 raise LanguageError('LANGUAGE_OUTPUT_TRUNCATED', 'fixed message')
-            return json.dumps({'status': 'ready', 'presetIds': ['sunny'], 'reasons': ['Natural daylight.'],
-                               'excludedIds': [], 'unsupported': [], 'question': ''})
+            return ScriptedLanguage(presets).script(args[0], args[1])
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for filename in ('data/catalog.json', 'tests/language_cases.json'):
@@ -80,7 +80,7 @@ class RunnerTests(unittest.TestCase):
             adapter = LanguageAdapter(presets, enabled=True, model='nvidia/Nemotron-3_5-Lightning',
                                       key='OFFLINE_SYNTHETIC_KEY', max_tokens=600, thinking_mode='off', transport=transport)
             with patch.object(runner, 'ROOT', root), patch.object(runner.LanguageAdapter, 'from_env', return_value=adapter), contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(runner.direct_suite(single_tool=single_tool, bounded=bounded, reviewed=reviewed, auto_suite=auto_suite, thinking_suite=thinking_suite), 1 if fail else 0)
+                self.assertEqual(runner.direct_suite(single_tool=single_tool, bounded=bounded, reviewed=reviewed, auto_suite=auto_suite, thinking_suite=thinking_suite), 1 if fail else 3)
                 self.assertEqual(runner.direct_suite(single_tool=single_tool, bounded=bounded, reviewed=reviewed, auto_suite=auto_suite, thinking_suite=thinking_suite), 2)
             report = json.loads((report_dir / ('thinking-suite.json' if thinking_suite else 'auto-suite.json' if auto_suite else 'reviewed-suite.json' if reviewed else 'bounded-suite.json' if bounded else 'single-tool-suite.json' if single_tool else 'direct-suite.json')).read_text(encoding='utf-8'))
             expected = 1 if fail else (6 if thinking_suite else 19 if single_tool or bounded else 20)

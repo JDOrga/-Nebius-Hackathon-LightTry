@@ -1,0 +1,8 @@
+[
+  {"id":"browser-explicit-zh","text":"晴日公园","language":"zh","expect":"sunny only; no generation"},
+  {"id":"browser-three-zh","text":"比较三个预设","language":"zh","expect":"three presets, Chinese reasons; explicit generation remains separate"},
+  {"id":"browser-remove-zh","text":"删掉第二项","language":"zh","expect":"ordered removal; exclusions unchanged"},
+  {"id":"browser-replace-en","text":"another one","language":"en","expect":"fresh single plan, different preset; exclusions unchanged"},
+  {"id":"browser-exclude-zh","text":"不要再推荐夜景","language":"zh","expect":"exclude street; waiting/repeat click protection; no automatic task"},
+  {"id":"browser-unexclude-zh","text":"允许推荐夜景","language":"zh","expect":"remove street exclusion; manual edit/undo/cross-sample reuse without more calls"}
+]

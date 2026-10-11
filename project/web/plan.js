@@ -1,11 +1,12 @@
 // Isolated recommendation state. No generation adapter or file access.
 export function createPlan(ids = []) {
-  return { ids: [...ids], excluded: [], reasons: [], unsupported: [], question: '', previous: null,
+  return { ids: [...ids], excluded: [], reasons: [], reasonLanguage:null, unsupported: [], question: '', previous: null,
     revision: 0, request: null, busy: false, error: '', source: 'manual', replyStatus:null };
 }
 export function changePlan(plan, ids, extra = {}) {
-  return { ...plan, ids: [...ids], reasons: [], unsupported: [], question: '', excluded: plan.excluded.filter(id=>!ids.includes(id)), replyStatus:null, ...extra,
-    previous: { ids: plan.ids, reasons: plan.reasons, excluded: plan.excluded, unsupported: plan.unsupported, question: plan.question, source: plan.source, replyStatus:plan.replyStatus },
+  const excluded = extra.excluded || plan.excluded;
+  return { ...plan, ids: ids.filter(id=>!excluded.includes(id)), reasons: [], reasonLanguage:null, unsupported: [], question: '', excluded: [...excluded], replyStatus:null, ...extra,
+    previous: { ids: plan.ids, reasons: plan.reasons, reasonLanguage:plan.reasonLanguage, excluded: plan.excluded, unsupported: plan.unsupported, question: plan.question, source: plan.source, replyStatus:plan.replyStatus },
     revision: plan.revision + 1, busy: false, request: null, error: '' };
 }
 export function undoPlan(plan) {
@@ -17,7 +18,11 @@ export function invalidatePlan(plan) {
 export function beginRecommendation(plan, token) {
   return plan.busy ? plan : { ...plan, request: token, busy: true, error: '' };
 }
-export function applyRecommendation(plan, token, value, allowed) {
+export function requestedLanguage(text, setting='zh') {
+  const matches=[...text.matchAll(/用中文(?:回答|回复)|用英文(?:回答|回复)|(?:reply|respond|answer) in (?:english|chinese)/gi)];
+  return matches.length ? /英文|english/i.test(matches.at(-1)[0]) ? 'en' : 'zh' : setting;
+}
+export function applyRecommendation(plan, token, value, allowed, reasonLanguage=null) {
   if (plan.request !== token) return plan;
   const keys = ['status','presetIds','reasons','excludedIds','unsupported','question'];
   const ids = (items, enumIds, max=3) => Array.isArray(items) && items.length <= max && items.every(i=>typeof i==='string' && enumIds.includes(i)) && new Set(items).size===items.length;
@@ -28,8 +33,13 @@ export function applyRecommendation(plan, token, value, allowed) {
     typeof value.question==='string' && value.question.length<=100 &&
     (value.status==='ready' ? value.presetIds.length>0 && !value.question : value.presetIds.length===0 && (value.status==='clarification' ? !!value.question.trim() : value.unsupported.length>0 && !value.question));
   if (!valid) return failRecommendation(plan, token, '文字服务返回无效，方案未修改。');
-  if (value.status !== 'ready') return { ...plan, busy: false, request: null, unsupported: value.unsupported, question: value.question, error: '', replyStatus:value.status };
-  return changePlan(plan, value.presetIds, { reasons: value.reasons, excluded: value.excludedIds, unsupported: value.unsupported, source: 'language', replyStatus:'ready' });
+  if (value.status !== 'ready') {
+    const extra={unsupported:value.unsupported,question:value.question,replyStatus:value.status};
+    if (value.excludedIds.length!==plan.excluded.length || value.excludedIds.some(id=>!plan.excluded.includes(id)))
+      return changePlan(plan,plan.ids,{...extra,excluded:value.excludedIds,source:'language'});
+    return { ...plan, busy: false, request: null, ...extra, error: '' };
+  }
+  return changePlan(plan, value.presetIds, { reasons: value.reasons, reasonLanguage, excluded: value.excludedIds, unsupported: value.unsupported, source: 'language', replyStatus:'ready' });
 }
 export function failRecommendation(plan, token, error) {
   return plan.request === token ? { ...plan, busy: false, request: null, error } : plan;
