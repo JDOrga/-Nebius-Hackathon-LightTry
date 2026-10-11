@@ -267,7 +267,10 @@ class CandidateTests(unittest.TestCase):
     def test_complete_32_case_offline_flow_never_means_model_passed(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'report.json'
-            self.assertEqual(run(output), 0)
+            from freeze_language_candidate import snapshot
+            manifest=Path(directory)/'new-offline-snapshot.json'
+            manifest.write_text(json.dumps(snapshot()),encoding='utf-8')
+            self.assertEqual(run(output,manifest), 0)
             report = json.loads(output.read_text(encoding='utf-8'))
             self.assertEqual(report['executedCases'], 32)
             self.assertEqual(report['modelAcceptance'], 'not-tested')

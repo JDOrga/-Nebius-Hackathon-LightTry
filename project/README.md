@@ -1,3 +1,17 @@
+# LightTry 正式照片工作室（本地集成）
+
+唯一推荐启动命令：
+
+```powershell
+python -X utf8 -B C:\Project\Nebius\project\start_studio.py
+```
+
+打开 http://127.0.0.1:8785 。默认关闭 Nemotron 与 GPU，无外部请求。复用现有 next.server、SchemeStore 与共享任务/照片服务；不导入设计预览存储。已有正式任务目录原样保留。旧 project/server.py CLI 转接同一工作室，旧 web 文件保留供历史/测试，不再是普通启动入口。旧语言参数不兼容，必须使用下文 next 的显式配置。
+
+本地无素材时须提供现有素材包；此命令不安装依赖、不调用云。独立副本验收与回退见 project/docs/STUDIO_INTEGRATION_20261011.md。以下为历史说明，启动以本节为准：
+
+---
+
 # Cosmos 本地光照预览
 
 2026-10-11 文字选光已完成40次预算内真实Token Factory测试：20个原始用例均尝试，最新汇总19/20有合法方案，仍有重复工具调用、中文理由语言不符及删除过度排除问题，完整质量验收未通过。当前thinking on、40960输出上限，普通启动仍关闭文字服务/GPU。真实结果与费用见[真实验收总结](docs/LANGUAGE_REAL_SUMMARY_20261011.md)。推荐、有限后续修改、手动编辑、撤回和跨图复用选择接入既有批次，用户显式确认才生成；Nemotron负责文字方案，Cosmos负责既有重布光。配置见[文字方案交付](docs/LANGUAGE_CONTROL_20261010.md)，独立离线替身与截图见[本地验收](docs/LANGUAGE_ACCEPTANCE_20261010.md)。

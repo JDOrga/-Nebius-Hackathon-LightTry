@@ -49,3 +49,27 @@ export function restoreInputStub(s){
     Math.max(s.width,s.height)>16384||s.width*s.height>40000000)return null;
   return {id:s.id,name:typeof s.name==='string'?s.name.slice(0,100):'我的照片',width:s.width,height:s.height,originalSha:s.originalSha,needsFile:true};
 }
+
+// Presentation only. No splitting user names, no changes to persisted identities.
+export function photoTitle(sample,input){
+ const names={'01_matte_terracotta':'陶罐','02_text_tea_tin':'茶盒','03_glossy_metal_teapot':'金属壶','04_transparent_glass':'玻璃杯','05_white_blue_mug':'白蓝杯'};
+ return names[sample?.id]||sample?.name||input?.name||'我的照片';
+}
+export function schemePresentation(s){
+ if(s.name.length<=16)return {title:s.name,fullName:s.name,summary:false};
+ const p=s.parameters;return {title:p.offsetDeg===45?'方向探索方案':p.strength===.7?'偏暗备选':({'sunny':'默认方案','sunrise':'晨光方案','street':'夜景方案'}[p.environmentId]||'光照方案'),fullName:s.name,summary:true};
+}
+export function environmentEdit(s,id,environments,policy,existing){
+ if(!environments.includes(id)||s.parameters.environmentId===id)return null;
+ const parameters={environmentId:id,offsetDeg:0,strength:1};
+ if(!allowed(parameters,policy)||sameParameters(s.parameters,parameters))return null;
+ return revise(s,parameters,s.name,existing);
+}
+export function comparisonCursor(keys,requested){return keys.includes(requested)?requested:keys[0]||null;}
+
+export function schemeCaption(s,all){
+ const d=schemePresentation(s);if(!d.summary)return d.title;
+ const families=[...new Set(all.filter(x=>x.inputId===s.inputId).map(x=>x.planId))];
+ const latest=families.map(id=>all.filter(x=>x.planId===id).reduce((a,b)=>a.version>b.version?a:b));
+ return latest.filter(x=>schemePresentation(x).title===d.title).length>1?d.title+' · '+(families.indexOf(s.planId)+1):d.title;
+}

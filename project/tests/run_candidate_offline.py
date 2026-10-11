@@ -17,12 +17,15 @@ from acceptance_checks import dimensions, failure_dimensions
 from freeze_language_candidate import snapshot
 
 
-def run(output):
+def run(output, manifest_path=None):
     if output.exists():
         print('Output exists; choose a new offline output file.')
         return 2
     candidate = snapshot()
-    manifest = ROOT / 'docs/LANGUAGE_CANDIDATE_20261011_DEMO.json'
+    manifest = Path(manifest_path) if manifest_path else ROOT / 'docs/LANGUAGE_CANDIDATE_20261011_DEMO.json'
+    if manifest_path and not manifest.is_file():
+        print('Explicit offline snapshot missing; refused.')
+        return 2
     if manifest.exists() and json.loads(manifest.read_text(encoding='utf-8'))['candidateSHA256'] != candidate['candidateSHA256']:
         print('Frozen candidate differs; do not pool results across changed sources.')
         return 2
@@ -72,4 +75,6 @@ def run(output):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
-    raise SystemExit(run(parser.parse_args().output))
+    parser.add_argument('--manifest', type=Path, help='Explicit NEW offline source snapshot; never overwrite historical acceptance.')
+    args=parser.parse_args()
+    raise SystemExit(run(args.output,args.manifest))

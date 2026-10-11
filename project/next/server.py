@@ -114,7 +114,7 @@ def main():
     p.add_argument('--port', type=int, default=8785)
     p.add_argument('--assets-dir', required=True)
     p.add_argument('--evidence-config', type=Path)
-    p.add_argument('--tasks-dir', type=Path, default=Path(__file__).parent / '.tasks')
+    p.add_argument('--tasks-dir', type=Path, default=PROJECT.parent / '.local/lighttry-development-20261011/workbench-tasks')
     p.add_argument('--inference-config', type=Path)
     p.add_argument('--language-key-file', type=Path, help='程序直接读取本机 Key 文件；不显示、不入库。仅显式使用时启用。')
     p.add_argument('--language-ledger', type=Path, help='本轮独立账本；不复用旧文字预算。')
