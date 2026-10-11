@@ -1,5 +1,7 @@
 # 本轮候选公开文件与本地材料
 
+2026-10-10 文字选光候选增量：`project/language.py`、`language.example.json`、`web/plan.js`、`tests/test_language.py`、`tests/plan.test.js`、`tests/language_cases.json`、`tests/serve_language_fixture.py` 及两份 `LANGUAGE_*_20261010.md`。调整 server 和既有 app/state/sources/index/styles；README/DEVELOPMENT/接口/架构文档更新。无新增依赖，测试入口不能由产品参数选用。截图/合成任务/日志均在忽略的 `project/qa/language-20261010/`；没有复制密钥、HDR、云任务证据或历史结果进入 Git。下列旧列表保留为上一轮历史范围。
+
 本轮没有暂存、提交或推送。候选代码包只复制下列 `project/` 文件，不复制整个工作区。它适合后续入库审核；自有代码未因第三方代码许可证自动取得新的总体许可。
 
 - `project/.gitignore`、`README.md`、`DEVELOPMENT.md`、`package.json`

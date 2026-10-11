@@ -42,3 +42,10 @@
 #batch-options{display:flex;flex-wrap:wrap;gap:12px}
 #batch-options label{font-size:13px;display:flex;align-items:center;gap:5px}
 .connection-status span{overflow-wrap:anywhere}
+#text-plan h2{font-size:18px;margin:0 0 10px}
+#text-plan label{display:block;margin:10px 0 6px}
+#lighting-request{width:100%;box-sizing:border-box;resize:vertical;font:inherit;padding:10px;border:1px solid #bbb;border-radius:8px;min-height:80px}
+#plan-detail{line-height:1.6;overflow-wrap:anywhere}
+#plan-detail p{margin:8px 0}
+#recommend-status{min-height:1.4em}
+textarea:focus-visible{outline:2px solid #48663d;outline-offset:2px}

@@ -1,4 +1,5 @@
 // Pure state transitions shared by the UI and small node:test regression suite.
+import { validResult } from './plan.js';
 export const EMPTY_VIEW = Object.freeze({ zoom: 1, panX: 0, panY: 0, split: 50 });
 export function createState(catalog) {
   return { mode: 'sample', sampleId: catalog.preferredSample || catalog.samples[0].id, presetId: catalog.presets[0].id,
@@ -9,7 +10,8 @@ export function reduce(state, event) {
     case 'SAMPLE': return { ...state, mode: 'sample', sampleId: event.id, task: null, error: null, view: { ...EMPTY_VIEW } };
     case 'MODE': return state.mode === event.mode ? state : { ...state, mode: event.mode, task: null, region: 'full', error: null, view: { ...EMPTY_VIEW } };
     case 'PRESET': return { ...state, presetId: event.id,
-      task: state.task?.presetResults ? state.task : state.tasks?.[event.id]?.input?.id === state.upload?.id ? state.tasks[event.id] : null, error: null };
+      task: (!['queued','running'].includes(state.task?.status) && !state.task?.executionUncertain && validResult(state,event.id)) ||
+        (state.task?.presetResults ? state.task : state.tasks?.[event.id]?.input?.id === state.upload?.id ? state.tasks[event.id] : null), error: null };
     case 'PLAN_PRESETS': return { ...state, plannedPresets: [...new Set(event.ids)].slice(0,3) };
     case 'UPLOAD_START': return { ...state, mode: 'generate', upload: null, task: null, tasks: {}, error: null, view: { ...EMPTY_VIEW } };
     case 'UPLOAD': return { ...state, mode: 'generate', upload: event.input, task: null, tasks: {}, error: null, view: { ...EMPTY_VIEW } };

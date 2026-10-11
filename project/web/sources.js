@@ -56,6 +56,14 @@ export const serviceInference = {
     }));
   },
 };
+export const languageService = {
+  async capabilities() { return responseJSON(await fetch('/api/language')); },
+  async recommend(text, currentPlan, compareThree, signal) {
+    return responseJSON(await fetch('/api/language/recommend', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-LightTry-Token': serviceInference.token },
+      body: JSON.stringify({ text, currentPlan, compareThree }), signal }));
+  },
+};
 export async function recoverTask(taskId, isCurrent = () => true, delay = ms => new Promise(resolve => setTimeout(resolve, ms))) {
   for (let attempt = 0; attempt < 3; attempt++) {
     if (!isCurrent()) return null;

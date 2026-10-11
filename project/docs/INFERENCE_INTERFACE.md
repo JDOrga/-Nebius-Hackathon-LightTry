@@ -1,5 +1,9 @@
 # LightTry 推理适配器接口
 
+## 2026-10-10 文字方案接口
+
+新增 `GET /api/language` 与 `POST /api/language/recommend`，共用本机 Host/Origin/CSRF 限制，独立于推理启用状态。请求只有本条 text、当前有序预设/排除项与显式比较三个标志，不传图片或资源身份。响应经过后端严格校验，再修改可编辑方案；固定函数名只是模型输出的数据载体，没有执行分发器，也没有 TaskStore 访问。只有用户另行点击确认才调用原 `POST /api/tasks`，只提交缺少有效结果的选择。详细字段/边界/配置与未验证项见 [文字方案交付](LANGUAGE_CONTROL_20261010.md)。原推理协议与守护没有变动。
+
 ## 2026-10-10 正式多灯光接入
 
 继续使用原 TaskStore、POST `/api/tasks`、driver/worker/batch；一个照片任务可含 `presets: Preset[]`（1–3项）及 `presetResults: {[presetId]: {preset,status,result,error}}`。原 `preset/result` 保留为首项兼容视图。批次终态增加 `partial`；每项分别保存 `queued/pending/running/succeeded/failed/expired`。未取回的项只表示等待完成记录，不根据整批 stage 或经过时间声称正在生成或成功。

@@ -1,5 +1,7 @@
 # 当前工程边界
 
+2026-10-10 当前产品 UI 已在 `project/web`；下文“没有新建 UI”为早期提取阶段历史描述。文字选光通过独立标准库 `project/language.py` 适配 Token Factory Nemotron，只返回受校验的当前预设方案；用户确认后复用原 TaskStore / Cosmos 批次。它没有图像输入、工具执行器、云资源操作或物理正确性裁决。文字默认关闭，真实 API 未验收，本轮只有离线替身/浏览器证据。详见 [文字方案与职责](../project/docs/LANGUAGE_CONTROL_20261010.md)。
+
 本项目沿用 Cosmos，提供有限保真度的灯光预览。默认 1280×704、单帧、15 步、seed 1000。先生成 basecolor/normal/depth/roughness/metallic，再以三个 HDR 做 forward 预览。结构检查确认尺寸、完整性与灯光差异；roughness/metallic 可以是常量，此时记录人工复核提示，其他通道及最终图像仍检查非恒定输出。几何、文字、微小材质、阴影、高光和色温仍需人工看图。不是物理渲染或高保真修复工具。
 
 `scripts/run_experiment.py` 保留原有 Cosmos 调用和恢复约束，输入改为显式本地数据路径。`validate_outputs.py` 保留结构验收和 contact sheet。没有纳入裁剪放大、融合、latent 分析或高分辨率补丁链。

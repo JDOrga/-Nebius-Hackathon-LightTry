@@ -1,0 +1,12 @@
+{
+  "note": "Documentation template only; server reads these environment variables only with --language-service. Never put an actual key here.",
+  "LIGHTTRY_LANGUAGE_ENABLED": "0",
+  "LIGHTTRY_LANGUAGE_MODEL": "nvidia/Nemotron-3_5-Lightning",
+  "LIGHTTRY_LANGUAGE_ENDPOINT": "https://api.tokenfactory.nebius.com/v1/chat/completions",
+  "LIGHTTRY_TOKEN_FACTORY_KEY": "<set privately in server environment>",
+  "LIGHTTRY_LANGUAGE_TIMEOUT": "12",
+  "LIGHTTRY_LANGUAGE_MAX_TOKENS": "600",
+  "LIGHTTRY_LANGUAGE_REPAIRS": "1",
+  "LIGHTTRY_LANGUAGE_OUTPUT_MODE": "tool",
+  "LIGHTTRY_LANGUAGE_THINKING": "auto"
+}

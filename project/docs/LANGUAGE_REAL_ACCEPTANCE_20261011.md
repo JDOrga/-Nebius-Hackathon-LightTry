@@ -1,0 +1,107 @@
+# Token Factory 真实验收：首项失败后停止，2026-10-11
+
+## 单工具参数后的实际结果与有界输出修正（最新）
+
+`single-tool-suite.json` 实际只执行两项后停止，并非整套成功：
+
+- `explicit-en`：1 个固定工具调用，协议合法；但输入 sunny 得到 sunny＋sunrise，constraintCheck false。理由又是中文，与英文输入语言要求不符。理由本身引用真实预设特征，没有编造精确控制，但整体需求遵循**未通过**。约 4.5 秒，967 输入 / 188 输出 tokens，价格估算 $0.00010314。
+- `mood-zh`：达到 600 token 上限，finish reason length。虽出现一个固定工具调用仍拒绝截断回复；没有进入生成。约 5.266 秒，981 输入 / 600 输出 tokens，价格估算 $0.00020286。不能从没有保存的参数猜测具体是哪一字段造成截断。
+
+这次新增 2 次请求，价格估算 $0.000306；累计预留最多 **7 次，剩余最多 33 次**。有 usage 的五次请求合计价格估算 **$0.00070944**，初次 HTTP 费用仍未知。保留全部旧报告，另存 `review-after-single-tool-suite.json`。禁用并行参数此次得到单工具回复，但只有两个案例，不能宣称已经解决所有多调用问题。
+
+程序继续拒绝多调用和非法/截断方案。新的提示要求明确点名预设时只选该项，除非用户要求替换或比较；英文输入的理由与问题使用英文。schema 和服务端/前端把理由硬上限收紧到 **60 字符**，澄清问题 **100 字符**，不靠模型自行保证长度。
+
+新验收入口 **显式使用 1000 输出 token 上限**（在原适配器允许的 128–1000 范围内），保持关 thinking、单工具、12 秒默认总超时、不重试。普通产品默认仍为 600，不偷偷提高启动费用设置。增加输出预算未更换模型/endpoint，也不扩大 40 次、$0.10 的用户费用授权；按 15000 输入 / 1000 输出 tokens 的规划假设，累计 26 次约 $0.02964，非账单保证。
+
+在同一个私下配置 Key 的 PowerShell 运行：
+
+```powershell
+python -X utf8 -B project/tests/run_language_probe.py --bounded-suite
+```
+
+先重测约束失败的英文项，再测中文氛围及未执行项，最多新增 **19 次**，累计最多 **26 次**。所有接口/截断/结构错误即停，语义失败如实记 false；不会以规则回答替代模型。新报告为 `project/qa/language-real-20261011/bounded-suite.json`，重复执行被拒绝。GPU 始终关闭。
+
+本次语言和预算离线测试 **26 项通过**，前端方案/已有状态回归 **26 项通过**，均无跳过。尚未执行新预算真实验收；当前产品的真实语义稳定性仍未通过验收。以下为此前阶段历史记录，最新执行步骤以上面的 `--bounded-suite` 为准。
+
+## 关闭 thinking 后的实际结果与单工具修正（最新）
+
+操作者执行 `--direct-suite` 的真实报告显示：
+
+- 中文明确选择 `explicit-zh`：合法 sunny 方案，工具调用 1 个，finish reason 为 tool_calls，944 输入 / 191 输出 tokens，约 5.844 秒，价格估算 $0.00010248。人工复核理由“晴日公园意指自然日光氛围，sunny 可提供明亮自然的日光效果”：符合现有 HDR 日光描述，没有角度、强度、色温或修复承诺；预设级解释接受，不据此裁定图片物理准确性。
+- 英文明确选择 `explicit-en`：回复包含 2 个工具调用，仍被严格校验拒绝，940 输入 / 183 输出 tokens，约 3.938 秒，价格估算 $0.00010032。没有保存或合并这些非法参数，没有进入生成。
+- 脚本按计划停止；其余 18 项未执行。关闭 thinking 后已取得一项真实合法工具方案，但完整中英文能力验收尚未完成。多工具调用是第二项失败的已知直接原因，不能判定两个调用具体内容相同或不同，因为无效参数未保存。
+
+本轮新增 2 次供应商请求，费用估算合计 $0.0002028。累计预留最多 **5 次请求，剩余最多 35 次**。目前有 usage 的三次请求合计价格估算 **$0.00040344**，首次 HTTP 的实际费用仍未知，不能当作全部账单。记录为 `project/qa/language-real-20261011/direct-suite.json`，复核结果另存 `review-after-direct-suite.json`，旧诊断不改写。
+
+新修正：tool 请求显式添加 `parallel_tool_calls:false`，系统说明要求恰好一次固定函数调用；多个预设都放在该单一方案中。响应端仍严格拒绝多个调用。[OpenAI 兼容协议的官方参数说明](https://developers.openai.com/api/docs/guides/function-calling) 给出这个参数的用途；不能据此保证 Token Factory 当前模型实现会遵循，下一次真实请求验证；不自动换模型、提高 token 或切换 JSON mode。
+
+在同一个私下配置 Key 的 PowerShell 中执行：
+
+```powershell
+python -X utf8 -B project/tests/run_language_probe.py --single-tool-suite
+```
+
+入口检查已审查的旧报告与累计预算，先重测失败的英文用例，成功后继续未发出的 18 项。保留已接受中文结果，不重复收费。最多新增 **19 次**，累计最多 **24 次**；每项仍只请求一次、无格式修复，任何接口/结构错误即停。新的不可重复报告为 `project/qa/language-real-20261011/single-tool-suite.json`，不会覆盖先前记录。GPU/图片上传和生成均关闭。
+
+本次修改的离线语言/预算回归 **24 项通过，0 跳过**；尚未执行新入口的真实调用。以下段落保留先前诊断历史，最新启动步骤以上面的 `--single-tool-suite` 为准。
+
+## 单次诊断的实际结果与修正（2026-10-11 更新）
+
+操作者在本机私下配置终端执行诊断后，`protocol-probe.json` 显示真实模型为 `nvidia/Nemotron-3_5-Lightning`，3.25 秒返回 `finishReason:length`、0 个 tool call、无 refusal。供应商 usage 为输入 944、输出 600、总计 1544 tokens。按公开价格计算该项约 **$0.00020064**；这是该次 usage 的价格估算，不包括首次 HTTP 请求未知计费，也不是控制台账单。
+
+现累计预留最多 **3 次请求**，剩余最多 37 次。首次 HTTP 的供应商调用数仍未知；诊断脚本仅调用一次。20 个语义用例仍未通过真实验收。
+
+截断是已证实的直接原因；默认 thinking 是否耗尽全部输出是合理假设，报告没有保存推理内容，不能当作已证实。[NVIDIA 官方模型卡](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16) 明确默认开启 thinking，可使用 `chat_template_kwargs.enable_thinking=false`。[Token Factory 参数文档](https://docs.tokenfactory.nebius.com/ai-models-inference/overview) 说明 API 支持 vLLM 参数。代码现在针对该准确模型 ID 的默认 `auto` 模式显式关闭 thinking；其他模型默认不添加此参数。环境变量 `LIGHTTRY_LANGUAGE_THINKING` 可设 auto/off/on，拒绝任意其他值。Token Factory 对该开关的真实兼容性仍需下一次调用确认。
+
+继续保留 600 token 预算、严格工具协议与字段校验。`finish_reason=length` 单独返回 `LANGUAGE_OUTPUT_TRUNCATED`，不自动格式修复或增大输出上限。
+
+下一步在**同一个已配置 Key 的 PowerShell**运行：
+
+```powershell
+python -X utf8 -B project/tests/run_language_probe.py --direct-suite
+```
+
+该显式付费入口先重新测试首个协议用例；得到合法工具方案后才继续其他 19 项。所有用例关闭格式修复，每项最多一次请求，总计最多新增 20 次，包含首项重测。整个授权累计最多 23 次，仍低于 40 次。任意接口/截断/结构错误即停止；语义约束未满足则记录 constraintCheck false，不写为通过。主观理由一律标为待人工复核，自动字段合法不等于解释诚实。
+
+发送前持久化计数，已有 `direct-suite.json` 时拒绝重复运行；不删除或覆盖旧诊断。只读取明确服务端环境，固定模型/endpoint/tool 模式、输出不高于 600，thinking 不允许 on，实际请求 payload 限 10000 UTF-8 bytes。授权计数、费用规划预留和每次供应商 usage 分别记录。报告存于 `project/qa/language-real-20261011/direct-suite.json`。Key、原始无效正文、推理内容、认证信息不记录。没有照片或生成入口。
+
+本次代码修改后语言适配器及验收脚本离线测试 **22 项通过、0 跳过**；`git diff --check` 通过。本次代理没有新增收费请求，不能写为开关已实测成功。普通演示与 GPU 推理仍默认关闭。
+
+用户明确授权最多 40 次请求、费用上限 $0.10，GPU 保持关闭。此次未读取凭据文件、其他进程的环境或认证正文；通过用户已经启动的本机产品服务进行调用。
+
+## 已执行
+
+- 本机 `http://127.0.0.1:8765/api/language`：enabled true、developmentTestMode false。
+- 本机 `/api/inference`：enabled false；没有发出图片任务、上传照片或启动 GPU。
+- 首个协议连通用例：`晴日公园`，当前选择和排除均为空，compareThree false。
+- 只发送一次本机推荐 POST。约 7.406 秒后返回 `INVALID_MODEL_OUTPUT`，没有合法方案。按原验收计划停止，剩余 19 项没有运行，不计为通过。
+- 产品适配器最多允许一次格式修复，因此本次按 **最多 2 次供应商请求**预留授权计数，剩余最多 38 次。当前服务没有暴露供应商用量、实际模型 ID 或内部修复次数，不能把预留数称为供应商实际请求数，不能确认其运行环境模型与模板相同。
+- 错误不足以区分输出截断、工具协议或方案字段问题；不能称为真实 Nemotron 能力验收通过，也不能从这个错误断言鉴权已经通过。
+
+本机脱敏记录：`project/qa/language-real-20261011/first.json`。没有保存原始模型正文、认证 Header 或 Key。原有代码修改保留，未提交或推送 Git，未改历史任务。
+
+## 费用证据边界
+
+2026-10-11 只读核对 [官方 Nemotron 页面](https://nebius.com/services/token-factory/models/nvidia-nemotron-models-inference)，公开 Lightning 价格仍为输入 $0.06/百万 tokens、输出 $0.24/百万 tokens。当前运行服务没有供应商 usage，所以本次实际计费未知，应在 Token Factory 控制台核对；没有调用账单接口或更改账户。
+
+诊断脚本的规划预留按每次 15000 输入 tokens、600 输出 tokens 计算，为 $0.001044/次；40 次约 $0.04176。输入数是保守规划假设而非 tokenizer/账单保证。原服务真实模型和 token 设置不可观察，本次不能以此断言实际费用。后续诊断脚本仅允许授权模型、官方 endpoint、tool 模式和不高于 600 的输出上限。
+
+## 下一步：同一私下配置终端运行单次诊断
+
+补充 `LanguageAdapter.last_response_audit`：仅记录固定枚举 finish reason、工具个数、预期函数是否匹配、refusal 布尔和整型 usage。任意供应商文本、工具参数及工具名不进入摘要。不会新增公共 API 或日志输出，不改变生成入口。
+
+独立脚本 `tests/run_language_probe.py` 读取明确环境变量，调用当前产品适配器，**只调用一次，关闭格式修复**。发送前写入报告，若报告已存在则拒绝再次调用，避免无意重复收费。报告包含固定用例、合法方案或错误码、协议摘要和供应商 usage（若提供）。即使成功也停止，不自动执行余下用例。费用估算与供应商账单仍需区分。
+
+在操作者此前私下配置 Key 的同一个 PowerShell 中，先 Ctrl+C 停止前台服务器，再执行：
+
+```powershell
+python -X utf8 -B project/tests/run_language_probe.py
+```
+
+脚本不启动服务器/GPU，也不生成图片。若报告已有记录不要删除后反复运行；先审查报告、累计请求数和实际费用。首次成功执行该诊断后总计预留为 3 次，剩余最多 37 次。只有诊断确认协议后才继续其余用例，仍使用本轮授权，不需要重新索要 Key 正文。
+
+此脚本本轮没有执行收费请求：代理工具进程没有配置 `LIGHTTRY_TOKEN_FACTORY_KEY`，用户服务器进程中的私下环境无法通过正常服务配置继承。不搜索或提取其他进程秘密。需要操作者在已有私下配置终端运行，这是环境传递要求，不是新的授权申请。
+
+## 本轮局部回归
+
+`python -X utf8 -B -m unittest discover -s project/tests -p test_language.py`：18 项通过（含新增摘要脱敏测试），0 跳过。其他上一轮回归没有重复执行，未宣称本轮再次通过。真实浏览器整套推荐流程和余下语义用例未验收。

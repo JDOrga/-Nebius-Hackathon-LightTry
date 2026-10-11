@@ -1,11 +1,13 @@
 import { createState, reduce, selection, currentTask, recordedRegion, validateFile, validateDimensions, fitSize, previewLayout } from './state.js';
-import { sampleSource, disconnectedInference, serviceInference, recoverTask, decodeUpload } from './sources.js';
+import { sampleSource, disconnectedInference, serviceInference, languageService, recoverTask, decodeUpload } from './sources.js';
+import { createPlan, changePlan, undoPlan, invalidatePlan, beginRecommendation, applyRecommendation, failRecommendation, missingPresets } from './plan.js';
 
 const $ = id => document.getElementById(id);
 const escape = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let catalog, state, renderVersion = 0, uploadVersion = 0, renderedResult = null;
 let capabilities = { enabled: false }, uploadFile = null, pending = false, pollVersion = 0;
 let requestId = null, restoring = false, fileSelectionRequested = false;
+let plan, languageCapabilities = { enabled:false }, recommendationController;
 const savedTaskKey = 'lighttry.lastTask';
 const requestKey = 'lighttry.pendingRequest';
 const relatedKey = 'lighttry.relatedTasks';
@@ -16,7 +18,12 @@ const storageSet = (key, value) => { try { value === null ? localStorage.removeI
 const surface = $('preview-surface');
 
 function dispatch(event) {
+  if (plan && ['UPLOAD_START','MODE','SAMPLE','RESTORE_START'].includes(event.type)) {
+    recommendationController?.abort(); plan = invalidatePlan(plan);
+    $('lighting-request').value = '';
+  }
   state = reduce(state, event);
+  if (event.type === 'RESTORE_TASK') plan = createPlan(state.plannedPresets);
   if (state.mode === 'sample') storageSet('lighttry.sampleView', JSON.stringify({sampleId:state.sampleId,presetId:state.presetId,region:state.region,comparison:state.comparison}));
   if (['TASK', 'RESTORE_TASK', 'RELATED_TASK'].includes(event.type) && state.upload) {
     storageSet(relatedKey, JSON.stringify({ inputId: state.upload.id,
@@ -56,10 +63,10 @@ function renderStatus() {
     $('upload-status').prepend(badge);
   }
   $('submit-task').hidden = !generate;
-  const plannedAlreadyComplete=state.plannedPresets.length>0 && state.plannedPresets.every(id=>state.task?.presetResults?.[id]?.status==='succeeded');
-  $('submit-task').disabled = !capabilities.enabled || !state.upload || !uploadFile || active() || !state.plannedPresets.length || plannedAlreadyComplete;
-  $('submit-task').textContent = `生成勾选的 ${state.plannedPresets.length} 种灯光（提交一批）`;
-  $('batch-plan').hidden = !generate;
+  const missing=missingPresets(state,state.plannedPresets);
+  $('submit-task').disabled = !capabilities.enabled || !state.upload || !uploadFile || active() || plan?.busy || !missing.length;
+  $('submit-task').textContent = missing.length ? `确认生成 ${missing.length} 种灯光（提交一批）` : '所选灯光已有有效结果';
+  $('batch-plan').hidden = false;
   $('batch-options').innerHTML = catalog.presets.map(p=>`<label><input type="checkbox" data-plan="${escape(p.id)}" ${state.plannedPresets.includes(p.id)?'checked':''} ${active()?'disabled':''}> ${escape(p.name)}</label>`).join('');
   if (state.task?.presetResults) {
     const summary = document.createElement('span');
@@ -78,7 +85,60 @@ function renderStatus() {
   $('sample-mode').disabled = $('generate-mode').disabled = !!active();
   // Keep the displayed selection bound to the submitted task until it ends.
   document.querySelectorAll('[data-preset]').forEach(button => { button.disabled = false; });
+  renderPlan();
 }
+
+const unsupportedText = { precision:'当前仅支持预设级近似选择，无法满足精确角度、强度、色温、灯位或阴影控制。',
+  material_detail:'当前不能承诺修复文字、材质、纹理或几何。', unrelated:'这条需求无法转换为当前灯光方案，请描述希望的灯光氛围。' };
+function renderPlan() {
+  if (!plan) return;
+  $('language-capability').textContent = languageCapabilities.developmentTestMode ? '离线文字测试替身 · 固定脚本，非 Nemotron 回答' : languageCapabilities.message || '文字服务未配置；仍可手动选择灯光。';
+  $('recommend-plan').disabled = !languageCapabilities.enabled || active() || plan.busy;
+  $('recommend-status').textContent = plan.busy ? '正在推荐…（尚未提交生成）' : plan.question || (plan.replyStatus==='unsupported' ? '当前需求无法满足；保留原方案，未提交生成。' : plan.source==='language' ? '方案已更新，可修改；确认生成前不会提交照片。' : '当前方案由手动选择，可用于另一张照片。');
+  $('recommend-error').hidden = !plan.error; $('recommend-error').textContent = plan.error;
+  $('undo-plan').disabled = !plan.previous || active();
+  $('plan-detail').replaceChildren();
+  plan.ids.forEach((id,index)=> {
+    const p = document.createElement('p');
+    p.textContent = `${index+1}. ${catalog.presets.find(p=>p.id===id)?.name || id} — ${plan.reasons[index] || '手动选择；以对应预设的实际效果为准。'}`;
+    $('plan-detail').append(p);
+  });
+  for (const item of plan.unsupported) { const p=document.createElement('p');p.textContent=unsupportedText[item];$('plan-detail').append(p); }
+  if(plan.excluded.length) { const p=document.createElement('p');p.textContent='本方案排除：'+plan.excluded.map(id=>catalog.presets.find(p=>p.id===id)?.name).join('、');$('plan-detail').append(p); }
+}
+function syncPlan() {
+  requestId=null;
+  dispatch({ type:'PLAN_PRESETS',ids:plan.ids });
+  if (plan.ids.length) dispatch({type:'PRESET',id:plan.ids[0]});
+}
+$('recommend-plan').onclick = async () => {
+  if (!plan || plan.busy || active() || !languageCapabilities.enabled) return;
+  const text = $('lighting-request').value.trim();
+  if (!text) { plan={...plan,error:'请输入 1–600 字的灯光需求。'};return renderPlan(); }
+  recommendationController = new AbortController();
+  const controller = recommendationController;
+  const token = crypto.randomUUID();
+  plan=beginRecommendation(plan,token);renderStatus();
+  const timer=setTimeout(()=>controller.abort(),25000);
+  try {
+    const value=await languageService.recommend(text,{presetIds:plan.ids,excludedIds:plan.excluded},$('compare-three').checked,controller.signal);
+    const next=applyRecommendation(plan,token,value,catalog.presets.map(p=>p.id));
+    if(next===plan) return;
+    plan=next;
+    if(value.status==='ready' && !plan.error) syncPlan();
+  } catch(error) { plan=failRecommendation(plan,token,error.name==='AbortError'?'文字请求已取消或超时；方案未修改。':error.message); }
+  finally { clearTimeout(timer);renderStatus(); }
+};
+$('undo-plan').onclick = () => {
+  if(!plan?.previous || active()) return;
+  recommendationController?.abort();plan=undoPlan(plan);syncPlan();
+};
+function cancelChangedRequest() {
+  if (!plan?.busy) return;
+  recommendationController?.abort();plan=invalidatePlan(plan);renderStatus();
+}
+$('lighting-request').oninput = cancelChangedRequest;
+$('compare-three').onchange = cancelChangedRequest;
 
 async function render() {
   const version = ++renderVersion;
@@ -282,7 +342,9 @@ $('view-upload-original').onclick = () => {
 $('submit-task').onclick = async () => {
   if (!capabilities.enabled || !uploadFile || !state.upload || active()) return;
   const input = state.upload;
-  const presets = catalog.presets.filter(p=>state.plannedPresets.includes(p.id));
+  if (plan?.busy) return;
+  const wanted = missingPresets(state,state.plannedPresets);
+  const presets = wanted.map(id=>catalog.presets.find(p=>p.id===id)).filter(Boolean);
   if(!presets.length) return;
   if(state.task && ['succeeded','partial','failed','expired'].includes(state.task.status)) requestId=null;
   dispatch({ type: 'NEW_TASK' });
@@ -330,7 +392,9 @@ $('preset-list').onclick = $('compact-preset-list').onclick = selectPreset;
 $('batch-options').onchange = event => {
   if(active() || !event.target.dataset.plan) return;
   requestId=null;
-  dispatch({type:'PLAN_PRESETS',ids:[...$('batch-options').querySelectorAll('input:checked')].map(i=>i.dataset.plan)});
+  recommendationController?.abort();
+  plan=changePlan(plan,[...$('batch-options').querySelectorAll('input:checked')].map(i=>i.dataset.plan),{source:'manual'});
+  syncPlan();
 };
 document.querySelectorAll('[data-comparison]').forEach(button => button.onclick = () => dispatch({ type: 'COMPARE', value: button.dataset.comparison }));
 document.querySelectorAll('[data-region]').forEach(button => button.onclick = () => dispatch({ type: 'REGION', value: button.dataset.region }));
@@ -404,11 +468,14 @@ new ResizeObserver(applyView).observe(surface);
 try {
   catalog = await sampleSource.catalog();
   state = createState(catalog);
+  plan = createPlan(state.plannedPresets);
   try { const saved = JSON.parse(storageGet('lighttry.sampleView') || 'null');
     if (saved && catalog.samples.some(s=>s.id===saved.sampleId) && catalog.presets.some(p=>p.id===saved.presetId)) state = {...state, ...saved, mode:'sample'};
   } catch {}
   try { capabilities = await serviceInference.capabilities(); }
   catch { capabilities = { enabled: false }; }
+  try { languageCapabilities = await languageService.capabilities(); }
+  catch { languageCapabilities = {enabled:false,message:'文字服务状态读取失败；仍可手动选择灯光。'}; }
   $('generate-mode').querySelector('span').textContent = capabilities.developmentTestMode ? '离线测试' : capabilities.enabled ? '推理已配置' : '推理默认关闭';
   render();
   if (capabilities.developmentTestMode) document.querySelector('.local-badge').textContent = '离线测试替身 · 非 GPU';

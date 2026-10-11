@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from inference.jobs import TaskStore, JobError
 from inference.images import MAX_BYTES
+from language import LanguageAdapter, LanguageError, strict_json
 INSTALL_HINT = ('请在代码根目录安装单独提供的 lighttry-demo-assets-20261010-candidate.zip：'
                 'python -X utf8 -B project/install_demo_assets.py "<素材包路径>"。'
                 '默认位置为 project/demo-assets；外部位置用 --assets-dir 或 LIGHTTRY_DEMO_ASSETS。'
@@ -59,6 +60,7 @@ class Handler(BaseHTTPRequestHandler):
     catalog = None
     assets_dir = None
     task_store = None
+    language_service = None
     csrf_token = secrets.token_urlsafe(32)
 
     def valid_host(self):
@@ -79,6 +81,23 @@ class Handler(BaseHTTPRequestHandler):
             return self.job_error(JobError('INVALID_ORIGIN', '请从当前本机应用提交任务。', 403))
         route = urlsplit(self.path).path
         try:
+            if route == '/api/language/recommend':
+                if not self.language_service:
+                    raise LanguageError('LANGUAGE_NOT_CONFIGURED', '文字服务未配置；请手动选择灯光。', 503)
+                if self.headers.get('Transfer-Encoding') or self.headers.get('Content-Type') != 'application/json':
+                    raise JobError('INVALID_BODY', '文字请求须使用 JSON。', 400)
+                try:
+                    size = int(self.headers.get('Content-Length', '0'))
+                    if not 0 < size <= 8192:
+                        raise ValueError()
+                    self.connection.settimeout(5)
+                    raw = self.rfile.read(size)
+                    if len(raw) != size:
+                        raise ValueError()
+                    body = strict_json(raw.decode('utf-8'))
+                except (ValueError, UnicodeError, RecursionError):
+                    raise JobError('INVALID_BODY', '文字请求为空、过长或格式无效。', 400)
+                return self.json_response(self.language_service.recommend(body))
             if not self.task_store or not self.task_store.executor:
                 raise JobError('SERVICE_NOT_CONNECTED', '真实推理默认关闭；本机预览不会上传或生成。', 503)
             if route == '/api/tasks':
@@ -109,7 +128,7 @@ class Handler(BaseHTTPRequestHandler):
             if len(pieces) == 5 and pieces[:3] == ['', 'api', 'tasks'] and pieces[4] == 'cancel':
                 return self.json_response(self.task_store.cancel(pieces[3]))
             raise JobError('ROUTE_NOT_FOUND', '接口不存在。', 404)
-        except JobError as error:
+        except (JobError, LanguageError) as error:
             return self.job_error(error)
         except (OSError, TimeoutError):
             return self.job_error(JobError('LOCAL_IO_ERROR', '本地读写失败或请求超时；请检查任务状态后重试。', 503))
@@ -120,6 +139,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self.valid_host():
             return self.job_error(JobError('INVALID_HOST', '只接受本机地址。', 403))
         route = urlsplit(self.path).path
+        if route == '/api/language':
+            return self.json_response(self.language_service.capabilities() if self.language_service else {
+                'enabled': False, 'developmentTestMode': False, 'message': '文字服务未配置；仍可手动选择灯光。'})
         if route == '/api/inference':
             capabilities = self.task_store.capabilities() if self.task_store else {
                 'enabled': False, 'developmentTestMode': False, 'cancelRunning': False,
@@ -178,7 +200,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_file(asset_path(self.assets_dir, self.catalog['assets'][key]), filename)
         # Explicit allowlist prevents serving configs, history, sources or arbitrary paths.
         allowed = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/state.js': 'state.js',
-                   '/sources.js': 'sources.js', '/styles.css': 'styles.css', '/favicon.svg': 'favicon.svg', '/about.html': 'about.html'}
+                   '/sources.js': 'sources.js', '/plan.js': 'plan.js', '/styles.css': 'styles.css', '/favicon.svg': 'favicon.svg', '/about.html': 'about.html'}
         if route in allowed:
             return self.send_file(ROOT / 'web' / allowed[route])
         self.send_error(404)
@@ -206,11 +228,14 @@ def main():
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--assets-dir', help='独立素材目录；相对路径从 project/ 解析')
     parser.add_argument('--inference-config', help='显式指定本机推理配置；默认关闭')
+    parser.add_argument('--language-service', action='store_true', help='显式读取文字服务环境配置；默认关闭，不自动调用')
     parser.add_argument('--tasks-dir', default='.tasks', help='本机私有任务目录；相对 project/ 解析')
     args = parser.parse_args()
     Handler.assets_dir = resolve_assets_dir(args.assets_dir)
     try:
         Handler.catalog = load_catalog(Handler.assets_dir)
+        if args.language_service:
+            Handler.language_service = LanguageAdapter.from_env(Handler.catalog['presets'])
         executor, timeout, retention = None, 1080, 86400
         if args.inference_config:
             config_path = Path(args.inference_config)
@@ -227,7 +252,7 @@ def main():
         tasks_dir = Path(args.tasks_dir)
         Handler.task_store = TaskStore(tasks_dir if tasks_dir.is_absolute() else ROOT / tasks_dir,
                                       Handler.catalog['presets'], executor, timeout, retention)
-    except (ValueError, OSError, KeyError, ImportError, JobError) as error:
+    except (ValueError, OSError, KeyError, ImportError, JobError, LanguageError) as error:
         parser.exit(2, str(error) + '\n')
     with ThreadingHTTPServer(('127.0.0.1', args.port), Handler) as server:
         print(f'光照预览：http://127.0.0.1:{args.port} （仅本机；Ctrl+C 停止）', flush=True)

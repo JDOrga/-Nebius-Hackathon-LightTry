@@ -20,10 +20,23 @@
       <section class="panel" id="lights-panel"><div class="section-title"><h2>光照方案</h2><span>03</span></div><p class="muted small">选择环境光；可用结果以样例记录为准</p><div id="preset-list" class="preset-list"></div><div class="hdr-note" id="hdr-note"></div></section>
       <section class="panel" id="samples-panel"><div class="section-title"><h2>内置样例</h2><span id="sample-count">05</span></div><div id="sample-list" class="sample-list"></div><button id="view-original" class="text-button">查看原始照片 ↗</button><p class="small muted">已完成的历史实测结果</p></section>
       <section class="upload-box" id="drop-zone" tabindex="0" role="button" aria-label="载入照片"><span class="upload-icon">＋</span><strong>载入照片</strong><span class="upload-capability">本机预览 · 提交后才生成</span><span>点击选图，或拖拽到这里</span><small>JPG / PNG / WebP · 最大 20 MB</small></section>
+      <section class="panel" id="text-plan"><h2>用一句话选光</h2>
+        <p id="language-capability" class="small muted">文字服务默认关闭</p>
+        <label for="lighting-request">灯光需求或方案修改</label>
+        <textarea id="lighting-request" maxlength="600" rows="3" placeholder="想要温暖一点、适合生活方式广告的感觉"></textarea>
+        <label class="small"><input id="compare-three" type="checkbox"> 明确比较三个预设</label>
+        <button id="recommend-plan" class="text-button" type="button">推荐 / 修改方案</button>
+        <p id="recommend-status" class="small" role="status" aria-live="polite"></p>
+        <p id="recommend-error" class="error" role="alert" hidden></p>
+        <div id="plan-detail" class="small"></div>
+        <button id="undo-plan" class="text-button" type="button" disabled>撤回上一次方案修改</button>
+        <p class="small muted">只支持三个环境预设的近似选择；不支持精确角度、强度、色温或阴影，不修复文字、材质和几何。推荐不会生成图片。</p>
+        <p class="small muted">换照片会保留灯光选择，清空旧生成状态；只复用选择，不复用其他照片的 inverse 或结果。</p>
+      </section>
       <input id="file-input" type="file" accept="image/jpeg,image/png,image/webp" hidden>
       <p id="upload-error" class="error" role="alert" hidden></p>
       <button id="view-upload-original" class="text-button" hidden>查看本次原始照片 ↗</button>
-      <fieldset id="batch-plan" hidden><legend>勾选准备生成（1–3 种）</legend><div id="batch-options"></div><p class="small muted">上方灯光按钮仅切换查看。点击生成后才提交一批；整批结束取回校验后发布结果。</p></fieldset>
+      <fieldset id="batch-plan"><legend>可编辑灯光方案（1–3 种）</legend><div id="batch-options"></div><p class="small muted">上方灯光按钮仅切换查看。已有有效结果优先显示；另行确认生成才提交缺少的灯光。</p></fieldset>
       <button id="submit-task" class="export-button" hidden disabled>提交光照任务</button>
       <button id="cancel-task" class="text-button" hidden>取消任务（需执行端支持）</button>
       <button id="restore-task" class="text-button" hidden>查看上次任务</button>

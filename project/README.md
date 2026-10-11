@@ -1,5 +1,7 @@
 # Cosmos 本地光照预览
 
+2026-10-10 新增有边界的文字选光方案：推荐、有限后续修改、手动编辑、撤回和跨照片复用选择，再显式确认接入现有批次。Nemotron 仅负责文字方案，Cosmos 负责既有重布光；普通启动两者均不自动调用。文字真实 API 未验收，离线脚本明确标识。启动、环境模板、当前素材路径及下一轮最多40次/$0.10计划见 [文字方案交付](docs/LANGUAGE_CONTROL_20261010.md)，本轮结果见 [本地验收](docs/LANGUAGE_ACCEPTANCE_20261010.md)。
+
 有限主体保真度的 AI 光照预览工具。保留 Cosmos 历史样例；真实任务默认关闭。2026-10-10 已验收一次新网页 sunny/sunrise 批次：复用历史inverse、一个forward对象顺序生成，结果自动取回展示；已独立确认停机。普通启动不连接云端、不启动云机。最短启动、两种模式和限制见 [可演示候选基线](docs/DEMO_CANDIDATE_BASELINE_20261010.md)，实际证据见 [新批次验收](docs/WEB_BATCH_ACCEPTANCE_RETRY2_20261010.md)。候选尚未发布。
 
 ## 启动
@@ -27,6 +29,7 @@ python -X utf8 -B project/server.py --assets-dir demo-assets-20261010
 ```powershell
 python -X utf8 -B -m unittest discover -s project/tests -p 'test_*.py' -v
 node --test project/tests/state.test.js
+node --test project/tests/plan.test.js
 ```
 
 测试只用 unittest、node:test。`qa/` 保存本轮实际 UI 截图、检查记录和原文件保存验收，忽略入库。开发记录见 [DEVELOPMENT.md](DEVELOPMENT.md)，适配器说明见 [docs/INFERENCE_INTERFACE.md](docs/INFERENCE_INTERFACE.md)。
