@@ -4,7 +4,7 @@ import {allowed,createScheme,revise as reviseBase,variant,sameParameters,matchin
 const $=id=>document.getElementById(id), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let catalog,lighting,inference,schemes=[],current,input,file=null,tasks=[],mode='result',compareKey=null,pending=false,requestId=null,region=false,zoom=1,pan={x:0,y:0};
 const libraryKey='lighttry.schemeLibrary.v1',cursorKey='lighttry.schemeCursor.v1',tasksKey='lighttry.schemeTasks.v1',submissionKey='lighttry.schemeSubmission.v1',originsKey='lighttry.schemeOrigins.v1';
-let schemeOrigins={};
+let schemeOrigins={},draftDirty=false;
 $('load-photo').onclick=()=>$('file').click();
 const revise=(s,p,n=s.name)=>reviseBase(s,p,n,schemes);
 const key=s=>s.planId+':'+s.version;
@@ -32,7 +32,14 @@ function activeTask(){return tasks.find(t=>t.input?.id===input?.id&&(['queued','
 function statusFor(s){const r=resultFor(s);if(r)return '已生成';const t=tasks.filter(t=>t.input?.id===input?.id&&t.lightingScheme?.planId===s.planId&&t.lightingScheme?.version===s.version).sort((a,b)=>b.createdAt-a.createdAt)[0];if(t&&transferFailure(t))return '取回失败 · 可恢复';return t?({queued:'待生成',running:'运行中',failed:'失败',expired:'已过期',partial:'部分完成'}[t.status]||t.status):'草稿 / 待生成';}
 function invalidateAI(){} // Chat checks live snapshot; no fake upstream cancellation.
 function put(s,force=false){if(!s.name.trim()||/[\x00-\x1f\x7f]/.test(s.name)){error('名称需为1–60字且不含控制字符。');return;}if(!force&&current&&s.parentVersion===current.version&&s.planId===current.planId&&s.name===current.name&&sameParameters(s.parameters,current.parameters))return;if(s.version>1000||s.name.length>60||schemes.length>=200){error('方案版本/名称或本地库已到有限上限；未更改。');return;}error(null);invalidateAI();current=s;if(!schemes.some(x=>key(x)===key(s)))schemes.push(s);requestId=null;persist();render();}
-const lightConsole=createConsole({get:()=>current,apply:p=>put(revise(current,p)),api,token:()=>inference.csrfToken,error});
+function workspaceView(value){document.body.dataset.workspaceView=value;document.querySelectorAll('[data-workspace-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.workspaceView===value)));requestAnimationFrame(applyView);}
+$('open-library').onclick=()=>$('library-drawer').showModal();
+$('close-library').onclick=()=>$('library-drawer').close();
+$('library-drawer').addEventListener('click',e=>{if(e.target===$('library-drawer')){const r=e.target.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)e.target.close();}});
+document.querySelector('.skip').onclick=()=>workspaceView('lighting');
+document.querySelectorAll('[data-workspace-view]').forEach(b=>b.onclick=()=>workspaceView(b.dataset.workspaceView));
+$('expand-preview').onclick=()=>{const preview=document.querySelector('.preview'),expanded=preview.classList.toggle('expanded-preview');$('expand-preview').setAttribute('aria-expanded',String(expanded));$('expand-preview').textContent=expanded?'收起预览':'展开预览';if(!expanded){zoom=1;pan={x:0,y:0};}applyView();};
+const lightConsole=createConsole({get:()=>current,apply:p=>put(revise(current,p)),api,token:()=>inference.csrfToken,error,onDraftChange:dirty=>{draftDirty=dirty;$('action-draft-status').hidden=!dirty;$('action-draft-status').textContent=dirty?'有未应用修改 · 左侧显示上一方案结果':'';$('generation-summary').hidden=dirty;if(dirty)$('generate').textContent='先应用参数';$('generate').disabled=dirty||$('generate').dataset.baseDisabled==='true';}});
 function parametersOptions(){lightConsole.render();const p=current.parameters;const all=[[0,1],...(lighting.capabilities.approvedVariants[p.environmentId]||[])];const offsets=[...new Set(all.map(x=>x[0]))];const strengths=[...new Set(all.filter(x=>x[0]===p.offsetDeg).map(x=>x[1]))];$('offset').innerHTML=offsets.map(o=>`<option value="${o}">${o===0?'默认加载方位':'方向变体 · 环境偏移 +'+o+'°'}</option>`).join('');$('offset').value=p.offsetDeg;$('strength').innerHTML=strengths.map(v=>`<option value="${v}">${v===1?'默认光照':'近似偏暗 · HDR 0.7'}</option>`).join('');$('strength').value=p.strength;$('offset').disabled=offsets.length<2;$('strength').disabled=strengths.length<2;$('range-note').textContent=p.offsetDeg===45?'实验性方向探索 · 非物理灯位':p.strength===.7?'近似偏暗 · HDR 0.7，非精确 EV':'';}
 async function render(){
   if(!current||!input)return;
@@ -44,9 +51,10 @@ async function render(){
   $('view-state').textContent=statusFor(current)+(current.parameters.offsetDeg===45?' · 实验性':'');
   $('identity').textContent='当前参照 '+current.planId.slice(0,8)+' / v'+current.version;
   $('source-note').textContent=r?.sourceNote||'没有匹配当前版本参数的结果；不展示旧参数图片。';
-  $('generation-summary').textContent=r?'结果已就绪，无需重新生成':`待生成：${schemeCaption(current,schemes)} · v${current.version}（仅此方案）。`;
-  $('generate').disabled=busy||tasks.some(t=>t.input?.id===input.id&&t.lightingScheme?.planId===current.planId&&t.lightingScheme?.version===current.version&&transferFailure(t))||!inference.enabled||!file||!!r||!allowed(current.parameters,lighting.capabilities);
-  const failed=tasks.find(t=>t.input?.id===input.id&&t.lightingScheme?.planId===current.planId&&t.lightingScheme?.version===current.version&&t.status==='failed'&&!t.executionUncertain);$('generate').textContent=r?'结果已就绪':failed?'确认重试此方案':'确认生成';
+  $('generation-summary').textContent=r?'结果已就绪，无需重新生成':`新方案待生成：${schemeCaption(current,schemes)} · v${current.version}（仅此方案）。`;
+  const generationBlocked=busy||tasks.some(t=>t.input?.id===input.id&&t.lightingScheme?.planId===current.planId&&t.lightingScheme?.version===current.version&&transferFailure(t))||!inference.enabled||!file||!!r||!allowed(current.parameters,lighting.capabilities);
+  $('generate').dataset.baseDisabled=String(generationBlocked);$('generate').disabled=draftDirty||generationBlocked;
+  const failed=tasks.find(t=>t.input?.id===input.id&&t.lightingScheme?.planId===current.planId&&t.lightingScheme?.version===current.version&&t.status==='failed'&&!t.executionUncertain);$('generate').textContent=draftDirty?'先应用参数':r?'结果已就绪':failed?'确认重试此方案':'确认生成';
   const transfer=tasks.find(t=>t.input?.id===input.id&&t.lightingScheme?.planId===current.planId&&t.lightingScheme?.version===current.version&&transferFailure(t));$('recover').hidden=!transfer;$('recover').dataset.task=transfer?.taskId||'';if(transfer){$('generation-summary').textContent='执行已结束，结果取回失败；恢复取回，不重新生成。';$('generate').textContent='取回失败，请使用恢复';}
   const t=activeTask();const stages={preflight:'检查环境',weights:'校验权重',inverse:'inverse 阶段',forward:'forward 阶段',validating:'验证实际结果',transferring:'取回结果'};
   $('stage').textContent=transfer?'取回阶段失败，结果尚待核验；可用已验证凭据恢复取回，不要重新计算。':pending?'正在提交；尚未确认执行…':t?'实际阶段：'+(stages[t.stage]||t.status)+(t.executionUncertain?'；执行状态不确定，禁止重复提交':''):inference.enabled?!file?'恢复后需重新载入同一原始文件才能提交。':'符合严格条件时复用 inverse；forward 冷启动仍可能数分钟。':'真实推理关闭 · 浏览、保存与下载已有结果可用。';
@@ -64,9 +72,11 @@ async function render(){
   else if(mode==='plans'){const other=schemes.find(s=>key(s)===compareKey),or=other&&displayResult(resultFor(other),other);panels=[[shown||din,r?schemeCaption(current,schemes)+' · v'+current.version+' · '+effectLabel(current.parameters):'当前待生成 · 输入'],...(or?[[or,schemeCaption(other,schemes)+' · v'+other.version+' · '+effectLabel(other.parameters)]]:[])];}
   else panels=[[shown||din,r?'当前方案实际结果':transfer?'取回失败 · 仅显示输入':'待生成 · 仅显示输入']];
   $('preview-panels').innerHTML=`<div class="${panels.length===2?'panels':''}">${panels.map(([img,label])=>`<div class="panel"><span class="label">${esc(label)}</span>${img.url?`<div class="image-viewport"><img src="${esc(img.url)}" alt="${esc(label)}" width="${img.width}" height="${img.height}"></div>`:'<div class="empty">照片字节未持久化；重新载入同一原始文件后恢复草稿。不展示旧图。</div>'}</div>`).join('')}</div>`;
-  $('plan-list').innerHTML=schemes.slice().reverse().filter(s=>$('all-photos').checked||s.inputId===input.id).filter(s=>$('show-history').checked||key(s)===key(current)||!schemes.some(n=>n.planId===s.planId&&n.version>s.version)).map(s=>{const old=schemes.some(n=>n.planId===s.planId&&n.version>s.version),rr=resultFor(s);return `<article class="plan-card ${key(s)===key(current)?'active':''}">${s.inputId===input.id&&(rr?.url||input.url)?`<img src="${esc(rr?.url||input.url||'')}" alt="${rr?'真实结果':'待生成，仅输入'}">`:''}<div><strong title="${esc(s.name)}">${esc(schemeCaption(s,schemes))}</strong><span class="badge">${s.inputId===input.id?statusFor(s):'另一照片 · 参数可复用'}</span>${schemePresentation(s).summary?`<details class="card-full-name"><summary>完整名称</summary><span>${esc(s.name)}</span></details>`:''}<p>${esc(effectLabel(s.parameters))} · v${s.version}${old?' · 旧版本':''}</p><button data-plan="${key(s)}">查看／编辑参照</button>${old?`<button data-restore="${key(s)}">恢复为新版本</button>`:''}</div></article>`}).join('');
+  $('plan-list').innerHTML=schemes.slice().reverse().filter(s=>$('all-photos').checked||s.inputId===input.id).filter(s=>$('show-history').checked||key(s)===key(current)||!schemes.some(n=>n.planId===s.planId&&n.version>s.version)).map(s=>{const old=schemes.some(n=>n.planId===s.planId&&n.version>s.version),rr=resultFor(s);return `<article class="plan-card ${key(s)===key(current)?'active':''}">${s.inputId===input.id&&(rr?.url||input.url)?`<button class="plan-thumb" data-plan="${key(s)}" aria-label="选择方案：${esc(schemeCaption(s,schemes))}"><img src="${esc(rr?.url||input.url||'')}" alt="${rr?'真实结果':'待生成，仅输入'}"></button>`:''}<div><strong title="${esc(s.name)}">${esc(schemeCaption(s,schemes))}</strong><span class="badge">${s.inputId===input.id?statusFor(s):'另一照片 · 参数可复用'}</span>${schemePresentation(s).summary?`<details class="card-full-name"><summary>完整名称</summary><span>${esc(s.name)}</span></details>`:''}<p>${esc(effectLabel(s.parameters))} · v${s.version}${old?' · 旧版本':''}</p><button data-plan="${key(s)}">查看／编辑参照</button><button data-copy="${key(s)}" ${s.inputId!==input.id?'disabled':''}>复制</button><button data-compare="${key(s)}" ${s.inputId!==input.id||key(s)===key(current)||!rr||!r?'disabled':''}>比较</button>${old?`<button data-restore="${key(s)}">恢复为新版本</button>`:''}</div></article>`}).join('');
+  document.querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const s=schemes.find(s=>key(s)===b.dataset.copy);if(s.inputId!==input.id)return;put(variant(s,s.name.slice(0,55)+' · 副本'));$('library-drawer').close();workspaceView('lighting');});
+  document.querySelectorAll('[data-compare]').forEach(b=>b.onclick=()=>{const s=schemes.find(s=>key(s)===b.dataset.compare);if(s.inputId!==input.id||!resultFor(s)||!resultFor(current))return;compareKey=key(s);mode='plans';zoom=1;pan={x:0,y:0};render();$('library-drawer').close();workspaceView('preview');});
   document.querySelectorAll('[data-restore]').forEach(b=>b.onclick=()=>{const s=schemes.find(s=>key(s)===b.dataset.restore);if(s.inputId===input.id)put(revise(s,s.parameters),true);});
-  document.querySelectorAll('[data-plan]').forEach(b=>b.onclick=async()=>{const s=schemes.find(s=>key(s)===b.dataset.plan);if(s.inputId!==input.id){const sample=catalog.samples.find(x=>x.input.sha256.slice(0,32)===s.inputId);if(sample){await chooseSample(sample.id);}else {const restored=tasks.find(t=>t.input?.id===s.inputId);if(restored){input={...restored.input,originalSha:restored.originalInput?.sha256,originalUrl:restored.input.url.replace(/\/input$/,'/original'),needsFile:true};file=null;}else {error('该方案关联另一照片；请先载入原照片，不会借用当前输入或结果。');return;}}}current=s;zoom=1;pan={x:0,y:0};invalidateAI();persist();render();});
+  document.querySelectorAll('[data-plan]').forEach(b=>b.onclick=async()=>{const s=schemes.find(s=>key(s)===b.dataset.plan);if(s.inputId!==input.id){const sample=catalog.samples.find(x=>x.input.sha256.slice(0,32)===s.inputId);if(sample){await chooseSample(sample.id);}else {const restored=tasks.find(t=>t.input?.id===s.inputId);if(restored){input={...restored.input,originalSha:restored.originalInput?.sha256,originalUrl:restored.input.url.replace(/\/input$/,'/original'),needsFile:true};file=null;}else {error('该方案关联另一照片；请先载入原照片，不会借用当前输入或结果。');return;}}}current=s;zoom=1;pan={x:0,y:0};invalidateAI();persist();render();$('library-drawer').close();workspaceView('preview');});
   $('photo-note').textContent=input.sampleId?'历史样例 · '+selectedSample().date:input.canvas?'既有任务照片 · 当前操作不上传；原始来源保留':'我的照片 · 本机原照；提交后按既有流程预处理，目前未上传';
   chat.update();applyView();
 }
@@ -118,3 +128,25 @@ async function restoreTask(id){if(!id)return;if(!/^[0-9a-f]{32}$/.test(id)){erro
 function openLookup(kind){$('lookup-dialog').dataset.kind=kind;$('lookup-dialog').dataset.task=$('recover').dataset.task||'';$('lookup-title').textContent=kind==='task'?'找回本机既有任务':'已验证的恢复守护编号';$('lookup-value').value='';$('lookup-dialog').showModal();$('lookup-value').focus();}
 $('restore-task').onclick=()=>openLookup('task');$('recover').onclick=()=>openLookup('recover');
 $('lookup-dialog').addEventListener('close',()=>{if($('lookup-dialog').returnValue==='confirm'){const id=$('lookup-value').value;$('lookup-dialog').dataset.kind==='task'?restoreTask(id):recoverTask(id);}});
+
+// Persistent layout state is independent of recipe and task identities.
+const divider=$('workspace-divider'), splitGrid=document.querySelector('.work-grid');
+let splitRatio=55;
+try{const n=Number(localStorage.getItem('lighttry.workspaceSplit.v1'));if(n>=40&&n<=68)splitRatio=n;}catch{}
+function setSplit(n){
+ splitRatio=Math.max(40,Math.min(68,n));
+ splitGrid.style.setProperty('--preview-share',splitRatio+'fr');
+ splitGrid.style.setProperty('--lighting-share',(100-splitRatio)+'fr');
+ divider.setAttribute('aria-valuenow',String(Math.round(splitRatio)));
+ $('layout-ratio').textContent='预览 '+Math.round(splitRatio)+'% / 调光 '+(100-Math.round(splitRatio))+'%';
+ document.querySelectorAll('[data-layout]').forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.layout)===Math.round(splitRatio))));
+ try{localStorage.setItem('lighttry.workspaceSplit.v1',String(splitRatio));}catch{}
+ requestAnimationFrame(()=>applyView());
+}
+document.querySelectorAll('[data-layout]').forEach(b=>b.onclick=()=>setSplit(Number(b.dataset.layout)));
+divider.onpointerdown=e=>{if(e.button!==0)return;divider.setPointerCapture(e.pointerId);divider.classList.add('dragging');};
+divider.onpointermove=e=>{if(!divider.hasPointerCapture(e.pointerId))return;const r=splitGrid.getBoundingClientRect();setSplit((e.clientX-r.left)/r.width*100);};
+divider.onpointerup=e=>{if(divider.hasPointerCapture(e.pointerId))divider.releasePointerCapture(e.pointerId);divider.classList.remove('dragging');};
+divider.onpointercancel=()=>divider.classList.remove('dragging');
+divider.onkeydown=e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();setSplit(e.key==='Home'?40:e.key==='End'?68:splitRatio+(e.key==='ArrowLeft'?-1:1));}};
+setSplit(splitRatio);
