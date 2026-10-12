@@ -248,8 +248,15 @@ class LanguageAdapter:
             if choice['message'].get('refusal'):
                 raise ValueError()
             if self.output_mode == 'tool':
-                if choice['message'].get('content') not in (None, ''):
-                    raise ValueError()
+                content=choice['message'].get('content')
+                if content not in (None, ''):
+                    # Opt-in joint acceptance discards bounded supplementary text
+                    # as UNTRUSTED DATA. It is never parsed, rendered, executed or
+                    # substituted for the SINGLE expected tool's real arguments.
+                    # The same call/name/finish/schema/semantic guards below hold.
+                    if not getattr(self,'allow_tool_preamble',False) or type(content) is not str or len(content)>1024 or (self._key and self._key in content):
+                        raise ValueError()
+                    self.last_response_audit['ignoredSupplementalContentChars']=len(content)
                 calls = choice['message']['tool_calls']
                 if (choice.get('finish_reason') != 'tool_calls' or len(calls) != 1 or calls[0]['type'] != 'function' or
                         calls[0]['function']['name'] != 'propose_lighting_plan'):

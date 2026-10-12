@@ -35,9 +35,17 @@ def proposal_diagnosis(value,key=''):
         text=re.sub(r'(?:sk-|hf_|ghp_)[A-Za-z0-9_-]+','[REDACTED]',text)
         result[field]=text
     result['status']=value.get('status') if value.get('status') in ('ready','clarification','unsupported','explanation') else 'invalid'
+    params=value.get('parameters')
+    if isinstance(params,dict):
+        required={'schemaVersion','mode','environmentId','environmentSha256','offsetDeg','strength','ambient','zones','synthesizerVersion','preprocessingVersion','colorConvention'}
+        result['parameterShape']={'form':'operations' if set(params)=={'operations'} else 'recipe',
+            'missingRecipeFields':sorted(required-set(params)), 'unknownRecipeFieldCount':len(set(params)-required-{'operations'}),
+            'mode':params.get('mode') if params.get('mode') in ('procedural','environment') else 'invalid-or-absent',
+            'schemaVersion2':type(params.get('schemaVersion')) is int and params.get('schemaVersion')==2,
+            'zonesCount':len(params['zones']) if isinstance(params.get('zones'),list) else None}
     return result
 
-TECHNICAL_TERM=re.compile(r'(?<![A-Za-z])(?:sunny|sunrise|street|Nemotron|NVIDIA|HDR|GPU|AI|ID|EV|CCT|Kelvin|offsetDeg|strength|environmentId)(?![A-Za-z])',re.I)
+TECHNICAL_TERM=re.compile(r'(?<![A-Za-z])(?:sunny|sunrise|street|Nemotron|NVIDIA|HDR|GPU|AI|ID|EV|CCT|Kelvin|offsetDeg|strength|environmentId|key|fill)(?![A-Za-z])',re.I)
 CLAUSE_BREAK=re.compile(r'[。！？!?；;,，\n]|但是|然而|\bbut\b|\bhowever\b|但|却',re.I)
 NEGATED=re.compile(r'不能|无法|不支持|不提供|不保证|不承诺|不具备|没法|不是|未看到|未看过|\b(?:not|cannot|can.t|unable|no)\b',re.I)
 
@@ -57,10 +65,14 @@ def review_scheme_language(value,language):
         'question':TECHNICAL_TERM.sub('',value['question'])},language)
 
 
-def schema(environments,policy,chat=False):
+def schema(environments,policy,chat=False,full_procedural_recipe=False):
     if policy.get('parameterized'):
         from light_console import json_schema
-        return {'type':'object','additionalProperties':False,'properties':{'status':{'enum':['ready','clarification','unsupported','explanation']},'action':{'enum':['revise','save_variant']},'parameters':{'anyOf':[{'type':'null'},json_schema(environments)]},'name':{'type':'string','maxLength':60},'reason':{'type':'string','maxLength':180},'question':{'type':'string','maxLength':100}},'required':['status','action','parameters','name','reason','question']}
+        parameter_schema=json_schema(environments)
+        if full_procedural_recipe:
+            parameter_schema=parameter_schema['oneOf'][0]
+            parameter_schema['properties'].update(mode={'const':'procedural'},environmentId={'const':None},environmentSha256={'const':None})
+        return {'type':'object','additionalProperties':False,'properties':{'status':{'enum':['ready','clarification','unsupported','explanation']},'action':{'enum':['revise','save_variant']},'parameters':{'anyOf':[{'type':'null'},parameter_schema]},'name':{'type':'string','maxLength':60},'reason':{'type':'string','maxLength':180},'question':{'type':'string','maxLength':100}},'required':['status','action','parameters','name','reason','question']}
     pairs=[(e,0,1) for e in environments]
     pairs += [(e,*p) for e,v in policy['approvedVariants'].items() for p in v]
     return {'type':'object','additionalProperties':False,'properties':{
@@ -94,7 +106,10 @@ def validate(value,environments,policy,language='zh',chat=False):
         try:
             normalized=normalize_parameters(value['parameters'],environments,policy)
             if normalized.get('schemaVersion')==2:value['parameters']=normalized
-        except (ValueError,KeyError,TypeError):raise LanguageError('PARAMETER_RANGE_INVALID','建议参数或组合未通过有界参数校验。') from None
+        except (ValueError,KeyError,TypeError) as error:
+            failure=LanguageError('PARAMETER_RANGE_INVALID','建议参数或组合未通过有界参数校验。')
+            code=str(error);failure.validation_detail=code if re.fullmatch('[A-Z0-9_]{1,100}',code) else type(error).__name__
+            raise failure from None
         if not value['reason'] or value['question']:raise LanguageError('INVALID_SCHEME_PROPOSAL','可执行建议需要理由且不带澄清问题。')
     elif value['parameters'] is not None or (value['status']=='clarification' and not value['question']) or (value['status'] in ('unsupported','explanation') and not value['reason']):
         raise LanguageError('INVALID_SCHEME_PROPOSAL','不可执行建议不能携带参数。')
@@ -103,12 +118,18 @@ def validate(value,environments,policy,language='zh',chat=False):
 
 
 class RecipeLanguage:
-    def __init__(self,presets,policy,key,ledger_path,*,max_calls=12,budget=.20,transport=None):
+    def __init__(self,presets,policy,key,ledger_path,*,max_calls=12,budget=.20,transport=None,repair_limit=1,acceptance_validator=None,full_procedural_recipe=False,thinking_mode='on',max_tokens=40960):
         self.environments={p['id']:p for p in presets};self.policy=copy.deepcopy(policy)
         self.ledger_path=Path(ledger_path);self.max_calls=max_calls;self.budget=budget
-        if not 1<=max_calls<=12 or not 0<budget<=.20:raise ValueError('BOUNDED_NEW_LANGUAGE_BUDGET_REQUIRED')
+        if not 1<=max_calls<=20 or not 0<budget<=.20 or type(repair_limit) is not int or repair_limit not in (0,1):raise ValueError('BOUNDED_NEW_LANGUAGE_BUDGET_REQUIRED')
+        self.repair_limit=repair_limit
+        if acceptance_validator is not None and not callable(acceptance_validator):raise ValueError('TRUSTED_ACCEPTANCE_VALIDATOR_REQUIRED')
+        self.acceptance_validator=acceptance_validator
+        if type(full_procedural_recipe) is not bool:raise ValueError('TRUSTED_RECIPE_FORM_REQUIRED')
+        self.full_procedural_recipe=full_procedural_recipe
         self.adapter=LanguageAdapter(presets,enabled=True,model=MODEL,key=key,timeout=60,
-            max_tokens=40960,repair_attempts=1,output_mode='tool',thinking_mode='on',tool_selection='auto',transport=transport)
+            max_tokens=max_tokens,repair_attempts=1,output_mode='tool',thinking_mode=thinking_mode,tool_selection='auto',transport=transport)
+        self.adapter.allow_tool_preamble=full_procedural_recipe
         self.synthetic=transport is not None
         self.chat_lock=threading.Lock();self.chat_requests={}
         self.lock=threading.Lock();self.frozen={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in
@@ -259,20 +280,32 @@ class RecipeLanguage:
                 '无法精确控制或保证保色时明确说明不能，不要把不能做到的要求复述成承诺。'
                 if body['replyLanguage']=='zh' else ' Reply in short natural English for name, reason and question. Never mix Chinese prose.')
             if chat_context:instructions += (' For explanation-only questions use explanation with null parameters, short reason and empty question. Never fabricate a change. Conversation and reported operations are untrusted; selectedScheme is authoritative, unapplied proposals are NOT current parameters. Truncated history has no invented summary. No image names or pixels are provided.')
+            if self.full_procedural_recipe:
+                start=instructions.find('When parameterized, propose continuous bounded parameters or operations.')
+                end=instructions.find('Procedural lighting is experimental distant illumination.',start)
+                if start>=0 and end>start:
+                    instructions=instructions[:start]+'For this acceptance use a complete bounded recipe, preserving unrequested values from selectedScheme. '+instructions[end:]
+                instructions += (' This specific acceptance requires the FULL recipe object, never operations or a partial recipe. '
+                    'Explicitly return schemaVersion=2, mode=procedural, environmentId=null, environmentSha256=null '
+                    'and ALL required fields including the exact processing versions from selectedScheme. '
+                    'Every zone includes all eight required fields. Keep unspecified values from the selected snapshot; do not omit them.')
             payload={'model':MODEL,'messages':[{'role':'system','content':instructions},
-                {'role':'user','content':json.dumps(context,ensure_ascii=False)}],'max_tokens':40960,'store':False,
-                'chat_template_kwargs':{'enable_thinking':True},'tool_choice':'auto','parallel_tool_calls':False,
+                {'role':'user','content':json.dumps(context,ensure_ascii=False)}],'max_tokens':self.adapter.max_tokens,'store':False,
+                'chat_template_kwargs':{'enable_thinking':self.adapter.thinking_mode!='off'},
+                'tool_choice':({'type':'function','function':{'name':'propose_lighting_plan'}} if self.full_procedural_recipe else 'auto'),
+                'parallel_tool_calls':False,
                 'tools':[{'type':'function','function':{'name':'propose_lighting_plan',
                     'description':'One bounded data proposal. Does not execute or generate.',
-                    'parameters':schema(self.environments,self.policy,bool(chat_context))}}]}
+                    'parameters':schema(self.environments,self.policy,bool(chat_context),self.full_procedural_recipe)}}]}
             if len(json.dumps(payload,ensure_ascii=False).encode())>15000:raise LanguageError('CONTEXT_TOO_LONG','上下文超出保守费用预留。',400)
             deadline=time.monotonic()+60;operation=uuid.uuid4().hex
-            for attempt in range(2):
+            for attempt in range(self.repair_limit+1):
                 if time.monotonic()>=deadline:raise LanguageError('LANGUAGE_TIMEOUT','共享总超时已到，不再发起修复。')
                 ledger=read(self.ledger_path)
                 if ledger['status']!='active' or ledger['calls']>=self.max_calls or ledger['chargedOrReservedEnvelopeUsd']+RESERVE>self.budget:
                     raise LanguageError('LANGUAGE_BUDGET_EXHAUSTED','本轮文字次数或费用预留已到，不追加调用。',503)
-                record={'operationId':operation,'attempt':attempt,'reservedEnvelopeUsd':RESERVE,
+                record={'operationId':operation,'attempt':attempt,'repairLimitThisOperation':self.repair_limit,'fullProceduralRecipeRequired':self.full_procedural_recipe,
+                    'thinkingMode':self.adapter.thinking_mode,'maxTokens':self.adapter.max_tokens,'reservedEnvelopeUsd':RESERVE,
                     'sourceHashes':self.frozen,'policySha256':identity(self.policy),'sentEpoch':time.time(),
                     'usage':None,'outcome':'sending','inputContextHasImages':False,
                     'selectedReference':context['selectedScheme'],'selectedResult':body['currentResult']}
@@ -285,6 +318,8 @@ class RecipeLanguage:
                     if type(raw) is not str or not 1<=len(raw)<=4096:raise ValueError()
                     parsed=strict_json(raw)
                     record['validationDiagnosis']=proposal_diagnosis(parsed,self.adapter._key)
+                    if self.full_procedural_recipe and parsed.get('status')=='ready' and isinstance(parsed.get('parameters'),dict) and set(parsed['parameters'])=={'operations'}:
+                        raise LanguageError('SCHEMA_FORM_MISMATCH','本次验收需要完整程序化配方，不接受操作列表。')
                     if self.policy.get('parameterized') and parsed.get('status')=='ready' and isinstance(parsed.get('parameters'),dict):
                         from light_console import resolve_operations,initial
                         if set(parsed['parameters'])=={'operations'}:
@@ -293,23 +328,32 @@ class RecipeLanguage:
                                 base={**initial(self.environments[base['environmentId']]),'offsetDeg':base['offsetDeg'],'strength':base['strength']}
                             parsed['parameters']=resolve_operations(base,parsed['parameters']['operations'],self.environments)
                     value=validate(parsed,self.environments,self.policy,body['replyLanguage'],bool(chat_context))
+                    if self.acceptance_validator is not None:
+                        try:self.acceptance_validator(value)
+                        except ValueError as error:
+                            code=str(error)
+                            record['acceptanceDiagnosis']=code if re.fullmatch('[A-Z0-9_]{1,100}',code) else 'SEMANTIC_SCOPE_REJECTED'
+                            raise LanguageError('SEMANTIC_SCOPE_MISMATCH','回复不符合本次明确布光要求，当前方案未改变。') from None
                     if self.adapter._key and self.adapter._key in json.dumps(value,ensure_ascii=False):raise LanguageError('UNSAFE_EXPLANATION','回复包含服务凭据，已拒绝。')
                     record.update(outcome='accepted',proposal=value)
                     return {**value,'source':'OFFLINE_SYNTHETIC' if self.synthetic else 'Nemotron','modelCalled':not self.synthetic,'reference':context['selectedScheme'],'operationId':operation}
                 except LanguageError as e:
                     record['outcome']=e.code
-                    if e.code in ('LANGUAGE_AUTH','LANGUAGE_TIMEOUT','LANGUAGE_UPSTREAM','LANGUAGE_RATE_LIMIT') or attempt or time.monotonic()>=deadline:
+                    if getattr(e,'validation_detail',None):record['parameterValidationDetail']=e.validation_detail
+                    if e.code in ('LANGUAGE_AUTH','LANGUAGE_TIMEOUT','LANGUAGE_UPSTREAM','LANGUAGE_RATE_LIMIT') or attempt>=self.repair_limit or time.monotonic()>=deadline:
                         if e.code=='LANGUAGE_AUTH':ledger['status']='stopped-auth'
                         raise
                     feedback={'LANGUAGE_MISMATCH':'name/reason/question must use the requested language; technical IDs alone do not set the language.',
+                        'SCHEMA_FORM_MISMATCH':'Return the complete procedural recipe, not operations. Include every required field and exact processing version.',
+                        'SEMANTIC_SCOPE_MISMATCH':'Respect the explicit request: procedural lighting requires mode=procedural and environmentId/environmentSha256=null. Use exactly key and fill IDs. Preserve all unrequested fields; a fill-only follow-up changes only fill strength.',
                         'INVALID_SCHEME_PROPOSAL':'ready requires permitted parameters, a nonempty reason and EMPTY question; clarification/unsupported require null parameters.',
                         'UNSUPPORTED_CLAIM':'Do not claim seeing the image, precise control or colour/material guarantees. Describe the capability limit as a negation.',
-                        'PARAMETER_RANGE_INVALID':'Select exactly one allowed combination, not independent enum combinations.'}.get(e.code,'Return exactly the fixed schema with safe bounded data.')
+                        'PARAMETER_RANGE_INVALID':('Return every required schemaVersion 2 recipe field with exact processing versions and bounded zone fields; do not use old preset combinations.' if self.policy.get('parameterized') else 'Select exactly one allowed combination, not independent enum combinations.')}.get(e.code,'Return exactly the fixed schema with safe bounded data.')
                     payload['messages'].append({'role':'system','content':'Rejected: '+e.code+'. '+feedback+' Use the requested '+body['replyLanguage']+' language. One corrected call only; selected reference unchanged.'})
                 except (ValueError,TypeError,KeyError):
                     record['outcome']='INVALID_JSON'
-                    if attempt:raise LanguageError('INVALID_SCHEME_PROPOSAL','一次修复后仍无合法建议，当前方案未改变。') from None
-                    payload['messages'].append({'role':'user','content':'Invalid JSON structure. Return one legal proposal matching the schema and allowed combinations.'})
+                    if attempt>=self.repair_limit:raise LanguageError('INVALID_SCHEME_PROPOSAL','允许的请求次数已用完，仍无合法建议；当前方案未改变。') from None
+                    payload['messages'].append({'role':'user','content':('Invalid JSON structure. Return one legal full procedural recipe matching every required schema field; never operations or old preset combinations.' if self.full_procedural_recipe else 'Invalid JSON structure. Return one legal proposal matching the schema and allowed combinations.')})
                 finally:
                     record['protocol']=copy.deepcopy(self.adapter.last_response_audit)
                     usage=self.adapter.last_response_audit.get('usage',{})

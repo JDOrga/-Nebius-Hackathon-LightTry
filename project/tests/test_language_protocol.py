@@ -16,6 +16,29 @@ import diagnose_language_protocol as diagnostic
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_opt_in_plain_preamble_never_replaces_actual_single_tool(self):
+        from types import SimpleNamespace
+        presets=json.loads((PRODUCT/'data/catalog.json').read_text(encoding='utf-8'))['presets']
+        adapter=LanguageAdapter(presets,enabled=True,model='nvidia/Nemotron-3_5-Lightning',key='SYNTHETIC_SECRET',output_mode='tool')
+        tool={'type':'function','function':{'name':'propose_lighting_plan','arguments':'{"actualToolArgument":true}'}}
+        def invoke(content,calls,opt_in):
+            body=json.dumps({'choices':[{'finish_reason':'tool_calls','message':{'content':content,'tool_calls':calls}}]}).encode()
+            class Response:
+                fp=SimpleNamespace(raw=SimpleNamespace(_sock=SimpleNamespace(settimeout=lambda _:None)))
+                def __enter__(self):return self
+                def __exit__(self,*a):pass
+                def read1(self,n):return body
+                def isclosed(self):return True
+            adapter.allow_tool_preamble=opt_in
+            with patch('language.urllib.request.build_opener',return_value=SimpleNamespace(open=lambda *a,**k:Response())):
+                return adapter._request({'model':adapter.model},5)
+        self.assertEqual(invoke('下面是结构化建议。',[tool],True),tool['function']['arguments'])
+        self.assertEqual(adapter.last_response_audit['ignoredSupplementalContentChars'],len('下面是结构化建议。'))
+        for text in ['{"fake":true}','```json','<tool_call>']:
+            self.assertEqual(invoke(text,[tool],True),tool['function']['arguments'])
+        for text,calls,opt in [('说明',[tool],False),('SYNTHETIC_SECRET',[tool],True),('x'*1025,[tool],True),('说明',[],True),('说明',[tool,tool],True)]:
+            with self.subTest(content=text[:30],calls=len(calls),opt=opt):
+                with self.assertRaises(LanguageError):invoke(text,calls,opt)
     def adapter(self, transport):
         presets = json.loads((PRODUCT / 'data/catalog.json').read_text(encoding='utf-8'))['presets']
         return LanguageAdapter(presets, enabled=True, model='nvidia/Nemotron-3_5-Lightning',
