@@ -94,3 +94,63 @@ C:\Project\Nebius\.local\lighttry-development-20261011\ROLLBACK.sh
 历史SYNTHETIC输入fixed-fixture-v1：BASELINE1/MODIFIED6/ROLLBACK1，各初始化1次、exit0、stderr空，恢复SHA110519556d5f93949d6c47fa0a4df45a04d76c09b97fba7cd1c7fbd6e6d8fc9d。未重跑，不能用它证明本轮GPU/前端。
 
 停止点：本地正式集成已可运行；等待用户评审，不自动发布/合并/开下一轮，也不启用付费链路。
+
+---
+
+# 本轮正式前端视觉收尾与同杯真实比较（2026-10-11，22时段）
+
+继续原项目、原 start_studio.py 与8785。保留开始时所有未提交修改；不新建页面/原型、不改后端架构/认证/配方/模型/恢复证明。当前轮修改仅 next/web/index.html、workbench.css、workbench.js、scheme-state.js（追加显示纯函数），新增 tests/studio-presentation.test.js，并追加本报告。
+
+## 显示与交互
+
+- 主标题为照片：白蓝杯等显示名称按catalog稳定sampleId映射；未知来源使用完整结构化name，不拆分字符串。日期移到历史小标签，实际源与SHA仍在详情。
+- 方案短名称原样显示；长名称用**参数显示摘要**（默认方案、晨光方案、偏暗备选等），不是改名。完整名称可展开、点标题仍编辑完整原名。重复摘要加库内家族序号区分，同家族旧版本共享序号，原planId/version/name不改变。未从名称猜日期或“变体”后缀。
+- 晴日公园/粉色晨光/夜间街灯分段按钮：aria-pressed、Tab/箭头/Home/End焦点、Enter/Space激活。箭头只移动焦点，不改参数。重新点已选环境不改变方向或倍率；换环境沿用默认档/白名单/revise逻辑，不生成。
+- 右栏字级/控件高度/间距回到A的清晰层级，编辑参照在侧栏滚动中保持可见。重复默认说明移除、完整名称放在结果动作后；真实推理关闭、Nemotron未配置、实验性/失败/不确定仍及时显示，按钮如实禁用。
+- 主图fit/common-scale/validRegion/下载逻辑不改；杯子左右结果填充原样保留。方案卡先名称/状态，再完整名称/来源参数。当前旧版本即使折叠旧库仍显示其活动卡，不藏编辑对象。
+
+## 正式真实比较（非替身）
+
+实际目录/catalog有同一白蓝杯两个真实历史结果：sunny与sunrise，日期2026-10-10，均1280×704。通过正式“另存变体→粉色晨光”展示已有匹配结果，没有生成新图。
+
+左：plan02f137df34f54c05a6423eb5ea595c08/v2，sunrise/0/1，JPEG SHA8a36f406aa5ac867ba52d11ea4eea097948e41542c9a037a125d2ba650eba1f2。
+右：planaa4dae71891b45cf88e74d2c8d7290c1/v3，sunny/0/1，JPEG SHA080bb85e9d13cabdfefc6037276552bebba1dfb38ff43373ee0aba65053b5668。
+输入同为1a7b31e4bbf0ca4478534552c63f2159（catalog输入SHA派生）；完整名称、参数、来源、图SHA见comparison-source.json，HTTP字节SHA分别验证。来源为历史固定预设，不补写实验参数实测记录，不改任务有效期。
+
+真实点击：两方案比较→切对照目标（编辑identity不变）→有效区域→适合窗口→区域PNG下载。两边完整图1280×704共同比例/中心；区域均396×704，按原validRegion裁出。实际PNG下载逐像素匹配记录区域，未美化/调色。窄屏实际上下排列，额外narrow-compare.jpg为运行页面全页截图，不合成。
+
+保存/刷新：当前参照保持相同；按照既有约定刷新返回“当前结果”，不持久化比较模式/对照下拉。这不是换了编辑目标。查看旧版本可准确显示版本与旧卡；折叠后当前旧卡保留。夜间街灯无本批结果：只输入、待生成、下载禁用；保存刷新identity相等仍待生成。没有借旧结果。
+
+## 实际画面与回归
+
+检查1280×900、1440×900、390×844，内容宽1265/1425/375，无横向溢出；不是浏览器缩放。完整杯子与左右实际填充均可见。首屏方案名/状态保留；侧栏较长内容仍为单独滚动，窄屏正常页面滚动，不宣称所有内容无需滚动。
+
+本轮截图目录：C:\Project\Nebius\.local\lighttry-integration-20261011\polish
+- white-cup-first.jpg：正式白蓝杯1280首屏，与上一轮同素材/视口；用户截图本身尺寸未提供，不宣称像素级同视口重现。
+- white-cup-1440.jpg：1440首屏。
+- white-cup-compare.jpg：正式两份已核验真实历史结果比较。
+- white-cup-region-compare.jpg：实际区域双图。
+- narrow-first.jpg、narrow-controls.jpg、narrow-compare.jpg：窄屏首屏、操作焦点、上下比较。
+- pending-long-name.jpg：正式待生成与可展开完整长名称，原名仍完整。
+
+Python214回归通过；Node47通过（原39+8新增显示/环境/名称/比较回归）。新增检查长名称不被拆分/改写、稳定sampleId显示、摘要不改身份、合法环境默认档与谱系、未知环境拒绝、已选环境不复位实验档、比较cursor独立、重复摘要区分。实际键盘箭头聚焦粉色晨光但选中仍晴日；Enter激活才改环境；Tab跳过关闭的生成到下载，焦点轮廓明确。
+
+原冻结JSON与历史模型报告未覆盖；Python继续沿用显式当前离线snapshot。所有离线结果不是模型验收。本轮收费模型/GPU/云/上传/安装/提交/推送均0。当前后端/参数/素材/任务证据未修改。
+
+## 角色与可回退
+
+上轮四角色仍保留，未替换：C:\Project\Nebius\.local\lighttry-integration-20261011\MODIFIED_FILE、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh。本轮补充polish子目录同四角色，回滚基线是本轮开始时带未提交集成的前端，不回退上轮业务集成。源码检查同输入presentation-v1：BASELINE四显示机制false，MODIFIED true，ROLLBACK恢复false，exit0、stderr空；静态检查不是视觉验收。独立副本回退恢复SHA，原生patch重建源码字节相等。不能在用户后续改动上盲目覆盖回退，先复制比较。
+
+原实验四角色也再次读取：C:\Project\Nebius\project\experiments\measured_controls.py；C:\Project\Nebius\.local\lighttry-development-20261011\DIFF_FILE.patch；VERIFICATION.txt；ROLLBACK.sh。历史合成fixed-fixture-v1 BASELINE1/MODIFIED6/ROLLBACK1，各初始化1/exit0/stderr空，恢复SHA110519556d5f93949d6c47fa0a4df45a04d76c09b97fba7cd1c7fbd6e6d8fc9d，未重跑且不是本轮GPU。
+
+未穷尽：全部触屏/辅助技术/系统高对比/200版本性能，真实付费链路。用户白蓝杯截图的实际像素视口未知。完成的是本轮正式前端打磨与真实已有结果比较，不是整个比赛项目验收完成。正式启动命令/地址仍见报告顶部。
+
+### 最终Git状态补充
+
+本轮开始HEAD为cef70911aa8ec54f4bc5971b0c98dff49c1638c0，已有未提交集成。最终核查发现执行期间HEAD变为ef1ea5fc4e8d168abbce4ada8e10a7b670564e18（Integrate the local LightTry photo studio，22:20:26+0800），本助手工具没有执行commit/push，不能判定外部操作主体。当前源码与本轮验收快照字节一致；最后仅本报告追加部分仍未提交。没有reset、改写或撤销该提交。本报告“提交/推送0”指本助手执行动作，不是声称HEAD在整个会话期间没有外部变化。回退仍仅在独立副本验证，不对当前已提交源码盲目覆盖。
+
+最终视觉补充：下载区需要更多侧栏高度，因此桌面侧栏上限调至600px；仅缩略图高度微调，不缩小全局字体或裁主图。执行期间外部提交之后，这项CSS收尾与报告补充仍未提交；最终以git status和本轮源码快照为准，不再只列报告。
+
+
+## 2026-10-12 Nemotron浮动会话
+正式入口继续8785，移除旧右栏输入，新增非模态浮动聊天与同一recommend接口的有界多轮契约。详见STUDIO_CHAT_20261012.md。旧报告/外部HEAD/用户修改原样保留；没有新的真实模型或GPU验收。

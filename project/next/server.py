@@ -29,7 +29,7 @@ class Handler(legacy.Handler):
             return self.job_error(JobError('INVALID_HOST', '只接受本机地址。', 403))
         route = urlsplit(self.path).path
         static = {'/': 'index.html', '/index.html': 'index.html',
-                  '/workbench.js': 'workbench.js', '/scheme-state.js': 'scheme-state.js', '/workbench.css': 'workbench.css'}
+                  '/workbench.js': 'workbench.js', '/scheme-state.js': 'scheme-state.js', '/chat.js': 'chat.js', '/workbench.css': 'workbench.css'}
         if route in static:
             return self.send_file(Path(__file__).parent / 'web' / static[route])
         if route == '/api/lighting':
@@ -82,6 +82,7 @@ class Handler(legacy.Handler):
             try:
                 if self.recipe_language is None: raise legacy.LanguageError('LANGUAGE_NOT_CONFIGURED','Nemotron 未启用。',503)
                 size=int(self.headers.get('Content-Length','0'))
+                if size>8192:raise legacy.LanguageError('CONTEXT_TOO_LONG','文字上下文超过8KiB，请缩短历史或当前需求。',400)
                 if not 0<size<=8192 or self.headers.get('Transfer-Encoding') or self.headers.get('Content-Type')!='application/json':raise ValueError()
                 self.connection.settimeout(5);raw=self.rfile.read(size)
                 if len(raw)!=size:raise ValueError()
