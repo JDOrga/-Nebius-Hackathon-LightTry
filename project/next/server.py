@@ -15,6 +15,7 @@ from inference.images import digest
 from inference.images import crop_photo_region
 from next.store import SchemeStore
 from next.evidence import load_evidence
+from next.accepted import load_accepted, measured_context
 from lighting import normalize_scheme
 from light_console import EnvironmentLibrary, MAX_BYTES, normalize, synthesize, encode_hdr, decode_hdr, sha
 import io
@@ -27,6 +28,7 @@ class Handler(legacy.Handler):
     studies = []
     study_files = {}
     recipe_language = None
+    imported_schemes = []
 
     def do_GET(self):
         if not self.valid_host():
@@ -36,6 +38,8 @@ class Handler(legacy.Handler):
                   '/workbench.js': 'workbench.js', '/scheme-state.js': 'scheme-state.js', '/chat.js': 'chat.js', '/console.js':'console.js', '/workbench.css': 'workbench.css'}
         if route in static:
             return self.send_file(Path(__file__).parent / 'web' / static[route])
+        if route == '/api/accepted-results':
+            return self.json_response({'schemes': self.imported_schemes, 'studies': [s for s in self.studies if s.get('recipeKey')]})
         if route == '/api/environments':
             return self.json_response({'environments':list(self.environment_library.environments.values())})
         if re.fullmatch(r'/api/environments/[a-f0-9]{64}/thumbnail',route):
@@ -53,7 +57,7 @@ class Handler(legacy.Handler):
             image=Image.fromarray((np.clip(a,0,1)*255).astype('uint8'));image.thumbnail((256,128));out=io.BytesIO();image.save(out,format='PNG');return self.send_bytes(out.getvalue(),'image/png')
         if route == '/api/lighting':
             return self.json_response({'schemaVersion': 1, 'capabilities': self.lighting_capabilities,
-                'studies': self.studies, 'textOnlyAI': True,
+                'studies': self.studies, 'importedSchemes': self.imported_schemes, 'textOnlyAI': True,
                 'language': self.recipe_language.capabilities() if self.recipe_language else {'enabled': False, 'message': 'Nemotron 未启用；手动操作不收费。'}})
         if route.startswith('/sample-region/'):
             parts=route.strip('/').split('/')
@@ -159,6 +163,7 @@ def main():
     p.add_argument('--port', type=int, default=8785)
     p.add_argument('--assets-dir', required=True)
     p.add_argument('--evidence-config', type=Path)
+    p.add_argument('--accepted-package', type=Path)
     p.add_argument('--tasks-dir', type=Path, default=PROJECT.parent / '.local/lighttry-development-20261011/workbench-tasks')
     p.add_argument('--inference-config', type=Path)
     p.add_argument('--language-key-file', type=Path, help='程序直接读取本机 Key 文件；不显示、不入库。仅显式使用时启用。')
@@ -169,6 +174,8 @@ def main():
     Handler.assets_dir = legacy.resolve_assets_dir(a.assets_dir)
     Handler.catalog = legacy.load_catalog(Handler.assets_dir)
     Handler.lighting_capabilities, Handler.studies, Handler.study_files = load_evidence(a.evidence_config)
+    accepted, accepted_files, Handler.imported_schemes = load_accepted(a.accepted_package, Handler.catalog)
+    Handler.studies.extend(accepted); Handler.study_files.update(accepted_files)
     Handler.lighting_capabilities={**Handler.lighting_capabilities,'parameterized':True,'legacyRevision':Handler.lighting_capabilities['revision'],'revision':'parameterized-engineering-v2','experimental':True}
     Handler.environment_library=EnvironmentLibrary(a.tasks_dir.parent/'environments-v2',Handler.catalog['presets'])
     if a.language_key_file:
@@ -177,7 +184,7 @@ def main():
         if not key.isascii() or not 20<=len(key)<=4096 or any(c.isspace() for c in key):raise ValueError('KEY_FILE_FORMAT_INVALID_NO_REQUEST')
         from next.language import RecipeLanguage
         Handler.recipe_language=RecipeLanguage(Handler.catalog['presets'],Handler.lighting_capabilities,key,a.language_ledger,
-            max_calls=a.language_max_calls,budget=a.language_budget)
+            max_calls=a.language_max_calls,budget=a.language_budget, measured_cases=measured_context(accepted))
     executor = None
     if a.inference_config:
         # A separate reviewed parameter adapter is required, never the old driver

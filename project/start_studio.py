@@ -18,5 +18,7 @@ if __name__=='__main__':
     evidence=ROOT/'.local/lighttry-development-20261011/workbench-evidence.local.json'
     args=['--assets-dir',str(assets if assets.is_dir() else PROJECT/'demo-assets'),'--tasks-dir',str(ROOT/'.local/lighttry-development-20261011/workbench-tasks')]
     if evidence.is_file():args+=['--evidence-config',str(evidence)]
+    accepted=ROOT/'.local/lighttry-joint-20261012/ai-confirmed-package'
+    if accepted.is_dir():args+=['--accepted-package',str(accepted)]
     sys.argv=[sys.argv[0],*args,*sys.argv[1:]]
     main()

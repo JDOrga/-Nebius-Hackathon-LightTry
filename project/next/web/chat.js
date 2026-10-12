@@ -1,3 +1,4 @@
+import {schemeWire} from './scheme-state.js';
 import {differences} from './console.js';
 import {uid,sameParameters} from './scheme-state.js';
 const $=id=>document.getElementById(id);
@@ -38,7 +39,7 @@ export function createChat({get,api,environmentLabel,apply}){
  s.items.push({role:'user',text});$('chat-input').value='';s.draft='';$('chat-status').textContent='正在等待文字服务；收起或关闭不会取消上游请求。';save();update();$('chat-history').scrollTop=$('chat-history').scrollHeight;
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);
  try{
- const safeScheme={...live.scheme,name:'当前方案'};const normalized=await api('/api/lighting/normalize',{method:'POST',headers:{'Content-Type':'application/json','X-LightTry-Token':live.token},body:JSON.stringify(safeScheme)});
+ const safeScheme={...schemeWire(live.scheme),name:'当前方案'};const normalized=await api('/api/lighting/normalize',{method:'POST',headers:{'Content-Type':'application/json','X-LightTry-Token':live.token},body:JSON.stringify(safeScheme)});
  if(get().reference!==captured||selected!==sk||editEpoch!==epoch)throw Error('准备期间上下文已改变，尚未发送模型请求。');
  const snapshot=Object.fromEntries(['inputId','planId','version','recipeKey'].map(k=>[k,normalized[k]]));
  const body={currentScheme:safeScheme,currentResult:live.result,text,history:[],replyLanguage:'zh',chat:{schemaVersion:1,sessionId:s.id,requestId:rid,snapshot,messages,operations}};

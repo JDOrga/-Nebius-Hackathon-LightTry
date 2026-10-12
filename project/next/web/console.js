@@ -1,3 +1,4 @@
+import {schemeWire} from './scheme-state.js';
 // Lighting-condition draft only. No photograph filters, no task submission.
 export const versions={synthesizerVersion:'sphere-gaussian-rgbe-v1',preprocessingVersion:'flip180-pixel-roll-log10000-v1',colorConvention:'linear-srgb-rgbe;picker-srgb-decoded-v1'};
 export function upgrade(p,envs){return p.schemaVersion===2?structuredClone(p):{schemaVersion:2,mode:'environment',environmentId:p.environmentId,environmentSha256:envs.find(e=>e.id===p.environmentId)?.sha256,offsetDeg:p.offsetDeg,strength:p.strength,ambient:{strength:.03,color:'#ffffff'},zones:[],...versions};}
@@ -42,7 +43,7 @@ export function createConsole({get,apply,api,token,error,onDraftChange=()=>{}}){
   root.querySelector('#remove-zone')?.addEventListener('click',()=>{draft.zones=draft.zones.filter(z=>z.id!==active);render();});
   root.querySelector('#light-starter')?.addEventListener('change',e=>{draft.zones=[zone()];if(e.target.value==='fill')draft.zones.push({...zone('fill','补光'),azimuthDeg:270,strength:.7,color:'#b6d2ff',sizeDeg:55});if(e.target.value==='rim')draft.zones=[{...zone('rim','轮廓光'),azimuthDeg:180,elevationDeg:15,strength:4,sizeDeg:15}];render();});
   document.getElementById('reset-light').onclick=()=>{draft=upgrade({environmentId:envs[0].id,offsetDeg:0,strength:1},envs);render();};
-  document.getElementById('apply-light').onclick=async()=>{try{const s=get(),bound=ref,value=await api('/api/lighting/normalize',{method:'POST',headers:{'Content-Type':'application/json','X-LightTry-Token':token()},body:JSON.stringify({...s,parameters:draft})});if(bound!==get().planId+':'+get().version)throw Error('编辑参照已改变');apply(value.parameters);ref='';render();}catch(e){error(e.message)}};
+  document.getElementById('apply-light').onclick=async()=>{try{const s=get(),bound=ref,value=await api('/api/lighting/normalize',{method:'POST',headers:{'Content-Type':'application/json','X-LightTry-Token':token()},body:JSON.stringify({...schemeWire(s),parameters:draft})});if(bound!==get().planId+':'+get().version)throw Error('编辑参照已改变');apply(value.parameters);ref='';render();}catch(e){error(e.message)}};
   document.getElementById('check-condition').onclick=async()=>{try{const v=await api('/api/lighting/condition',{method:'POST',headers:{'Content-Type':'application/json','X-LightTry-Token':token()},body:JSON.stringify(draft)});root.querySelector('#condition-status').textContent=JSON.stringify(v);}catch(e){error(e.message)}};
   preview();
  }

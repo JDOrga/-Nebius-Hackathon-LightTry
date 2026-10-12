@@ -48,11 +48,15 @@ def energy(array):
 
 def verify_joint(prep):
     plan = read(safe_file(prep, 'joint.json'))
-    if plan['version'] != VERSION or not 6 <= len(plan['cases']) <= 7:
-        raise ValueError('JOINT_PLAN_VERSION_OR_COUNT')
     envs = {e['id']: e for e in read(prep / 'project/next/runtime/environments.json')}
-    expected = matrix(envs)
-    if [c['id'] for c in plan['cases'][:6]] != list(expected):
+    if plan['version'] == 'direction-energy-key-unknowns-v1':
+        from next.runtime.key_unknowns import recipes
+        expected=recipes(envs)
+        if len(plan['cases'])!=4:raise ValueError('JOINT_PLAN_VERSION_OR_COUNT')
+    elif plan['version']==VERSION and 6<=len(plan['cases'])<=7:
+        expected=matrix(envs)
+    else:raise ValueError('JOINT_PLAN_VERSION_OR_COUNT')
+    if [c['id'] for c in plan['cases'][:len(expected)]] != list(expected):
         raise ValueError('JOINT_CASE_ORDER')
     for c in plan['cases']:
         recipe = normalize(c['parameters'], envs)

@@ -45,6 +45,16 @@ export function validateLibrary(value,environments) {
     (s.inputId===null||/^[0-9a-f]{32}$/.test(s.inputId)));
 }
 export const referenceKey=(s,inputId)=>canonical({planId:s.planId,version:s.version,parameters:s.parameters,inputId});
+export function mergeAcceptedLibrary(existing, incoming) {
+ const out=[...existing];
+ for(const s of incoming){
+  const old=out.find(x=>x.planId===s.planId&&x.version===s.version);
+  if(old){if(old.inputId!==s.inputId||!sameParameters(old.parameters,s.parameters)||old.importedResultSha256!==s.importedResultSha256)throw Error('实测导入身份冲突；已有方案未覆盖');continue;}
+  if(out.length>=200)throw Error('方案库已满；未覆盖已有方案，请先整理');
+  out.push(structuredClone(s));
+ }
+ return out;
+}
 export function restoreInputStub(s){
   if(!s||!/^[0-9a-f]{32}$/.test(s.id)||!/^[0-9a-f]{64}$/.test(s.originalSha)||
     !Number.isInteger(s.width)||!Number.isInteger(s.height)||Math.min(s.width,s.height)<32||
@@ -58,6 +68,7 @@ export function photoTitle(sample,input){
  return names[sample?.id]||sample?.name||input?.name||'我的照片';
 }
 export function schemePresentation(s){
+ if(s.provenance?.caseId&&s.name===s.provenance.caseId+' · 2026-10-12实测')return {title:s.provenance.caseId+' · 10-12实测',fullName:s.name,summary:false};
  if(s.name.length<=16)return {title:s.name,fullName:s.name,summary:false};
  const p=s.parameters;return {title:p.offsetDeg===45?'方向探索方案':p.strength===.7?'偏暗备选':({'sunny':'默认方案','sunrise':'晨光方案','street':'夜景方案'}[p.environmentId]||'光照方案'),fullName:s.name,summary:true};
 }
@@ -75,3 +86,5 @@ export function schemeCaption(s,all){
  const latest=families.map(id=>all.filter(x=>x.planId===id).reduce((a,b)=>a.version>b.version?a:b));
  return latest.filter(x=>schemePresentation(x).title===d.title).length>1?d.title+' · '+(families.indexOf(s.planId)+1):d.title;
 }
+
+export const schemeWire=s=>Object.fromEntries(["schemaVersion","planId","version","name","parameters","inputId","parentVersion"].map(k=>[k,s[k]]));
