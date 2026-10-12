@@ -58,6 +58,9 @@ def review_scheme_language(value,language):
 
 
 def schema(environments,policy,chat=False):
+    if policy.get('parameterized'):
+        from light_console import json_schema
+        return {'type':'object','additionalProperties':False,'properties':{'status':{'enum':['ready','clarification','unsupported','explanation']},'action':{'enum':['revise','save_variant']},'parameters':{'anyOf':[{'type':'null'},json_schema(environments)]},'name':{'type':'string','maxLength':60},'reason':{'type':'string','maxLength':180},'question':{'type':'string','maxLength':100}},'required':['status','action','parameters','name','reason','question']}
     pairs=[(e,0,1) for e in environments]
     pairs += [(e,*p) for e,v in policy['approvedVariants'].items() for p in v]
     return {'type':'object','additionalProperties':False,'properties':{
@@ -88,8 +91,10 @@ def validate(value,environments,policy,language='zh',chat=False):
     if review_scheme_language(value,language) not in ('pass','not-applicable'):
         raise LanguageError('LANGUAGE_MISMATCH','建议回复语言不符合本次设置。')
     if value['status']=='ready':
-        try:normalize_parameters(value['parameters'],environments,policy)
-        except (ValueError,KeyError,TypeError):raise LanguageError('PARAMETER_RANGE_INVALID','建议参数或组合未通过实测范围校验。') from None
+        try:
+            normalized=normalize_parameters(value['parameters'],environments,policy)
+            if normalized.get('schemaVersion')==2:value['parameters']=normalized
+        except (ValueError,KeyError,TypeError):raise LanguageError('PARAMETER_RANGE_INVALID','建议参数或组合未通过有界参数校验。') from None
         if not value['reason'] or value['question']:raise LanguageError('INVALID_SCHEME_PROPOSAL','可执行建议需要理由且不带澄清问题。')
     elif value['parameters'] is not None or (value['status']=='clarification' and not value['question']) or (value['status'] in ('unsupported','explanation') and not value['reason']):
         raise LanguageError('INVALID_SCHEME_PROPOSAL','不可执行建议不能携带参数。')
@@ -224,7 +229,7 @@ class RecipeLanguage:
             combos={e:[[0,1],*self.policy['approvedVariants'].get(e,[])] for e in self.environments}
             context={'selectedScheme':{k:current[k] for k in ('planId','version','inputId','parameters','recipeKey')},
                 'selectedResultIdentityOnly':body['currentResult'],'request':body['text'],
-                'limitedUserModificationHistory':body['history'],'allowedCombinations':combos,
+                'limitedUserModificationHistory':body['history'],'allowedCombinations':combos if not self.policy.get('parameterized') else None,'lightingBounds':{'inputMultiplier':[.25,4],'maxZones':3,'zoneIntensity':[0,16],'elevation':[-90,90],'angularFWHM':[2,120],'experimental':True},
                 'environmentDescriptions':{p['id']:p['description'] for p in self.environments.values()},
                 'responseLanguage':body['replyLanguage'],'photosReceived':False}
             if chat_context:context['boundedConversation']=chat_context
@@ -244,9 +249,11 @@ class RecipeLanguage:
                 'ready has one permitted parameters object, short reason and empty question. '
                 'clarification or unsupported has null parameters; ask one bounded lighting question or explain the limit. '
                 'Use short natural Chinese or English according to responseLanguage; no paths, URLs, commands. '
-                'Current evidence: sunny0.7 vs1.0 is an approximate darker/default choice. +45 is a fixed approximate '
-                'direction recipe with observed changes, not a calibrated lamp angle.1.4 and-45 are withheld. '
-                'Other environments have nominal default parameters only. Do not recommend withheld levels.')
+                'When parameterized, propose continuous bounded parameters or operations. Relative rotation/exposure '
+                'and zone edits preserve unspecified values and resolve against selectedScheme only. Never guess prior values. '
+                'Use operations rotate(delta degrees), exposure(delta input EV), add_zone, edit_zone, remove_zone or set. '
+                'Procedural lighting is experimental distant illumination. No calibrated photograph left/right, '
+                'exact output EV, lux, lamp distance or shadow softness promises. Do not upload or generate.')
             instructions += (' 本次回复语言必须是中文：name、reason、question 使用简短自然中文，不写英语句子。'
                 '仅允许环境ID与HDR/EV等必要术语保持原名。ready 的 question 必须空字符串，澄清时才提一个问题。'
                 '无法精确控制或保证保色时明确说明不能，不要把不能做到的要求复述成承诺。'
@@ -278,6 +285,13 @@ class RecipeLanguage:
                     if type(raw) is not str or not 1<=len(raw)<=4096:raise ValueError()
                     parsed=strict_json(raw)
                     record['validationDiagnosis']=proposal_diagnosis(parsed,self.adapter._key)
+                    if self.policy.get('parameterized') and parsed.get('status')=='ready' and isinstance(parsed.get('parameters'),dict):
+                        from light_console import resolve_operations,initial
+                        if set(parsed['parameters'])=={'operations'}:
+                            base=current['parameters']
+                            if base.get('schemaVersion')!=2:
+                                base={**initial(self.environments[base['environmentId']]),'offsetDeg':base['offsetDeg'],'strength':base['strength']}
+                            parsed['parameters']=resolve_operations(base,parsed['parameters']['operations'],self.environments)
                     value=validate(parsed,self.environments,self.policy,body['replyLanguage'],bool(chat_context))
                     if self.adapter._key and self.adapter._key in json.dumps(value,ensure_ascii=False):raise LanguageError('UNSAFE_EXPLANATION','回复包含服务凭据，已拒绝。')
                     record.update(outcome='accepted',proposal=value)

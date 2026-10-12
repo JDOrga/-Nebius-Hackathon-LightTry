@@ -11,6 +11,9 @@ class SchemeStore(TaskStore):
     def __init__(self, root, presets, executor=None, timeout=1080, retention=86400,
                  *, lighting_capabilities=CLOSED, approved_language_operation=None, **kwargs):
         self.environments = {p['id']: copy.deepcopy(p) for p in presets}
+        from light_console import EnvironmentLibrary
+        self.environment_library=EnvironmentLibrary(Path(root).parent/'environments-v2',presets)
+        self.environments.update(self.environment_library.environments)
         self.lighting_capabilities = copy.deepcopy(lighting_capabilities)
         self.approved_language_operation=approved_language_operation
         super().__init__(root, presets, executor, timeout, retention, **kwargs)
@@ -23,7 +26,7 @@ class SchemeStore(TaskStore):
                         self._restore_preset(preset)
 
     def _restore_preset(self, preset):
-        env = self.environments.get(preset.get('environmentId'))
+        env = self.environments.get(preset.get('carrierEnvironmentId',preset.get('environmentId')))
         if not env or any(preset.get(k) != env[k] for k in ('hdr', 'sha256', 'index')):
             raise ValueError('STORED_SCHEME_ENVIRONMENT_MISMATCH')
         scheme = preset['scheme']
@@ -50,10 +53,14 @@ class SchemeStore(TaskStore):
                 if scheme['inputId'] != metadata.get('inputId'):
                     raise ValueError('SCHEME_INPUT_MISMATCH')
                 if self.executor and not getattr(self.executor, 'supports_lighting_parameters', False):
-                    if (scheme['parameters']['offsetDeg'], scheme['parameters']['strength']) != (0, 1):
+                    if scheme['parameters'].get('schemaVersion')==2 or (scheme['parameters']['offsetDeg'], scheme['parameters']['strength']) != (0, 1):
                         raise ValueError('EXECUTOR_HAS_NO_PARAMETER_ADAPTER')
-                env = self.environments[scheme['parameters']['environmentId']]
+                is_v2=scheme['parameters'].get('schemaVersion')==2
+                selected=self.environments.get(scheme['parameters']['environmentId'])
+                env=selected if selected and selected.get('source',{}).get('kind')!='local-import' else self.environments['sunny']
+                derived=self.environment_library.derived(scheme['parameters']) if is_v2 else None
                 raw = copy.deepcopy(metadata['lightingScheme'])
+                if is_v2:raw['parameters']=copy.deepcopy(scheme['parameters'])
                 origin=None
                 if 'languageProposalId' in metadata:
                     if self.approved_language_operation is None:raise ValueError('LANGUAGE_PROVENANCE_NOT_CONFIGURED')
@@ -65,7 +72,14 @@ class SchemeStore(TaskStore):
                     'id': identity(binding),
                     'name': scheme['name'], 'environmentId': env['id'], 'scheme': raw,
                     'recipeKey': scheme['recipeKey'], 'parameters': scheme['parameters'],
-                    'capabilityRevision': scheme['parameters']['capabilityRevision']}
+                    'capabilityRevision': scheme['parameters'].get('capabilityRevision','parameterized-engineering-v2')}
+                if is_v2:
+                    preset['carrierEnvironmentId']=env['id']
+                    preset['sourceEnvironment']=selected
+                    preset['environmentId']=scheme['parameters']['environmentId']
+                    if derived is not None:
+                        preset['derivedHdrSha256']=digest(derived)
+
                 if origin:preset['languageProposal']=origin
                 self.presets[preset['id']] = preset
                 value = {k: v for k, v in metadata.items() if k != 'lightingScheme'}
@@ -130,8 +144,9 @@ class SchemeStore(TaskStore):
             if (proof.get('recipeKey') != p['recipeKey'] or proof.get('parameters') != p['parameters'] or
                     proof.get('adapterVersion') != task['runConfig'].get('lightingAdapterVersion')):
                 raise ValueError('RESULT_LIGHTING_IDENTITY_MISMATCH')
-            from experiments.controls import normalize
-            expected = normalize(p['parameters']['offsetDeg'], p['parameters']['strength'])
+            if proof.get('derivedHdrSha256')!=p.get('derivedHdrSha256'):raise ValueError('RESULT_DERIVED_HDR_MISMATCH')
+            from light_console import preprocessing_parameters
+            expected = preprocessing_parameters(p['parameters'])
             condition = proof.get('actualCondition', {})
             metadata = condition.get('metadata', {})
             if (condition.get('parameters') != expected or metadata.get('envmap_rot') != expected['envRot'] or

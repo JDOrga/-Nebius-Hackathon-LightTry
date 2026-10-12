@@ -16,7 +16,7 @@ class SchemeExecutor(GuardedCosmosExecutor):
         return {**super().run_config(),'lightingAdapterVersion':'single-scheme-hdr-adapter-v1'}
     def prepare_request(self,folder,request):
         config=read(self.config_path)
-        if [p.get('environmentId') for p in request['presets']]!=config.get('required_environment_ids',['sunny']):
+        if [p.get('carrierEnvironmentId',p.get('environmentId')) for p in request['presets']]!=config.get('required_environment_ids',['sunny']):
             raise ValueError('AUTHORIZED_SCHEME_ENVIRONMENT_REQUIRED')
         if config.get('required_language_operation_id'):
             p=request['preset']
@@ -24,6 +24,15 @@ class SchemeExecutor(GuardedCosmosExecutor):
                 p['scheme']['parameters']!=config['required_parameters'] or
                 request['original']['sha256']!=config['operator_scope']['approvedInputOriginalSha256']):
                 raise ValueError('EXACT_ACCEPTED_LANGUAGE_SCHEME_AND_INPUT_REQUIRED')
+        p=request['preset']
+        if p.get('derivedHdrSha256'):
+            from light_console import EnvironmentLibrary,sha
+            library=EnvironmentLibrary(folder.parent.parent/'environments-v2',[])
+            data=library.derived(p['parameters'])
+            if sha(data)!=p['derivedHdrSha256']:raise ValueError('DERIVED_HDR_IDENTITY_MISMATCH')
+            target=folder/'inputs/lighting.hdr'
+            if target.exists() and target.read_bytes()!=data:raise ValueError('DERIVED_HDR_COLLISION')
+            target.write_bytes(data)
         requirement=config.get('required_inverse_reuse')
         if requirement is not None:
             value=identity(request,(folder/'inputs/photo.png').read_bytes(),

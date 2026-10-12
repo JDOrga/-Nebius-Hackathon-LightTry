@@ -4,6 +4,14 @@ import sys
 ROOT=Path(__file__).resolve().parents[1]
 PROJECT=ROOT/'project'
 sys.path.insert(0,str(PROJECT))
+if __name__=='__main__':
+    try: __import__('numpy')
+    except ImportError:
+        import os
+        runtime=ROOT/'.local/lighttry-development-20261011/cpu-venv/Scripts/python.exe'
+        if runtime.is_file() and Path(sys.executable).resolve()!=runtime.resolve():
+            os.execv(str(runtime),[str(runtime),'-X','utf8','-B',str(Path(__file__).resolve()),*sys.argv[1:]])
+        raise SystemExit('Existing NumPy runtime required; no dependencies installed. Use the existing CPU venv.')
 from next.server import main
 if __name__=='__main__':
     assets=ROOT/'.local/demo-candidate-20261010/demo-assets'

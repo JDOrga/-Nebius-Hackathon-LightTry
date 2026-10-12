@@ -38,6 +38,7 @@ def main():
     if len(job.get('presets',[]))!=1 or job['runConfig'].get('lightingAdapterVersion')!=VERSION:
         raise ValueError('SINGLE_REVIEWED_SCHEME_REQUIRED')
     p=job['preset']; raw=p['scheme']['parameters']
+    if p.get('sourceEnvironment'):environments[p['sourceEnvironment']['id']]=p['sourceEnvironment']
     expected=normalize_parameters(raw,environments,policy)
     if p['parameters']!=expected or p['environmentId']!=raw['environmentId']:
         raise ValueError('SCHEME_PARAMETERS_MISMATCH')
@@ -59,14 +60,14 @@ def main():
         prep=Path(__file__).resolve().parents[3];run=prep/'run'
         directory=run/'presets'/str(p['index'])
         condition=read(directory/'condition.json');model=read(directory/'model-condition.json')
-        from experiments.controls import normalize
-        if condition['parameters']!=normalize(raw['offsetDeg'],raw['strength']):
+        from light_console import preprocessing_parameters
+        if condition['parameters']!=preprocessing_parameters(raw):
             raise ValueError('ACTUAL_CONDITION_PARAMETERS_MISMATCH')
         if any(model[k]['shape']!=[1,3,1,704,1280] for k in ('env_ldr','env_log','env_nrm')):
             raise ValueError('ACTUAL_MODEL_CONDITION_MISMATCH')
         receipt=read(run/'receipt.json')
         receipt['lighting']={'recipeKey':p['recipeKey'],'parameters':expected,'adapterVersion':VERSION,
-            'actualCondition':condition,'actualModelCondition':model}
+            'actualCondition':condition,'actualModelCondition':model,'derivedHdrSha256':p.get('derivedHdrSha256')}
         atomic(run/'receipt.json',receipt)
         atomic(run/'parameter-proof.json',receipt['lighting'])
         if finished is None:raise ValueError('ORIGINAL_EXECUTION_COMPLETION_MISSING')

@@ -1,3 +1,4 @@
+import {differences} from './console.js';
 import {uid,sameParameters} from './scheme-state.js';
 const $=id=>document.getElementById(id);
 export const sessionKey=s=>s.inputId+':'+s.planId;
@@ -21,8 +22,8 @@ export function createChat({get,api,environmentLabel,apply}){
  if(m.value?.status==='ready'){
  const v=m.value,card=document.createElement('div');card.className='chat-suggestion';bubble.append(card);
  card.append(textNode('strong','建议差异 · '+(v.source==='OFFLINE_SYNTHETIC'?'隔离替身':'文字服务')));
- for(const [key,label] of [['environmentId','环境'],['offsetDeg','加载方向'],['strength','HDR 倍率']])card.append(textNode('p',label+'：'+(key==='environmentId'?environmentLabel(m.before[key]):m.before[key])+' → '+(key==='environmentId'?environmentLabel(v.parameters[key]):v.parameters[key])));
- if(v.parameters.offsetDeg===45)card.append(textNode('p','+45° 实验性加载偏移，不是真实灯位。','chat-experimental'));
+ for(const line of differences(m.before,v.parameters))card.append(textNode('p',line));
+ if(v.parameters.schemaVersion===2)card.append(textNode('p','连续输入参数／程序化远场布光为工程实验范围；非精确照片曝光或物理灯位。','chat-experimental'));
  let why=live.busy?'真实任务处理中，稍后应用；不改变运行中的参照。':m.state==='applied'?('已应用到 v'+m.appliedVersion+'，尚未生成。'):m.state==='rejected'?'已拒绝，当前方案不变。':m.ref!==live.reference||m.draftEpoch!==editEpoch?'旧上下文／需求已变，需基于当前状态重新请求。':sameParameters(v.parameters,live.scheme.parameters)?'参数相同，无需修改或创建版本。':'尚未应用，当前配置不变。';card.append(textNode('p',why));
  const button=textNode('button','应用到当前方案');button.type='button';button.disabled=!applicable(m,live,editEpoch);card.append(button);
  button.onclick=()=>{const now=get();if(!applicable(m,now,editEpoch))return;const result=apply(v,m.ref);if(result){m.state='applied';m.appliedVersion=result.version;$('chat-status').textContent='实际应用：方案 '+result.planId.slice(0,8)+' / v'+result.version+'。未提交生成。';save();update();}};

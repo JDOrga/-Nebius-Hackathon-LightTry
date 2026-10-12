@@ -33,6 +33,9 @@ def identity(value):
 
 
 def normalize_parameters(value, presets, capabilities=CLOSED):
+    if isinstance(value,dict) and value.get('schemaVersion')==2:
+        from light_console import normalize
+        return normalize(value,presets)
     if not isinstance(value, dict) or set(value) != {'environmentId', 'offsetDeg', 'strength'}:
         raise ValueError('EXACT_LIGHTING_PARAMETERS_REQUIRED')
     env = value['environmentId']
@@ -43,14 +46,17 @@ def normalize_parameters(value, presets, capabilities=CLOSED):
             not math.isfinite(offset) or not math.isfinite(strength)):
         raise ValueError('FINITE_NUMERIC_PARAMETERS_REQUIRED')
     allowed = capabilities.get('approvedVariants', {}).get(env, [])
-    if (offset, strength) != (0, 1) and [offset, strength] not in allowed:
+    if capabilities.get('parameterized'):
+        from light_console import angle, number
+        offset=angle(offset);strength=number(strength,.25,4)
+    if not capabilities.get('parameterized') and (offset, strength) != (0, 1) and [offset, strength] not in allowed:
         raise ValueError('LIGHTING_CAPABILITY_NOT_VALIDATED')
     preset = presets[env]
     return {'schemaVersion': SCHEMA, 'environmentId': env, 'hdrSha256': preset['sha256'],
             'offsetDeg': int(offset) if float(offset).is_integer() else offset,
             'strength': int(strength) if float(strength).is_integer() else strength,
             'processing': 'fixed-upstream-loading-v1' if (offset, strength) == (0, 1) else 'hdr-controls-v1',
-            'capabilityRevision': 'legacy-fixed-preset' if (offset, strength) == (0, 1) else capabilities['revision']}
+            'capabilityRevision': 'legacy-fixed-preset' if (offset, strength) == (0, 1) else (capabilities.get('legacyRevision',capabilities['revision']) if [offset,strength] in allowed else 'parameterized-engineering-v2')}
 
 
 def normalize_scheme(value, presets, capabilities=CLOSED):

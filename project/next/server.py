@@ -16,6 +16,10 @@ from inference.images import crop_photo_region
 from next.store import SchemeStore
 from next.evidence import load_evidence
 from lighting import normalize_scheme
+from light_console import EnvironmentLibrary, MAX_BYTES, normalize, synthesize, encode_hdr, decode_hdr, sha
+import io
+from PIL import Image
+import numpy as np
 
 
 class Handler(legacy.Handler):
@@ -29,9 +33,24 @@ class Handler(legacy.Handler):
             return self.job_error(JobError('INVALID_HOST', '只接受本机地址。', 403))
         route = urlsplit(self.path).path
         static = {'/': 'index.html', '/index.html': 'index.html',
-                  '/workbench.js': 'workbench.js', '/scheme-state.js': 'scheme-state.js', '/chat.js': 'chat.js', '/workbench.css': 'workbench.css'}
+                  '/workbench.js': 'workbench.js', '/scheme-state.js': 'scheme-state.js', '/chat.js': 'chat.js', '/console.js':'console.js', '/workbench.css': 'workbench.css'}
         if route in static:
             return self.send_file(Path(__file__).parent / 'web' / static[route])
+        if route == '/api/environments':
+            return self.json_response({'environments':list(self.environment_library.environments.values())})
+        if re.fullmatch(r'/api/environments/[a-f0-9]{64}/thumbnail',route):
+            key=route.split('/')[3];e=next((e for e in self.environment_library.environments.values() if e['sha256']==key),None)
+            if not e:return self.send_error(404)
+            try:
+                if e['source']['kind']=='local-import':
+                    data=self.environment_library.safe_path(e['derivedSha256']+'.hdr').read_bytes();expected=e['derivedSha256']
+                else:
+                    data=(PROJECT.parent/'upstream/asset/examples/hdri_examples'/e['hdr']).read_bytes();expected=e['sha256']
+                if digest(data)!=expected:return self.send_error(409)
+                a=decode_hdr(data,max_value=1e12)
+            except (ValueError,OSError):return self.send_error(422)
+            a=a/(1+a);a=np.where(a<=.0031308,12.92*a,1.055*a**(1/2.4)-.055)
+            image=Image.fromarray((np.clip(a,0,1)*255).astype('uint8'));image.thumbnail((256,128));out=io.BytesIO();image.save(out,format='PNG');return self.send_bytes(out.getvalue(),'image/png')
         if route == '/api/lighting':
             return self.json_response({'schemaVersion': 1, 'capabilities': self.lighting_capabilities,
                 'studies': self.studies, 'textOnlyAI': True,
@@ -63,6 +82,31 @@ class Handler(legacy.Handler):
         return super().do_GET()
 
     def do_POST(self):
+        route=urlsplit(self.path).path
+        if route in ('/api/environments/import','/api/lighting/condition'):
+            if not self.valid_host() or self.headers.get('X-LightTry-Token')!=self.csrf_token or self.headers.get('Origin') not in (None,'http://'+self.headers.get('Host','')):
+                return self.job_error(JobError('INVALID_ORIGIN','仅接受当前本机应用。',403))
+            try:
+                size=int(self.headers.get('Content-Length','0'))
+                limit=MAX_BYTES if route.endswith('import') else 8192
+                if not 0<size<=limit or self.headers.get('Transfer-Encoding'):raise ValueError('REQUEST_SIZE_INVALID')
+                self.connection.settimeout(10);data=self.rfile.read(size)
+                if len(data)!=size:raise ValueError('REQUEST_TRUNCATED')
+                if route.endswith('import'):
+                    if self.headers.get('Content-Type')!='application/octet-stream':raise ValueError('HDR_BYTES_REQUIRED')
+                    name=__import__('urllib.parse',fromlist=['unquote']).unquote(self.headers.get('X-Environment-Name','本机环境'))
+                    value=self.environment_library.import_bytes(data,name)
+                    self.task_store.environments[value['id']]=value
+                    if self.recipe_language:self.recipe_language.environments[value['id']]=value
+                    return self.json_response(value)
+                if self.headers.get('Content-Type')!='application/json':raise ValueError('JSON_REQUIRED')
+                recipe=normalize(legacy.strict_json(data.decode('utf-8')),self.environment_library.environments)
+                derived=self.environment_library.derived(recipe)
+                if derived is None:return self.json_response({'recipe':recipe,'status':'bundled-environment','modelExecuted':False})
+                a=decode_hdr(derived);from light_console import loaded_latlong
+                a=loaded_latlong(a,recipe['offsetDeg'],recipe['strength'])
+                return self.json_response({'recipe':recipe,'derivedHdrSha256':digest(derived),'loadedLatlongSha256':digest(a.tobytes()),'shape':list(a.shape),'min':float(a.min()),'max':float(a.max()),'modelExecuted':False,'status':'CPU HDR validated; model projection pending'})
+            except (ValueError,KeyError,TypeError,UnicodeError,OSError) as e:return self.job_error(JobError('LIGHTING_INVALID',str(e),422))
         recovery=re.fullmatch(r'/api/tasks/([a-f0-9]{32})/recover-transferred',urlsplit(self.path).path)
         if recovery:
             if (not self.valid_host() or self.headers.get('X-LightTry-Token')!=self.csrf_token or self.headers.get('Origin') not in (None,'http://'+self.headers.get('Host',''))):
@@ -103,7 +147,7 @@ class Handler(legacy.Handler):
                 raw = self.rfile.read(size)
                 if len(raw) != size: raise ValueError()
                 body = legacy.strict_json(raw.decode('utf-8'))
-                value = normalize_scheme(body, {p['id']: p for p in self.catalog['presets']}, self.lighting_capabilities)
+                value = normalize_scheme(body, self.environment_library.environments, self.lighting_capabilities)
                 return self.json_response(value)
             except (ValueError, KeyError, TypeError, UnicodeError, RecursionError):
                 return self.job_error(JobError('INVALID_LIGHTING_SCHEME', '参数、版本或组合未通过校验。', 422))
@@ -125,6 +169,8 @@ def main():
     Handler.assets_dir = legacy.resolve_assets_dir(a.assets_dir)
     Handler.catalog = legacy.load_catalog(Handler.assets_dir)
     Handler.lighting_capabilities, Handler.studies, Handler.study_files = load_evidence(a.evidence_config)
+    Handler.lighting_capabilities={**Handler.lighting_capabilities,'parameterized':True,'legacyRevision':Handler.lighting_capabilities['revision'],'revision':'parameterized-engineering-v2','experimental':True}
+    Handler.environment_library=EnvironmentLibrary(a.tasks_dir.parent/'environments-v2',Handler.catalog['presets'])
     if a.language_key_file:
         if not a.language_ledger: raise ValueError('NEW_LANGUAGE_LEDGER_REQUIRED')
         key=a.language_key_file.read_text(encoding='utf-8-sig').strip()
@@ -141,6 +187,8 @@ def main():
     Handler.task_store = SchemeStore(a.tasks_dir, Handler.catalog['presets'], executor,
                                     lighting_capabilities=Handler.lighting_capabilities,
                                     approved_language_operation=Handler.recipe_language.approved_operation if Handler.recipe_language else None)
+    Handler.task_store.environment_library=Handler.environment_library
+    Handler.task_store.environments.update(Handler.environment_library.environments)
     with ThreadingHTTPServer(('127.0.0.1', a.port), Handler) as http:
         print('LightTry 方案工作台：http://127.0.0.1:' + str(a.port), flush=True)
         try: http.serve_forever()

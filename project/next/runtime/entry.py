@@ -176,9 +176,21 @@ def _scheme_forward(args, module, timeline, state_root, validate_output):
     index=args.envlight_ind[0];p=values[str(index)]['hdr'];raw=p['scheme']['parameters']
     policy=read(Path(__file__).with_name('policy.json'))
     envs={v['id']:v for v in read(Path(__file__).with_name('environments.json'))}
+    if p.get('sourceEnvironment'):envs[p['sourceEnvironment']['id']]=p['sourceEnvironment']
     if normalize_parameters(raw,envs,policy)!=p['parameters']:raise ValueError('EXECUTABLE_SCHEME_RANGE_MISMATCH')
     directory=state_root/str(index);directory.mkdir(exist_ok=True)
     helper=module.process_environment_map;baseline={}
+    if p.get('derivedHdrSha256'):
+        import inspect
+        original_helper=helper;signature=inspect.signature(original_helper)
+        derived=state_root/'lighting.hdr'
+        if not derived.exists():derived=Path(__file__).resolve().parents[3]/'inputs/lighting.hdr'
+        if derived.is_symlink():raise ValueError('UNSAFE_DERIVED_HDR')
+        if digest(derived.read_bytes())!=p['derivedHdrSha256']:raise ValueError('DERIVED_HDR_CHANGED')
+        def helper(*a,**kw):
+            bound=signature.bind(*a,**kw);bound.apply_defaults();bound.arguments['hdr_dir']=str(derived)
+            return original_helper(*bound.args,**bound.kwargs)
+        helper.__signature__=signature
     module.process_environment_map,calls=condition_hook(helper,raw,directory,baseline,capture=False)
     original_constructor=module.DiffusionRendererPipeline
     def constructor(**kwargs):
@@ -202,8 +214,34 @@ def _scheme_forward(args, module, timeline, state_root, validate_output):
         _original_run_forward(args,module,timeline,state_root,validate_output)
         if len(calls)!=1 and not (directory/'complete.json').exists():raise ValueError('HDR_CALL_PROOF_MISSING')
     finally:
-        module.process_environment_map=helper;module.DiffusionRendererPipeline=original_constructor
+        module.process_environment_map=locals().get('original_helper',helper);module.DiffusionRendererPipeline=original_constructor
 run_forward=_scheme_forward
+
+def run_recipe_session(args,module,timeline,items,validate_output):
+    """Explicit bounded multi-recipe session, one pipeline, one proven G-buffer.
+
+    items are already prepared forward state roots with worker identities; never
+    creates/re-runs inverse or accepts user paths from a recipe.
+    """
+    if not 1<=len(items)<=8:raise ValueError('BOUNDED_RECIPE_SESSION_REQUIRED')
+    original=module.DiffusionRendererPipeline;pipeline=None;generate=None
+    def shared(**kwargs):
+        nonlocal pipeline,generate
+        if pipeline is None:
+            pipeline=original(**kwargs);generate=pipeline.generate_video
+            timeline.emit('console_pipeline_ready',initializationCount=1)
+        else:pipeline.generate_video=generate
+        return pipeline
+    module.DiffusionRendererPipeline=shared
+    try:
+        for state_root in items:
+            records=read(state_root/'identities.json')
+            if len(records)!=1:raise ValueError('ONE_RECIPE_PER_STATE_ROOT')
+            args.envlight_ind=[int(next(iter(records)))]
+            _scheme_forward(args,module,timeline,state_root,validate_output)
+    finally:
+        if pipeline is not None:pipeline.generate_video=generate
+        module.DiffusionRendererPipeline=original
 
 if __name__ == '__main__':
     main()

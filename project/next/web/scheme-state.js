@@ -9,6 +9,7 @@ export const uid=()=>crypto.randomUUID().replaceAll('-','');
 export const digest=async value=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(canonical(value))))).map(b=>b.toString(16).padStart(2,'0')).join('');
 export function allowed(parameters,policy) {
   const {offsetDeg:o,strength:s,environmentId:e}=parameters;
+  if(policy.parameterized||parameters.schemaVersion===2)return Number.isFinite(o)&&Number.isFinite(s)&&o>=0&&o<360&&s>=.25&&s<=4;
   return typeof o==='number'&&Number.isFinite(o)&&typeof s==='number'&&Number.isFinite(s)&&
     ((o===0&&s===1)||(policy.approvedVariants?.[e]||[]).some(p=>p[0]===o&&p[1]===s));
 }
@@ -28,6 +29,7 @@ export function matchingTask(task,inputId,parameters,now=Date.now()) {
   if(task.input?.id!==inputId || task.status!=='succeeded' || task.executionUncertain ||
     task.expiresAt*1000<=now) return null;
   const p=task.preset;
+  if(parameters.schemaVersion===2){const r=task.result;return p.recipeKey&&r?.recipeKey===p.recipeKey&&sameParameters(p.scheme?.parameters,parameters)&&sameParameters(r.parameters,parameters)&&r.taskId===task.taskId&&r.inputId===inputId?r:null;}
   const actual=p.parameters?{environmentId:p.environmentId,offsetDeg:p.parameters.offsetDeg,strength:p.parameters.strength}:
     {environmentId:p.id,offsetDeg:0,strength:1};
   const r=task.result;
@@ -38,7 +40,7 @@ export function validateLibrary(value,environments) {
   if(!Array.isArray(value)||value.length>200) return [];
   return value.filter(s=>s&&s.schemaVersion===1&&/^[0-9a-f]{32}$/.test(s.planId)&&
     Number.isInteger(s.version)&&s.version>0&&s.version<=1000&&typeof s.name==='string'&&s.name.length<=60&&
-    environments.includes(s.parameters?.environmentId)&&typeof s.parameters.offsetDeg==='number'&&
+    (environments.includes(s.parameters?.environmentId)||s.parameters?.schemaVersion===2&&(s.parameters.mode==='procedural'||/^hdr-[a-f0-9]{64}$/.test(s.parameters.environmentId)))&&typeof s.parameters.offsetDeg==='number'&&
     Number.isFinite(s.parameters.offsetDeg)&&typeof s.parameters.strength==='number'&&Number.isFinite(s.parameters.strength)&&
     (s.inputId===null||/^[0-9a-f]{32}$/.test(s.inputId)));
 }

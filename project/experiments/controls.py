@@ -54,7 +54,8 @@ def summarize_tensor(tensor, baseline=None):
 
 def condition_hook(original, parameters, path, baseline_arrays, *, capture=True):
     """Bind literal helper parameters and record actual returned conditioning tensors."""
-    expected = normalize(parameters['offsetDeg'], parameters['strength'])
+    from light_console import preprocessing_parameters
+    expected = preprocessing_parameters(parameters)
     signature = inspect.signature(original)
     for name in ('env_rot', 'env_strength', 'env_flip', 'rotate_envlight', 'log_scale'):
         if name not in signature.parameters:

@@ -27,7 +27,7 @@ BUNDLE_FILES = ['scripts/run_experiment.py', 'scripts/weights.py', 'scripts/vali
     'project/inference/jobs.py', 'project/inference/images.py', 'project/inference/__init__.py',
     'project/inference/reuse.py', 'project/inference/batch.py',
     'project/inference/timing.py', 'project/inference/measured_entry.py',
-    'project/lighting.py','project/experiments/__init__.py','project/experiments/controls.py',
+    'project/lighting.py','project/light_console.py','project/experiments/__init__.py','project/experiments/controls.py',
     'project/next/runtime/__init__.py','project/next/runtime/worker.py','project/next/runtime/entry.py',
     'project/next/runtime/policy.json','project/next/runtime/environments.json','project/next/runtime/export_product_chunks.py']
 
@@ -124,6 +124,11 @@ def build_bundle(job, run, config=None):
         minimal['input'] = {k: v for k, v in request['input'].items() if k not in ('name', 'url', 'originalUrl')}
         add('request.json', json.dumps(minimal).encode())
         add('inputs/photo.png', payload)
+        if request['preset'].get('derivedHdrSha256'):
+            from light_console import sha
+            data=(job/'inputs/lighting.hdr').read_bytes()
+            if sha(data)!=request['preset']['derivedHdrSha256']:raise ValueError('DERIVED_HDR_CHANGED')
+            add('inputs/lighting.hdr',data)
         for name, data in references.items():
             add(name, data)
         info = tarfile.TarInfo('bundle_contents.json')
