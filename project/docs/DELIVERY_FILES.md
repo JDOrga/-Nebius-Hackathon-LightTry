@@ -1,3 +1,5 @@
+> 2026-10-12 更新：旧 project/web 页面与 state/plan 专属测试已删除；正式前端为 project/next/web，旧快照和下文清单仅为历史记录。当前测试使用 node --test project/tests/*.test.js。
+
 # 本轮候选公开文件与本地材料
 
 2026-10-11 本地收尾 R2：启动文字适配器还需新增 `project/language_contract.py`，不能只复制 `language.py`。新增候选冻结/离线验收文件见 `tests/freeze_language_candidate.py`、`run_candidate_offline.py`、`acceptance_checks.py`、`test_language_candidate.py`、`language_regressions.json`、`language_browser_cases.json`；当前配置及文件哈希见 [LANGUAGE_CANDIDATE_20261011_R2.json](LANGUAGE_CANDIDATE_20261011_R2.json)，交付与复现见 [本地收尾](LANGUAGE_LOCAL_CLOSEOUT_20261011.md)，收费范围见 [新的真实复验计划](LANGUAGE_NEXT_ACCEPTANCE_20261011.md)。早期无 R2 后缀的本地冻结记录为历史；本次真实请求为 0，不代表真实复验通过。

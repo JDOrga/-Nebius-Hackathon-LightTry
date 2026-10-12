@@ -1,3 +1,5 @@
+> 2026-10-12 更新：旧 project/web 页面与 state/plan 专属测试已删除；正式前端为 project/next/web，旧快照和下文清单仅为历史记录。当前测试使用 node --test project/tests/*.test.js。
+
 # LightTry 正式照片工作室：本地集成交付（2026-10-11）
 
 ## 运行与当前结论

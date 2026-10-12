@@ -2,5 +2,8 @@
   "name": "cosmos-light-preview-local",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node --test tests/state.test.js", "start": "python -B server.py" }
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "start": "python -B start_studio.py"
+  }
 }

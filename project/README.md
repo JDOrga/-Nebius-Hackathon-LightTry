@@ -1,3 +1,9 @@
+## 2026-10-12 工作区清理
+
+正式前端仅保留 `project/next/web/`，启动使用 `python -X utf8 -B project/start_studio.py`（默认端口 8785）。旧 `project/web/` 页面、资源及专属 state/plan JavaScript 测试已删除；共享 `project/server.py` 的 Handler、素材校验和任务 API 保留供工作室与后端回归使用，旧静态路由返回 404，未使用的旧 main 函数已移除。`npm test` 运行全部保留的前端回归；`npm start` 使用正式入口。候选快照改为跟踪正式前端，旧冻结记录仅作历史证据，不应复用为当前源码授权。
+
+仅清理 `project/qa/` 中 2026-10-11 之前的 `.log`；截图、报告、任务数据、素材、云运行及历史推理证据均保留。历史文档中的旧页面路径和测试数字仅描述当时状态，不再作为当前入口。
+
 # LightTry 正式照片工作室（本地集成）
 
 唯一推荐启动命令：
@@ -6,7 +12,7 @@
 python -X utf8 -B C:\Project\Nebius\project\start_studio.py
 ```
 
-打开 http://127.0.0.1:8785 。默认关闭 Nemotron 与 GPU，无外部请求。复用现有 next.server、SchemeStore 与共享任务/照片服务；不导入设计预览存储。已有正式任务目录原样保留。旧 project/server.py CLI 转接同一工作室，旧 web 文件保留供历史/测试，不再是普通启动入口。旧语言参数不兼容，必须使用下文 next 的显式配置。
+打开 http://127.0.0.1:8785 。默认关闭 Nemotron 与 GPU，无外部请求。复用现有 next.server、SchemeStore 与共享任务/照片服务；不导入设计预览存储。已有正式任务目录原样保留。旧 project/server.py CLI 转接同一工作室，旧 web 页面及专属测试已删除，共享后端保留。旧语言参数不兼容，必须使用下文 next 的显式配置。
 
 本地无素材时须提供现有素材包；此命令不安装依赖、不调用云。独立副本验收与回退见 project/docs/STUDIO_INTEGRATION_20261011.md。以下为历史说明，启动以本节为准：
 
@@ -42,8 +48,7 @@ python -X utf8 -B project/server.py --assets-dir demo-assets-20261010
 
 ```powershell
 python -X utf8 -B -m unittest discover -s project/tests -p 'test_*.py' -v
-node --test project/tests/state.test.js
-node --test project/tests/plan.test.js
+node --test project/tests/*.test.js
 ```
 
 测试只用 unittest、node:test。`qa/` 保存本轮实际 UI 截图、检查记录和原文件保存验收，忽略入库。开发记录见 [DEVELOPMENT.md](DEVELOPMENT.md)，适配器说明见 [docs/INFERENCE_INTERFACE.md](docs/INFERENCE_INTERFACE.md)。

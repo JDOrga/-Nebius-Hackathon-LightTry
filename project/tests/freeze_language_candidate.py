@@ -17,8 +17,10 @@ from language import LanguageAdapter
 
 FILES = [
     'project/language.py', 'project/language_contract.py', 'project/language.example.json',
-    'project/server.py', 'project/web/app.js', 'project/web/plan.js', 'project/web/sources.js',
-    'project/web/index.html', 'project/web/state.js', 'project/web/styles.css',
+    'project/server.py', 'project/next/web/index.html', 'project/next/web/workbench.js',
+    'project/next/web/workbench.css', 'project/next/web/chat.js', 'project/next/web/console.js',
+    'project/next/web/scheme-state.js',
+
     'project/data/catalog.json', 'project/data/demo-package.json',
     'project/tests/language_cases.json', 'project/tests/language_regressions.json',
     'project/tests/language_browser_cases.json', 'project/tests/acceptance_checks.py',
@@ -26,7 +28,7 @@ FILES = [
     'project/tests/diagnose_language_protocol.py', 'project/tests/run_candidate_offline.py',
     'project/tests/serve_language_fixture.py', 'project/tests/test_language.py',
     'project/tests/test_language_candidate.py', 'project/tests/test_language_acceptance_runner.py',
-    'project/tests/test_language_finish.py', 'project/tests/plan.test.js', 'project/tests/state.test.js',
+    'project/tests/test_language_finish.py',
     'project/tests/freeze_language_candidate.py', 'project/tests/language_demo_cases.json',
     'project/tests/demo_policy.py', 'project/tests/demo_web_acceptance.py',
     'project/tests/candidate_budget.py', 'project/tests/test_candidate_budget.py',

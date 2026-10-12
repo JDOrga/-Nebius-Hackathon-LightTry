@@ -1,5 +1,4 @@
 """Loopback preview and durable inference tasks; real execution disabled by default."""
-import argparse
 import base64
 import hashlib
 import json
@@ -198,11 +197,7 @@ class Handler(BaseHTTPRequestHandler):
             suffix = 'photo-region.png' if region else 'full.jpg'
             filename = f"{sample['name']}_{preset['name']}_AI光照预览_{suffix}"
             return self.send_file(asset_path(self.assets_dir, self.catalog['assets'][key]), filename)
-        # Explicit allowlist prevents serving configs, history, sources or arbitrary paths.
-        allowed = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/state.js': 'state.js',
-                   '/sources.js': 'sources.js', '/plan.js': 'plan.js', '/styles.css': 'styles.css', '/favicon.svg': 'favicon.svg', '/about.html': 'about.html'}
-        if route in allowed:
-            return self.send_file(ROOT / 'web' / allowed[route])
+        # Retired preview UI is not served; the studio owns its static routes.
         self.send_error(404)
 
     def send_file(self, path, filename=None):
@@ -227,46 +222,6 @@ class Handler(BaseHTTPRequestHandler):
             # Do not turn it into a second HTTP error write or a traceback.
             self.close_connection = True
 
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--port', type=int, default=8765)
-    parser.add_argument('--assets-dir', help='独立素材目录；相对路径从 project/ 解析')
-    parser.add_argument('--inference-config', help='显式指定本机推理配置；默认关闭')
-    parser.add_argument('--language-service', action='store_true', help='显式读取文字服务环境配置；默认关闭，不自动调用')
-    parser.add_argument('--tasks-dir', default='.tasks', help='本机私有任务目录；相对 project/ 解析')
-    args = parser.parse_args()
-    Handler.assets_dir = resolve_assets_dir(args.assets_dir)
-    try:
-        Handler.catalog = load_catalog(Handler.assets_dir)
-        if args.language_service:
-            Handler.language_service = LanguageAdapter.from_env(Handler.catalog['presets'])
-        executor, timeout, retention = None, 1080, 86400
-        if args.inference_config:
-            config_path = Path(args.inference_config)
-            if not config_path.is_absolute():
-                config_path = ROOT / config_path
-            config = json.loads(config_path.read_text(encoding='utf-8-sig'))
-            if config.get('enabled') is True:
-                import PIL
-                from inference.executor import GuardedCosmosExecutor
-                executor = GuardedCosmosExecutor(config_path)
-            timeout, retention = int(config.get('timeout_seconds', timeout)), int(config.get('retention_seconds', retention))
-            if not 10 <= timeout <= 1080 or not 60 <= retention <= 86400:
-                raise ValueError('任务超时须在 10–1080 秒、结果保留须在 60–86400 秒内。')
-        tasks_dir = Path(args.tasks_dir)
-        Handler.task_store = TaskStore(tasks_dir if tasks_dir.is_absolute() else ROOT / tasks_dir,
-                                      Handler.catalog['presets'], executor, timeout, retention)
-    except (ValueError, OSError, KeyError, ImportError, JobError, LanguageError) as error:
-        parser.exit(2, str(error) + '\n')
-    with ThreadingHTTPServer(('127.0.0.1', args.port), Handler) as server:
-        print(f'光照预览：http://127.0.0.1:{args.port} （仅本机；Ctrl+C 停止）', flush=True)
-        try:
-            server.serve_forever()
-        except KeyboardInterrupt:
-            pass
-        finally:
-            Handler.task_store.close()
 
 
 if __name__ == '__main__':
