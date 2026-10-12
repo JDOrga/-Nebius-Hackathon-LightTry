@@ -83,3 +83,5 @@
 }
 
 .global-adjustments{border-top:1px solid var(--line);margin-top:14px;padding-top:10px}.global-adjustments h3{margin:0 0 6px}.zone-property-group>label:first-child{margin-top:0!important}.zone-property-group .light-switch{margin:4px 0 10px!important}@media(min-width:1001px){#lighting-console .zone-select-mobile{display:none}}
+
+.condition-visual{position:relative;width:100%;max-width:340px}.condition-visual canvas{display:block;width:100%}.condition-label{position:absolute;top:8px;left:8px;right:8px;font:600 12px/1.5 "Segoe UI","Microsoft YaHei",sans-serif;color:white;text-shadow:0 1px 2px #0008;pointer-events:none}

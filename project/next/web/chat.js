@@ -55,8 +55,8 @@ export function createChat({get,api,environmentLabel,apply}){
  const panel=$('chat-panel');function clamp(){if(matchMedia('(max-width:700px)').matches){panel.style.left='';panel.style.top='';return;}const b=panel.getBoundingClientRect();panel.style.left=Math.max(8,Math.min(b.left,innerWidth-b.width-8))+'px';panel.style.top=Math.max(8,Math.min(b.top,innerHeight-b.height-8))+'px';}
  function center(){if(matchMedia('(max-width:700px)').matches)return;const b=panel.getBoundingClientRect();panel.style.left=Math.max(8,(innerWidth-b.width)/2)+'px';panel.style.top=Math.max(8,(innerHeight-b.height)/2)+'px';clamp();}
  function open(){panel.hidden=false;$('chat-open').setAttribute('aria-expanded','true');$('chat-open').title='收起 AI 试光助手';update();if(!panel.style.left)center();clamp();$('chat-input').focus();}
- function close(minimize=false){panel.hidden=true;$('chat-open').setAttribute('aria-expanded','false');$('chat-open').title='打开 AI 试光助手';$('chat-open').focus();}
- $('chat-open').onclick=()=>panel.hidden?open():close();$('chat-close').onclick=()=>close();$('chat-minimize').onclick=()=>close(true);$('chat-reset').onclick=center;
+ function close(){panel.hidden=true;$('chat-open').setAttribute('aria-expanded','false');$('chat-open').title='打开 AI 试光助手';$('chat-open').focus();}
+ $('chat-open').onclick=()=>panel.hidden?open():close();$('chat-close').onclick=()=>close();
  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!panel.hidden&&!e.isComposing&&!composing&&!document.querySelector('dialog[open]')){e.preventDefault();close();}});
  panel.onkeydown=e=>{if(e.key==='Escape'&&!e.isComposing&&!composing){e.preventDefault();close();}};
  $('chat-handle').onpointerdown=e=>{if(e.target.closest('button')||matchMedia('(max-width:700px)').matches)return;const b=panel.getBoundingClientRect();drag={x:e.clientX,y:e.clientY,left:b.left,top:b.top};$('chat-handle').setPointerCapture(e.pointerId);};
