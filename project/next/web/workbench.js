@@ -19,6 +19,17 @@ function displayInput(){const sample=selectedSample();if(region&&sample?.canvas)
 function displayResult(result,scheme=current){if(!result||!region)return result;const sample=selectedSample();if(result.study){const box=result.study.canvas.validRegion;return {...result,url:result.regionUrl,downloadUrl:result.regionDownloadUrl,width:box[2]-box[0],height:box[3]-box[1]};}if(result.task&&input.canvas){const b=input.canvas.validRegion;return {...result,url:result.regionUrl||result.url+'-region',downloadUrl:result.regionDownloadUrl||result.downloadUrl+'-region',width:b[2]-b[0],height:b[3]-b[1]};}if(sample?.canvas){const b=sample.canvas.validRegion;return {...result,url:'/sample-region/'+sample.id+'/'+scheme.parameters.environmentId,downloadUrl:'/sample-region/'+sample.id+'/'+scheme.parameters.environmentId+'?download=1',width:b[2]-b[0],height:b[3]-b[1]};}if(sample?.regionResults?.[scheme.parameters.environmentId])return {...sample.regionResults[scheme.parameters.environmentId],downloadUrl:'/download/'+sample.id+'/'+scheme.parameters.environmentId+'-region',sourceNote:result.sourceNote};return result;}
 function resultFor(s){
   if(!input || s.inputId!==input.id) return null;
+  // Imported results are pinned artifacts, not interchangeable recipe matches.
+  if(Object.prototype.hasOwnProperty.call(s,'importedResultSha256')){
+    const sample=selectedSample(), hash=s.importedResultSha256;
+    if(!sample||!/^([a-f0-9]{64})$/.test(hash)||!s.recipeKey||!s.provenance?.taskId||!s.provenance?.caseId)return null;
+    const exact=lighting.studies.filter(x=>x.sampleId===sample.id&&x.inputSha256===sample.input.sha256&&
+      sameParameters(x.parameters,s.parameters)&&x.recipeKey===s.recipeKey&&x.result?.recipeKey===s.recipeKey&&
+      x.result?.inputId===s.inputId&&x.result?.sha256===hash&&x.taskId===s.provenance.taskId&&
+      x.result?.taskId===s.provenance.taskId&&x.caseId===s.provenance.caseId);
+    if(exact.length!==1)return null;
+    const study=exact[0];return {...study.result,sourceNote:'独立受控实测 · '+new Date(study.generatedAt*1000).toLocaleString()+' · 非本次在线生成',study};
+  }
   const t=tasks.map(t=>[t,matchingTask(t,input.id,s.parameters)]).find(x=>x[1]);
   if(t)return {...t[1],sourceNote:'正式任务 '+t[0].taskId.slice(0,8)+(t[0].transferRecovery?' · 原生成已取回，未重算':'')+' · 源方案版本 '+(t[0].lightingScheme?.version||'旧固定预设'),task:t[0]};
   const sample=selectedSample();if(!sample)return null;
