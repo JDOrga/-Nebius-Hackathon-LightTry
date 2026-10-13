@@ -13,6 +13,9 @@ def load_accepted(package, catalog):
         return [], {}, []
     package = Path(package).resolve(); packet = package / 'packet'; root = package / 'execution/results'
     plan = verify_joint(packet)
+    calibration=plan['version']=='direction-energy-calibration-five-v2'
+    summary=read(package/'execution/calibration-summary.json') if calibration else {}
+    if calibration and summary['execution']!='generated-five':raise ValueError('CALIBRATION_SUMMARY_NOT_COMPLETE')
     event = read(safe_file(root, 'execution.json'))
     if event.get('status') != 'succeeded' or event.get('executionStopped') is not True:
         raise ValueError('ACCEPTED_TERMINAL_SUCCESS_REQUIRED')
@@ -26,7 +29,7 @@ def load_accepted(package, catalog):
     for case in plan['cases']:
         record = validate_case(packet, root, case)
         marker = read(safe_file(root / 'cases' / case['id'], '0/complete.json'))
-        key = 'joint-' + plan['taskId'] + '-' + case['id']
+        key = ('calibration-' + hashlib.sha256((plan['input']['sha256']+case['recipeKey']+record['sha256']).encode()).hexdigest() if calibration else 'joint-' + plan['taskId'] + '-' + case['id'])
         files[key] = (Path(record['path']), record['sha256'])
         study = {'sampleId': sample['id'], 'caseId': case['id'],
                  'inputSha256': plan['input']['sha256'], 'originalSha256': original['sha256'],
@@ -34,7 +37,7 @@ def load_accepted(package, catalog):
                  'hdrSha256': case['hdrSha256'], 'taskId': plan['taskId'],
                  'canvas': sample['canvas'], 'generatedAt': marker['completedEpoch'],
                  'source': case['source'], 'comparison': case['comparison'],
-                 'visualStatus': 'partial; AI dark; no color/detail fidelity guarantee',
+                 'visualStatus': summary.get('visual','partial; AI dark; no color/detail fidelity guarantee'),
                  'result': {'url': '/study/' + key, 'downloadUrl': '/study-download/' + key,
                             'regionUrl': '/study-region/' + key, 'regionDownloadUrl': '/study-download-region/' + key,
                             'sha256': record['sha256'], 'recipeKey': case['recipeKey'],
@@ -42,10 +45,10 @@ def load_accepted(package, catalog):
                             'width': 1280, 'height': 704}}
         studies.append(study)
         schemes.append({'schemaVersion': 1, 'planId': hashlib.sha256(key.encode()).hexdigest()[:32],
-                        'version': 1, 'parentVersion': None, 'name': case['id'] + ' · 2026-10-12实测',
+                        'version': 1, 'parentVersion': None, 'name': case['id'] + (' · 本轮五项校准实测' if calibration else ' · 2026-10-12实测'),
                         'parameters': copy.deepcopy(case['parameters']), 'inputId': plan['input']['sha256'][:32],
                         'recipeKey': case['recipeKey'], 'importedResultSha256': record['sha256'],
-                        'provenance': {'taskId': plan['taskId'], 'source': case['source'], 'caseId': case['id']}})
+                        'provenance': {'taskId': plan['taskId'], 'source': case['source'], 'caseId': case['id'], **({'cohort':'current-calibration-20261013'} if calibration else {})}})
     return studies, files, schemes
 
 
@@ -61,3 +64,23 @@ def measured_context(studies):
              'caseId': s['caseId'], 'observation': notes[s['caseId']],
              'source': 'retained GPU evidence plus operator/agent offline review; not model vision'}
             for s in studies if s.get('recipeKey') and s['caseId'] in notes]
+
+
+def load_accepted_many(packages,catalog):
+    studies,files,schemes=[],{},[]
+    for package in packages or []:
+        a,b,c=load_accepted(package,catalog)
+        known={s['planId']:s for s in schemes}
+        for s in c:
+            if s['planId'] in known:
+                # Stable photo/full-recipe/output identity wins over cohort labels.
+                # Same bytes from a later run do not replace the first evidence.
+                if any(known[s['planId']][k]!=s[k] for k in ('inputId','parameters','recipeKey','importedResultSha256')):
+                    raise ValueError('ACCEPTED_IMPORT_IDENTITY_CONFLICT')
+            if s['planId'] not in known:schemes.append(s);known[s['planId']]=s
+        for study in a:
+            if not any(s['result']['url']==study['result']['url'] for s in studies):studies.append(study)
+        for k,v in b.items():
+            if k in files and files[k][1]!=v[1]:raise ValueError('ACCEPTED_FILE_IDENTITY_CONFLICT')
+            if k not in files:files[k]=v
+    return studies,files,schemes

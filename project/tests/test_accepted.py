@@ -30,7 +30,7 @@ class AcceptedTests(unittest.TestCase):
    adapter.recommend({'currentScheme':scheme,'currentResult':{'status':'已生成','kind':'study','artifactId':self.studies[2]['result']['sha256']},'text':'解释方向对亮度的影响','history':[],'replyLanguage':'zh'})
   context=json.loads(sent[0]['messages'][1]['content']);self.assertEqual([c['caseId'] for c in context['verifiedMeasuredCases']],['C','F']);self.assertEqual(len(context['measuredCaseNotes']),7);self.assertFalse(context['photosReceived']);self.assertEqual(context['selectedScheme']['parameters'],scheme['parameters']);self.assertIn('do not prescribe multiplying all intensities',sent[0]['messages'][0]['content'])
  def test_four_targeted_cases_and_energy(self):
-  env={e['id']:e for e in self.catalog['presets']};r=recipes(env);self.assertEqual(list(r),['direction-225','direction-315','width-45','width-70'])
+  env={e['id']:e for e in self.catalog['presets']};r=recipes(env,repeat=False);self.assertEqual(list(r),['direction-225','direction-315','width-45','width-70'])
   C=self.studies[2]['parameters'];target=energy(decode_hdr(encode_hdr(synthesize(C))))['sphericalIntegralRGB'][0]
   for k,p in r.items():
    for f in ['ambient','offsetDeg','strength']:self.assertEqual(p[f],C[f])

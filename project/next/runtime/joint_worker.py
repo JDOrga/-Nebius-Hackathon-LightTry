@@ -65,7 +65,7 @@ def main():
     parser.add_argument('--runtime', type=Path, required=True)
     parser.add_argument('--receipt', type=Path, required=True)
     parser.add_argument('--resume', action='store_true')
-    parser.add_argument('--joint', action='store_true', required=True, help='Strict A-F plus confirmed real AI session; no inverse fallback')
+    parser.add_argument('--joint', action='store_true', required=True, help='Verified joint or five-case calibration session; no inverse fallback')
     options = parser.parse_args()
     prep = options.prep.resolve()
     if os.name != 'posix' or sys.version_info[:2] != (3, 10) or not prep.is_relative_to('/home/jovyan'):

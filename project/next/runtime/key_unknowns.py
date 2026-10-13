@@ -3,13 +3,14 @@ import copy
 from light_console import synthesize, encode_hdr, decode_hdr, normalize
 from next.runtime.joint import matrix, energy
 
-VERSION = 'direction-energy-key-unknowns-v1'
+LEGACY_VERSION = 'direction-energy-key-unknowns-v1'
+VERSION = 'direction-energy-calibration-five-v2'
 
 
-def recipes(environments):
+def recipes(environments, *, repeat=True):
     base = matrix(environments)['C']  # actual 135deg case, not a brighter-intensity rule
     target = energy(decode_hdr(encode_hdr(synthesize(base))))['sphericalIntegralRGB'][0]
-    out = {}
+    out = {'C-repeat': copy.deepcopy(base)} if repeat else {}
     for azimuth in (225, 315):
         p = copy.deepcopy(base); p['zones'][0]['azimuthDeg'] = azimuth
         out['direction-' + str(azimuth)] = normalize(p, environments)

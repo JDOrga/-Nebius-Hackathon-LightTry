@@ -306,6 +306,7 @@ class RecipeLanguage:
             if len(json.dumps(payload,ensure_ascii=False).encode())>15000:raise LanguageError('CONTEXT_TOO_LONG','上下文超出保守费用预留。',400)
             deadline=time.monotonic()+60;operation=uuid.uuid4().hex
             for attempt in range(self.repair_limit+1):
+                if len(json.dumps(payload,ensure_ascii=False).encode())>15000:raise LanguageError('CONTEXT_TOO_LONG','修复后的上下文也必须在15KB上限内。',400)
                 if time.monotonic()>=deadline:raise LanguageError('LANGUAGE_TIMEOUT','共享总超时已到，不再发起修复。')
                 ledger=read(self.ledger_path)
                 if ledger['status']!='active' or ledger['calls']>=self.max_calls or ledger['chargedOrReservedEnvelopeUsd']+RESERVE>self.budget:
@@ -355,7 +356,7 @@ class RecipeLanguage:
                         'INVALID_SCHEME_PROPOSAL':'ready requires permitted parameters, a nonempty reason and EMPTY question; clarification/unsupported require null parameters.',
                         'UNSUPPORTED_CLAIM':'Do not claim seeing the image, precise control or colour/material guarantees. Describe the capability limit as a negation.',
                         'PARAMETER_RANGE_INVALID':('Return every required schemaVersion 2 recipe field with exact processing versions and bounded zone fields; do not use old preset combinations.' if self.policy.get('parameterized') else 'Select exactly one allowed combination, not independent enum combinations.')}.get(e.code,'Return exactly the fixed schema with safe bounded data.')
-                    payload['messages'].append({'role':'system','content':'Rejected: '+e.code+'. '+feedback+' Use the requested '+body['replyLanguage']+' language. One corrected call only; selected reference unchanged.'})
+                    payload['messages'].append({'role':'system','content':'Rejected: '+e.code+'. '+record.get('acceptanceDiagnosis','')+'. '+feedback+' Use the requested '+body['replyLanguage']+' language. One corrected call only; selected reference unchanged.'})
                 except (ValueError,TypeError,KeyError):
                     record['outcome']='INVALID_JSON'
                     if attempt>=self.repair_limit:raise LanguageError('INVALID_SCHEME_PROPOSAL','允许的请求次数已用完，仍无合法建议；当前方案未改变。') from None

@@ -41,7 +41,7 @@ def prepare(output, applied=None):
     names=set(BUNDLE_FILES)|{'project/experiments/worker.py','project/next/runtime/joint.py',
         'project/next/runtime/joint_entry.py','project/next/runtime/joint_worker.py',
         'project/next/runtime/joint_launch.py','project/next/runtime/joint_inspect.py',
-        'project/next/runtime/joint_results.py','project/next/runtime/joint_bundle.py','project/next/runtime/key_unknowns.py','project/next/runtime/joint_watch.py','project/next/runtime/status_stream.py','cloud/Prepare-JointWatch.ps1','cloud/joint_watch_bridge.py','cloud/Retrieve-JointBundle.ps1','cloud/joint_bundle_bridge.py','cloud/install_bundle.py'}
+        'project/next/runtime/joint_results.py','project/next/runtime/joint_bundle.py','project/next/runtime/key_unknowns.py','project/next/runtime/calibration.py','project/next/runtime/joint_watch.py','project/next/runtime/status_stream.py','cloud/Prepare-JointWatch.ps1','cloud/joint_watch_bridge.py','cloud/Retrieve-JointBundle.ps1','cloud/joint_bundle_bridge.py','cloud/install_bundle.py'}
     for name in sorted(names):
         dst=packet/name;dst.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(ROOT/name,dst)
     envs={e['id']:e for e in read(ROOT/'project/next/runtime/environments.json')}

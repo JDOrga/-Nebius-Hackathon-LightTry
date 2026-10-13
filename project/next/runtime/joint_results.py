@@ -95,6 +95,10 @@ def validate_case(packet,root,case):
 
 def comparison(packet,target,root):
     plan=read(packet/'joint.json');items=[];records=[]
+    if plan.get('version')=='direction-energy-calibration-five-v2':
+        from next.runtime.calibration import comparison_page
+        comparison_page(packet,target,root)
+        return [validate_case(packet,root,c) for c in plan['cases'] if root and (root/'cases'/c['id']/'0/complete.json').exists()]
     for case in plan['cases']:
         state='尚未运行';source='';image=''
         if root and (root/'cases'/case['id']/'0/complete.json').exists():

@@ -7,3 +7,5 @@ test('capacity does not destroy existing library',()=>{const list=Array.from({le
 test('AI import stays visibly AI; personal rename preserved',()=>{assert.equal(schemePresentation(imported).title,'AI · 10-12实测');assert.equal(schemePresentation({...imported,name:'我自己的名字'}).title,'我自己的名字')});
 
 test('wire schema strips provenance only, retaining full lighting parameters',()=>{const s=schemeWire(imported);assert.equal(Object.keys(s).length,7);assert.deepEqual(s.parameters,imported.parameters);assert(!('provenance' in s));assert(!('importedResultSha256' in s));});
+
+test('current calibration distinct from history without overriding user rename',()=>{const s={...imported,name:'direction-225 · 本轮五项校准实测',provenance:{caseId:'direction-225',cohort:'current-calibration-20261013'}};assert.equal(schemePresentation(s).title,'direction-225 · 本轮校准');assert.equal(schemePresentation({...s,name:'我的新方案'}).title,'我的新方案');});

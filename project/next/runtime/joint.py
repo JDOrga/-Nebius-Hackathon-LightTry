@@ -49,10 +49,10 @@ def energy(array):
 def verify_joint(prep):
     plan = read(safe_file(prep, 'joint.json'))
     envs = {e['id']: e for e in read(prep / 'project/next/runtime/environments.json')}
-    if plan['version'] == 'direction-energy-key-unknowns-v1':
+    if plan['version'] in ('direction-energy-key-unknowns-v1','direction-energy-calibration-five-v2'):
         from next.runtime.key_unknowns import recipes
-        expected=recipes(envs)
-        if len(plan['cases'])!=4:raise ValueError('JOINT_PLAN_VERSION_OR_COUNT')
+        expected=recipes(envs, repeat=plan['version']=='direction-energy-calibration-five-v2')
+        if len(plan['cases'])!=len(expected):raise ValueError('JOINT_PLAN_VERSION_OR_COUNT')
     elif plan['version']==VERSION and 6<=len(plan['cases'])<=7:
         expected=matrix(envs)
     else:raise ValueError('JOINT_PLAN_VERSION_OR_COUNT')
@@ -205,6 +205,9 @@ def session(args, module, timeline, state_root, validate_output):
                         raise ValueError('MODEL_CONDITION_SHAPE_RANGE')
                     if name != 'env_nrm' and not np.array_equal(arr, active['arrays'][name][None].transpose(0,4,1,2,3)*2-1):
                         raise ValueError('MODEL_CONDITION_HASH_MISMATCH')
+                if plan.get('version')=='direction-energy-calibration-five-v2':
+                    module.misc.set_random_seed(args.seed)
+                    timeline.emit('calibration_rng_reset',caseId=active['id'],seed=args.seed,policy='independent-before-each-forward')
                 active['forward'] += 1; total_forward += 1
                 atomic(active['directory']/'model-condition.json', records)
                 module.torch.cuda.synchronize()

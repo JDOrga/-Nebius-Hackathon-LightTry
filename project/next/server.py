@@ -15,7 +15,7 @@ from inference.images import digest
 from inference.images import crop_photo_region
 from next.store import SchemeStore
 from next.evidence import load_evidence
-from next.accepted import load_accepted, measured_context
+from next.accepted import load_accepted, load_accepted_many, measured_context
 from lighting import normalize_scheme
 from light_console import EnvironmentLibrary, MAX_BYTES, normalize, synthesize, encode_hdr, decode_hdr, sha
 import io
@@ -163,7 +163,7 @@ def main():
     p.add_argument('--port', type=int, default=8785)
     p.add_argument('--assets-dir', required=True)
     p.add_argument('--evidence-config', type=Path)
-    p.add_argument('--accepted-package', type=Path)
+    p.add_argument('--accepted-package', type=Path, action='append')
     p.add_argument('--tasks-dir', type=Path, default=PROJECT.parent / '.local/lighttry-development-20261011/workbench-tasks')
     p.add_argument('--inference-config', type=Path)
     p.add_argument('--language-key-file', type=Path, help='程序直接读取本机 Key 文件；不显示、不入库。仅显式使用时启用。')
@@ -174,7 +174,7 @@ def main():
     Handler.assets_dir = legacy.resolve_assets_dir(a.assets_dir)
     Handler.catalog = legacy.load_catalog(Handler.assets_dir)
     Handler.lighting_capabilities, Handler.studies, Handler.study_files = load_evidence(a.evidence_config)
-    accepted, accepted_files, Handler.imported_schemes = load_accepted(a.accepted_package, Handler.catalog)
+    accepted, accepted_files, Handler.imported_schemes = load_accepted_many(a.accepted_package, Handler.catalog)
     Handler.studies.extend(accepted); Handler.study_files.update(accepted_files)
     Handler.lighting_capabilities={**Handler.lighting_capabilities,'parameterized':True,'legacyRevision':Handler.lighting_capabilities['revision'],'revision':'parameterized-engineering-v2','experimental':True}
     Handler.environment_library=EnvironmentLibrary(a.tasks_dir.parent/'environments-v2',Handler.catalog['presets'])

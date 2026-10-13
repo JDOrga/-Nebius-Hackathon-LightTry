@@ -68,6 +68,7 @@ export function photoTitle(sample,input){
  return names[sample?.id]||sample?.name||input?.name||'我的照片';
 }
 export function schemePresentation(s){
+ if(s.provenance?.cohort==='current-calibration-20261013'&&s.name===s.provenance.caseId+' · 本轮五项校准实测')return {title:s.provenance.caseId+' · 本轮校准',fullName:s.name,summary:false};
  if(s.provenance?.caseId&&s.name===s.provenance.caseId+' · 2026-10-12实测')return {title:s.provenance.caseId+' · 10-12实测',fullName:s.name,summary:false};
  if(s.name.length<=16)return {title:s.name,fullName:s.name,summary:false};
  const p=s.parameters;return {title:p.offsetDeg===45?'方向探索方案':p.strength===.7?'偏暗备选':({'sunny':'默认方案','sunrise':'晨光方案','street':'夜景方案'}[p.environmentId]||'光照方案'),fullName:s.name,summary:true};

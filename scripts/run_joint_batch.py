@@ -68,6 +68,9 @@ def consume_bundle(package,job,root,remote,metadata):
             '</p><pre>'+html.escape(json.dumps(case['parameters'],ensure_ascii=False,indent=2))+'</pre><p>recipeKey '+
             case['recipeKey']+'; HDR SHA '+case['hdrSha256']+'</p></section>')
     (job/'comparison.html').write_text('<!doctype html><meta charset="utf-8"><h1>LightTry 整包取回</h1><p>方位坐标未校准；结构通过不等于视觉可控。角尺寸改变总能量，不能独立证明物理柔光。</p>'+''.join(sections),encoding='utf-8')
+    if plan.get('version')=='direction-energy-calibration-five-v2':
+        from next.runtime.calibration import finalize
+        finalize(package)
     return {case['id'] for case,record in records}
 
 def execute(package,config_path):
@@ -133,12 +136,16 @@ def execute(package,config_path):
                 counts=[e for e in events if e.get('event')=='joint_complete']
                 if len(counts)!=1 or counts[0]['initializationCount']!=1 or counts[0]['forwardCount']!=len(plan['cases']) or counts[0]['inverseCount']!=0:
                     raise ValueError('OBSERVED_MODEL_EXECUTION_COUNTS_MISMATCH')
-                atomic(job/'summary.json',{'structure':'passed','visual':'pending','observedCounts':counts[0],'retrieved':sorted(retrieved)});break
+                prior=read(job/'summary.json') if (job/'summary.json').exists() else {}
+                atomic(job/'summary.json',{**prior,'structure':'passed','visual':prior.get('visual','pending'),'observedCounts':counts[0],'retrieved':sorted(retrieved)});break
             raise ValueError('WATCH_RETURNED_NONTERMINAL_NO_RECONNECT')
     except BaseException as error:
         atomic(job/'failure.json',{'type':type(error).__name__,'error':str(error),'relaunch':False});raise
     finally:
         if authorized:shutdown(run,job,timing)
+    if plan.get('version')=='direction-energy-calibration-five-v2':
+        from next.runtime.calibration import stage_import
+        stage_import(package)
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--package',type=Path,required=True);p.add_argument('--config',type=Path);p.add_argument('--execute',action='store_true');o=p.parse_args()
