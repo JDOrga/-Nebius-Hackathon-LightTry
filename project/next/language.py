@@ -194,7 +194,12 @@ class RecipeLanguage:
             rec=accepted[op['operationId']]
             if rec['selectedReference']['inputId']!=current['inputId'] or rec['selectedReference']['planId']!=current['planId']:
                 raise LanguageError('INVALID_CHAT_OPERATION','建议不属于当前照片与方案会话。',400)
-            verified.append({'operationId':op['operationId'],'reportedState':op['state'],'proposal':rec['proposal']})
+            from next.runtime.joint import changes
+            proposal=rec['proposal']
+            verified.append({'operationId':op['operationId'],'reportedState':op['state'],
+                'proposal':{'status':proposal['status'],'action':proposal['action'],'reason':proposal['reason'],
+                    'parameterDiff':changes(rec['selectedReference']['parameters'],proposal['parameters']) if proposal.get('parameters') else []},
+                'sourceVersion':rec['selectedReference']['version']})
         # Text/history and reported applied state are advisory. The normalized
         # business snapshot ALWAYS wins, never client "validated" flags.
         serialized=json.dumps(body,ensure_ascii=False)
@@ -296,17 +301,17 @@ class RecipeLanguage:
                     'Every zone includes all eight required fields. Keep unspecified values from the selected snapshot; do not omit them.')
             if measured:instructions += (' Trusted measured cases are text summaries of prior real GPU results, NOT your visual observations. C improved visibility by direction alone; do not prescribe multiplying all intensities. Use C/F as optional starting references, preserve selectedScheme for relative edits, retain every continuous bounded parameter and explicit confirm-before-apply. Prior visual success is partial, not a guarantee. ')
             payload={'model':MODEL,'messages':[{'role':'system','content':instructions},
-                {'role':'user','content':json.dumps(context,ensure_ascii=False)}],'max_tokens':self.adapter.max_tokens,'store':False,
+                {'role':'user','content':json.dumps(context,ensure_ascii=False,separators=(',',':'))}],'max_tokens':self.adapter.max_tokens,'store':False,
                 'chat_template_kwargs':{'enable_thinking':self.adapter.thinking_mode!='off'},
                 'tool_choice':({'type':'function','function':{'name':'propose_lighting_plan'}} if self.full_procedural_recipe else 'auto'),
                 'parallel_tool_calls':False,
                 'tools':[{'type':'function','function':{'name':'propose_lighting_plan',
                     'description':'One bounded data proposal. Does not execute or generate.',
                     'parameters':schema(self.environments,self.policy,bool(chat_context),self.full_procedural_recipe)}}]}
-            if len(json.dumps(payload,ensure_ascii=False).encode())>15000:raise LanguageError('CONTEXT_TOO_LONG','上下文超出保守费用预留。',400)
+            if len(json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode())>15000:raise LanguageError('CONTEXT_TOO_LONG','上下文超出保守费用预留。',400)
             deadline=time.monotonic()+60;operation=uuid.uuid4().hex
             for attempt in range(self.repair_limit+1):
-                if len(json.dumps(payload,ensure_ascii=False).encode())>15000:raise LanguageError('CONTEXT_TOO_LONG','修复后的上下文也必须在15KB上限内。',400)
+                if len(json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode())>15000:raise LanguageError('CONTEXT_TOO_LONG','修复后的上下文也必须在15KB上限内。',400)
                 if time.monotonic()>=deadline:raise LanguageError('LANGUAGE_TIMEOUT','共享总超时已到，不再发起修复。')
                 ledger=read(self.ledger_path)
                 if ledger['status']!='active' or ledger['calls']>=self.max_calls or ledger['chargedOrReservedEnvelopeUsd']+RESERVE>self.budget:

@@ -7,19 +7,21 @@ export const sensitive=t=>/(?:[A-Za-z]:[\\/]|(?:sk-|hf_|ghp_)[A-Za-z0-9_-]+|----
 export const boundedMessages=items=>{let total=0;return items.filter(m=>m.role==='user'||m.role==='assistant').slice(-8).reverse().filter(m=>{total+=m.text.length;return total<=2400;}).reverse().map(m=>({role:m.role,text:m.text.slice(0,320)}));};
 export const applicable=(m,live,draftEpoch)=>!live.busy&&m.value?.status==='ready'&&!m.state&&m.ref===live.reference&&m.draftEpoch===draftEpoch&&!sameParameters(m.value.parameters,live.scheme.parameters);
 export function createChat({get,api,environmentLabel,apply}){
+ const keep=(items,n)=>{const pinned=items.map((m,i)=>m.operationId?i:-1).filter(i=>i>=0).slice(-4);const rest=items.map((_,i)=>i).filter(i=>!pinned.includes(i)).slice(-(n-pinned.length));return [...pinned,...rest].sort((a,b)=>a-b).map(i=>items[i]);};
  const storage='lighttry.chat.tab.v1';let sessions={},selected=null,ref=null,pending=false,editEpoch=0,composing=false,drag=null;
  try{const saved=JSON.parse(sessionStorage.getItem(storage)||'{}');if(saved&&typeof saved==='object'&&!Array.isArray(saved))for(const [k,v] of Object.entries(saved).slice(-4)){if(/^[a-f0-9]{32}:[a-f0-9]{32}$/.test(k)&&/^[a-f0-9]{32}$/.test(v.id)&&Array.isArray(v.items))sessions[k]={id:v.id,items:v.items.filter(m=>['user','assistant','notice'].includes(m.role)&&typeof m.text==='string'&&m.text.length<=600&&!sensitive(m.text)).slice(-8),draft:''};}}catch{}
  // Reloaded proposal cards are inert: only live validated responses can apply.
  for(const v of Object.values(sessions))for(const m of v.items){delete m.value;delete m.ref;if(m.operationId&&!['applied','rejected'].includes(m.state))m.state='stale';}
- function save(){try{const entries=Object.entries(sessions).slice(-4);sessionStorage.setItem(storage,JSON.stringify(Object.fromEntries(entries.map(([k,v])=>[k,{id:v.id,items:v.items.slice(-8).map(m=>({role:m.role,text:m.text.slice(0,600),operationId:m.operationId,state:m.state||'stale',appliedVersion:m.appliedVersion}))}]))));}catch{$('chat-status').textContent='标签会话存储不可用；关闭后文字不会保留。';}}
+ function save(){try{const entries=Object.entries(sessions).slice(-4);sessionStorage.setItem(storage,JSON.stringify(Object.fromEntries(entries.map(([k,v])=>[k,{id:v.id,items:keep(v.items,8).map(m=>({role:m.role,text:m.text.slice(0,600),operationId:m.operationId,state:m.state||'stale',appliedVersion:m.appliedVersion,displayDiff:m.displayDiff}))}]))));}catch{$('chat-status').textContent='标签会话存储不可用；关闭后文字不会保留。';}}
  function session(){const live=get();if(!live)return null;const k=sessionKey(live.scheme);if(k!==selected){if(selected&&sessions[selected])sessions[selected].draft=$('chat-input').value;selected=k;sessions[k]??={id:uid(),items:[],draft:''};for(const old of Object.keys(sessions).slice(0,-4))if(old!==k)delete sessions[old];$('chat-input').value=sessions[k].draft;editEpoch++;}
  if(ref&&ref!==live.reference&&sessions[k].items.length){sessions[k].items.push({role:'notice',text:'编辑上下文已改变，下一次请求使用当前版本。旧建议不能直接应用。'});sessions[k].items=sessions[k].items.slice(-12);}ref=live.reference;return sessions[k];}
  function textNode(tag,text,cls){const e=document.createElement(tag);e.textContent=text;if(cls)e.className=cls;return e;}
  function update(){const live=get(),s=session();if(!live||!s)return;
  $('chat-context').textContent=live.label;$('chat-service').textContent=live.language.enabled?(live.language.developmentTestMode?'隔离测试 transport · 非 Nemotron / GPU':'Nemotron 文字服务已启用 · 发送可能产生文字费用，不生成图片'):'Nemotron 未配置 · 可浏览会话，仍可手动调光';
  $('chat-send').disabled=pending||!live.language.enabled;$('chat-send').textContent=pending?'等待中…':'发送';$('chat-send').title=!live.language.enabled?'服务未配置，未发出模型请求':pending?'请求仍在等待，不重复发送':'发送文字，不生成图片';
- const log=$('chat-history'),previousScroll=log.scrollTop,atEnd=log.scrollHeight-log.scrollTop-log.clientHeight<40;log.replaceChildren();if(!s.items.length)log.append(textNode('p','从一个想法开始，也可以询问理由。未配置时不会伪造回复。','chat-empty'));
+ const log=$('chat-history'),previousScroll=log.scrollTop,atEnd=log.scrollHeight-log.scrollTop-log.clientHeight<40;log.replaceChildren();if(live.confirmedApplication)log.append(textNode('p','当前方案已确认应用到 v'+live.confirmedApplication.version+'；'+(live.result.kind==='none'?'尚未生成。':'已有匹配结果。'),'chat-applied-summary'));if(!s.items.length)log.append(textNode('p','从一个想法开始，也可以询问理由。未配置时不会伪造回复。','chat-empty'));
  for(const m of s.items){const bubble=textNode('article',m.text,'chat-bubble '+m.role);log.append(bubble);
+ if(m.operationId&&!m.value){const summary=textNode('div',m.state==='applied'?'已确认应用到 v'+m.appliedVersion+'；未由此操作提交生成。':m.state==='rejected'?'已拒绝；未应用。':'后续建议未应用；刷新恢复为只读记录，不可直接应用。','chat-suggestion');bubble.append(summary);for(const line of (Array.isArray(m.displayDiff)?m.displayDiff:[]).filter(x=>typeof x==='string'&&x.length<=160&&!sensitive(x)).slice(0,12))summary.append(textNode('p',line));}
  if(m.value?.status==='ready'){
  const v=m.value,card=document.createElement('div');card.className='chat-suggestion';bubble.append(card);
  card.append(textNode('strong','建议差异 · '+(v.source==='OFFLINE_SYNTHETIC'?'隔离替身':'文字服务')));
@@ -35,7 +37,7 @@ export function createChat({get,api,environmentLabel,apply}){
  }
  async function send(e){e?.preventDefault();const live=get(),s=session(),text=$('chat-input').value.trim();if(pending||!live?.language.enabled||!text)return;if(sensitive(text)){$('chat-status').textContent='请去除密钥、网址或机器路径；仅发送光照文字。';return;}
  const captured=live.reference,epoch=editEpoch,rid=uid(),sk=selected;pending=true;
- const messages=boundedMessages(s.items.map(m=>({...m,text:m.text+(m.operationId?'（建议状态：'+(m.state==='applied'?'已应用到v'+m.appliedVersion:m.state==='rejected'?'已拒绝':m.ref===captured?'尚未应用':'旧上下文')+'）':'')}))),operations=s.items.filter(m=>m.operationId).slice(-4).map(m=>({operationId:m.operationId,state:m.state|| (m.ref===captured?'proposed':'stale')}));
+ const messages=boundedMessages(s.items.filter((m,i)=>m.role!=='user'||s.items.slice(i+1).find(n=>n.role==='assistant'||n.role==='user')?.role==='assistant').map(m=>({...m,text:m.text+(m.operationId?'（建议状态：'+(m.state==='applied'?'已应用到v'+m.appliedVersion:m.state==='rejected'?'已拒绝':m.ref===captured?'尚未应用':'旧上下文')+'）':'')}))),operations=s.items.filter(m=>m.operationId).slice(-4).map(m=>({operationId:m.operationId,state:m.state|| (m.ref===captured?'proposed':'stale')}));
  s.items.push({role:'user',text});$('chat-input').value='';s.draft='';$('chat-status').textContent='正在等待文字服务；收起或关闭不会取消上游请求。';save();update();$('chat-history').scrollTop=$('chat-history').scrollHeight;
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);
  try{
@@ -45,10 +47,10 @@ export function createChat({get,api,environmentLabel,apply}){
  const body={currentScheme:safeScheme,currentResult:live.result,text,history:[],replyLanguage:'zh',chat:{schemaVersion:1,sessionId:s.id,requestId:rid,snapshot,messages,operations}};
  const value=await api('/api/lighting/recommend',{method:'POST',headers:{'Content-Type':'application/json','X-LightTry-Token':live.token},body:JSON.stringify(body),signal:controller.signal});
  if(value.sessionId!==s.id||value.requestId!==rid)throw Error('响应关联身份不一致，未应用。');
- s.items.push({role:'assistant',text:[value.reason,value.question].filter(Boolean).join(' ')||'此需求暂无可执行建议。',value,operationId:value.status==='ready'?value.operationId:undefined,ref:captured,draftEpoch:epoch,before:live.scheme.parameters});
+ s.items.push({role:'assistant',text:[value.reason,value.question].filter(Boolean).join(' ')||'此需求暂无可执行建议。',value,operationId:value.status==='ready'?value.operationId:undefined,ref:captured,draftEpoch:epoch,before:live.scheme.parameters,displayDiff:value.status==='ready'?differences(live.scheme.parameters,value.parameters):[]});
  $('chat-status').textContent=(value.source==='OFFLINE_SYNTHETIC'?'隔离测试 transport 返回，非真实模型。':'文字响应已返回。')+' 未自动应用或生成。'+(get().reference!==captured||selected!==sk||epoch!==editEpoch?'旧上下文响应仅保留在原会话。':'');
  }catch(err){s.items.push({role:'notice',text:err.name==='AbortError'?'本机等待超时，上游可能已计费或仍在处理；不会自动重试，也未声称取消上游。':err.message});$('chat-status').textContent='请求未产生可应用结果；当前方案不变。'}
- finally{clearTimeout(timer);pending=false;s.items=s.items.slice(-12);save();update();}
+ finally{clearTimeout(timer);pending=false;s.items=keep(s.items,12);save();update();}
  }
  $('chat-form').onsubmit=send;$('chat-input').oncompositionstart=()=>composing=true;$('chat-input').oncompositionend=()=>composing=false;
  $('chat-input').oninput=()=>{editEpoch++;if(selected)sessions[selected].draft=$('chat-input').value;update();};

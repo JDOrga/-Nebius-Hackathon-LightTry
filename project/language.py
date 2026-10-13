@@ -218,7 +218,7 @@ class LanguageAdapter:
 
     def _request(self, payload, timeout):
         self.last_response_audit = {}
-        request = urllib.request.Request(self.endpoint, data=json.dumps(payload, ensure_ascii=False).encode(),
+        request = urllib.request.Request(self.endpoint, data=json.dumps(payload, ensure_ascii=False, separators=(',',':')).encode(),
                                          headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + self._key})
         try:
             deadline = time.monotonic() + timeout
@@ -385,7 +385,7 @@ class LanguageAdapter:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise LanguageError('LANGUAGE_TIMEOUT', '文字服务超时；方案未修改。')
-                if len(json.dumps(payload, ensure_ascii=False).encode('utf-8')) > 15000:
+                if len(json.dumps(payload, ensure_ascii=False, separators=(',',':')).encode('utf-8')) > 15000:
                     raise LanguageError('LANGUAGE_BUDGET_STOP', '文字上下文超过预算，未发送请求。')
                 try:
                     self.last_response_audit = {}
