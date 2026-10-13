@@ -13,6 +13,7 @@ from next.runtime.driver import authorization
 from next.runtime.joint import verify_joint
 from next.runtime.joint_results import extract,comparison,validate_case,PARTS
 from inference.timing import Timeline
+from next.runtime.status_stream import observe
 
 def shutdown(run,job,timing):
     """Early completion signals the pre-armed guard; independently verify release."""
@@ -81,7 +82,9 @@ def execute(package,config_path):
         if hashlib.sha256(data).hexdigest()!=bundle['sha256']:raise ValueError('FROZEN_JOINT_ARCHIVE_CHANGED')
         for name in ('cloud/install_bundle.py','project/next/runtime/joint_launch.py',
             'project/next/runtime/joint_inspect.py','project/next/runtime/joint_results.py', 'project/next/runtime/joint_bundle.py',
-            'cloud/Retrieve-JointBundle.ps1', 'cloud/joint_bundle_bridge.py'):
+            'cloud/Retrieve-JointBundle.ps1', 'cloud/joint_bundle_bridge.py',
+            'cloud/Prepare-JointWatch.ps1', 'cloud/joint_watch_bridge.py',
+            'project/next/runtime/joint_watch.py', 'project/next/runtime/status_stream.py'):
             if (ROOT/name).read_bytes()!=(package/'packet'/name).read_bytes():
                 raise ValueError('TRANSPORT_PROGRAM_CHANGED_REPREPARE_BEFORE_START')
         for p in (run/'inference-code.tar.gz',run/'bundle.json'):
@@ -91,8 +94,8 @@ def execute(package,config_path):
         def call(operation,program=None,value=None,flag=None,part=None):
             authorization(config_path)
             if time.time()>=deadline:raise TimeoutError('FIXED_WORK_WINDOW_ENDED')
-            args=['powershell.exe','-NoProfile','-File',str(ROOT/('cloud/Retrieve-JointBundle.ps1' if operation=='retrieve_joint_bundle' else 'cloud/Invoke-ScaleRemote.ps1')), '-RunDirectory',str(run),'-Execute']
-            if operation!='retrieve_joint_bundle':args+=['-Operation',operation]
+            args=['powershell.exe','-NoProfile','-File',str(ROOT/('cloud/Prepare-JointWatch.ps1' if operation=='prepare_watch' else 'cloud/Retrieve-JointBundle.ps1' if operation=='retrieve_joint_bundle' else 'cloud/Invoke-ScaleRemote.ps1')), '-RunDirectory',str(run),'-Execute']
+            if operation not in ('retrieve_joint_bundle','prepare_watch'):args+=['-Operation',operation]
             if part:args+=['-SourceRunId',run.name,'-ControlPart',part]
             if program:args+=['-ContainerProgramPath',str(ROOT/program)]
             if value is not None:
@@ -102,6 +105,7 @@ def execute(package,config_path):
                 with (job/(operation+'-'+str(part)+'.log')).open('ab') as log:
                     result=subprocess.run(args,stdout=log,stderr=subprocess.STDOUT,stdin=subprocess.DEVNULL,timeout=min(120,max(.1,deadline-time.time())),shell=False)
             if result.returncode:raise ValueError('GUARDED_TRANSPORT_FAILED_'+operation)
+            if operation=='prepare_watch':return read(run/'watch-command.json')
             if operation=='retrieve_joint_bundle':return read(run/(operation+'-result.json'))
             if program:return json.loads(read(run/(operation+'-result.json'))['output'])
         call('upload_directory');call('upload',flag='-UploadArchive')
@@ -113,8 +117,10 @@ def execute(package,config_path):
         try:call('launch','project/next/runtime/joint_launch.py',q)
         except ValueError:timer.emit('launch_response_uncertain_inspect_only')
         retrieved=set();root=job/'results';root.mkdir()
+        spec=call('prepare_watch',value={'prep':prep,'taskId':plan['taskId'],'nonce':plan['nonce']})
         while True:
-            remote=call('inspect','project/next/runtime/joint_inspect.py',{'prep':prep})
+            with timer.span('single_ssh_status_watch'):
+                remote=observe(spec,run,plan,deadline,job)
             if (remote['taskId'],remote['nonce'])!=(plan['taskId'],plan['nonce']):raise ValueError('REMOTE_JOINT_IDENTITY_MISMATCH')
             atomic(job/'last-observed.json',remote)
             if remote['status'] in ('succeeded','failed'):
@@ -128,7 +134,7 @@ def execute(package,config_path):
                 if len(counts)!=1 or counts[0]['initializationCount']!=1 or counts[0]['forwardCount']!=len(plan['cases']) or counts[0]['inverseCount']!=0:
                     raise ValueError('OBSERVED_MODEL_EXECUTION_COUNTS_MISMATCH')
                 atomic(job/'summary.json',{'structure':'passed','visual':'pending','observedCounts':counts[0],'retrieved':sorted(retrieved)});break
-            time.sleep(min(30,max(0,deadline-time.time())))
+            raise ValueError('WATCH_RETURNED_NONTERMINAL_NO_RECONNECT')
     except BaseException as error:
         atomic(job/'failure.json',{'type':type(error).__name__,'error':str(error),'relaunch':False});raise
     finally:
@@ -137,6 +143,6 @@ def execute(package,config_path):
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('--package',type=Path,required=True);p.add_argument('--config',type=Path);p.add_argument('--execute',action='store_true');o=p.parse_args()
     if not o.execute:
-        plan=verify_joint(o.package.resolve()/'packet');print('LOCAL_PLAN_ONLY; no API/SSH/GPU; forward target',len(plan['cases']),'; retrieval=terminal-single-ssh-v1')
+        plan=verify_joint(o.package.resolve()/'packet');print('LOCAL_PLAN_ONLY; no API/SSH/GPU; forward target',len(plan['cases']),'; retrieval=terminal-single-ssh-v1; progress=single-ssh-status-stream-v1')
     elif not o.config:p.error('--config required for explicit execution')
     else:execute(o.package.resolve(),o.config.resolve())
