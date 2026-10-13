@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import queue
+import re
 import subprocess
 import threading
 import time
@@ -45,7 +46,7 @@ def observe(spec, run, plan, deadline, job):
     if time.time()>=deadline:raise TimeoutError('FIXED_WATCH_DEADLINE_REACHED')
     monotonic_deadline=time.monotonic()+max(0.,deadline-time.time())
     process = subprocess.Popen([spec['executable'], *spec['arguments']], stdin=subprocess.DEVNULL,
-                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
     try:
         atomic(job / 'watch-process.json', {'pid': process.pid, 'sshSessions': 1, 'reconnectAllowed': False})
     except BaseException:
@@ -66,6 +67,24 @@ def observe(spec, run, plan, deadline, job):
         except BaseException:
             enqueue(ValueError('WATCH_PIPE_READ_FAILED'))
         finally:enqueue(None)
+    diagnostic = {'bytesRead':0,'recognizedCodes':[], 'rawStderrRetained':False}
+    allowed = re.compile(r'(?:VM_USER_MISMATCH|WATCH_SOURCE_BINDING_MISMATCH|NO_VALID_RUNNING_CONTAINERS|CONTAINER_MATCH_NOT_UNIQUE|INVALID_CONTAINER_ID|DOCKER_QUERY_FAILED|FIXED_WATCH_DEADLINE_REACHED|WATCH_CONTAINER_FAILED_EXIT_[0-9]{1,3}|WATCH_BRIDGE_FAILED_(?:ValueError|KeyError|TypeError|JSONDecodeError|TimeoutExpired|OSError))')
+    def stderr_reader():
+        try:
+            while True:
+                line = process.stderr.readline(1025)
+                if not line:break
+                diagnostic['bytesRead'] += len(line)
+                if diagnostic['bytesRead'] > 65536:
+                    enqueue(ValueError('WATCH_STDERR_BOUND_EXCEEDED'));return
+                value = line.decode('ascii',errors='ignore').strip()
+                if line.endswith(b'\n') and len(line)<=1024 and allowed.fullmatch(value):
+                    if value not in diagnostic['recognizedCodes'] and len(diagnostic['recognizedCodes'])<8:
+                        diagnostic['recognizedCodes'].append(value)
+        except BaseException:
+            diagnostic['readerFailure']=True
+    error_thread = threading.Thread(target=stderr_reader,daemon=True)
+    error_thread.start()
     thread = threading.Thread(target=reader, daemon=True)
     try:thread.start()
     except BaseException:
@@ -107,4 +126,7 @@ def observe(spec, run, plan, deadline, job):
         if process.poll() is None:
             process.kill(); process.wait(timeout=5)  # kill owned handle, not arbitrary PID
         process.stdout.close(); thread.join(timeout=2)
+        error_thread.join(timeout=2); process.stderr.close()
+        diagnostic.update(exitCode=process.returncode,readerExited=not error_thread.is_alive(),reconnectAllowed=False)
+        atomic(job/'watch-diagnostic.json',diagnostic)
         atomic(job/'watch-cleanup.json',{'pid':process.pid,'exitCode':process.returncode,'ownedProcessExited':process.poll() is not None,'readerExited':not thread.is_alive(),'reconnectAllowed':False})

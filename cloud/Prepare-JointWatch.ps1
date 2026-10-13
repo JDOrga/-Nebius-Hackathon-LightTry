@@ -28,7 +28,7 @@ $q=Get-Content $RequestPath -Raw|ConvertFrom-JsonUtc
 $watchNonce=[Guid]::NewGuid().ToString('N')
 $q | Add-Member -NotePropertyName watchNonce -NotePropertyValue $watchNonce
 $q | Add-Member -NotePropertyName runId -NotePropertyValue (Split-Path $run -Leaf)
-$q | Add-Member -NotePropertyName deadlineUtc -NotePropertyValue $script:RemoteDeadline.ToString('o')
+$q | Add-Member -NotePropertyName deadlineUtc -NotePropertyValue $script:RemoteDeadline.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.ffffffzzz',[Globalization.CultureInfo]::InvariantCulture)
 $req=@{image=$target.image;ssh_user=$target.ssh_user;container_python=$snapshot.container_python;container_request=$q;
  probe_source=(ConvertTo-Base64 (Get-Content (Join-Path $PSScriptRoot 'remote_probe.py') -Raw));
  container_program=(ConvertTo-Base64 (Get-Content (Join-Path $root 'project/next/runtime/joint_watch.py') -Raw))}
@@ -36,7 +36,7 @@ $program=Get-Content (Join-Path $PSScriptRoot 'joint_watch_bridge.py') -Raw
 $command=New-EncodedShellCommand $program (ConvertTo-Base64 ($req|ConvertTo-Json -Depth 8 -Compress))
 if($command.Length -gt 28000){throw 'NATIVE_COMMAND_TOO_LARGE'}
 $exe=(Get-Command ssh.exe -CommandType Application -ErrorAction Stop|Select-Object -First 1).Source
-$record=@{executable=$exe;arguments=@($sshArgs)+@($command);watchNonce=$watchNonce;taskId=$q.taskId;nonce=$q.nonce;deadlineUtc=$q.deadlineUtc;sshSessionsTarget=1;reconnectAllowed=$false}
+$record=@{executable=$exe;arguments=@($sshArgs)+@($command);watchNonce=$watchNonce;taskId=$q.taskId;nonce=$q.nonce;deadlineUtc=$q.deadlineUtc;deadlineUtcOriginal=$script:RemoteDeadline.ToString('o');wireFractionDigits=6;sshSessionsTarget=1;reconnectAllowed=$false}
 $path=Join-Path $run 'watch-command.json'
 if(Test-Path $path){throw 'PRESERVE_EXISTING_WATCH_NO_RECONNECT'}
 Write-AtomicJson $path $record
