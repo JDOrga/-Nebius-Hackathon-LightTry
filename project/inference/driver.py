@@ -28,6 +28,22 @@ BUNDLE_FILES = ['scripts/run_experiment.py', 'scripts/weights.py', 'scripts/vali
     'project/inference/timing.py', 'project/inference/measured_entry.py']
 
 
+def cache_directory(root=None):
+    """Reuse one configured cache; no copy, credentials, or cloud activity."""
+    root = ROOT if root is None else Path(root)
+    config = root / '.local/studio.json'
+    value = os.environ.get('LIGHTTRY_INVERSE_CACHE')
+    if value is None:
+        value = (read(config) if config.is_file() else {}).get('inverse_cache_dir', '.local/state/inverse-cache')
+    if not isinstance(value, str) or not value:
+        raise ValueError('INVERSE_CACHE_PATH_REQUIRED')
+    path = Path(value)
+    path = (path if path.is_absolute() else root/path).resolve()
+    if not path.is_relative_to(root.resolve()):
+        raise ValueError('INVERSE_CACHE_OUTSIDE_WORKSPACE')
+    return path
+
+
 def authorization(config_path):
     config = read(Path(config_path))
     if config.get('enabled') is not True or config.get('model_license_ack') is not True:
@@ -70,7 +86,7 @@ def build_bundle(job, run, config=None, *, root=None, bundle_files=None, include
     from inference.reuse import identity, key, validate, safe_file
     value = identity(request, payload, read(root / 'manifests/weights_manifest.json'),
                      read(root / 'manifests/patch_manifest.json'))
-    cached = root / '.local/state/inverse-cache' / key(value)
+    cached = cache_directory(root) / key(value)
     reusable = None
     if (config or {}).get('reuse_inverse', True) and cached.exists():
         try:
@@ -172,7 +188,7 @@ def bind_prepared_bundle(job, run, config, *, root=None, bundle_files=None):
             files['weight-reference/receipt.json'] != paths[1].read_bytes() or json.loads(files['weight-reference/reference.json']) != reference):
         raise ValueError('PREPARED_WEIGHT_POLICY_MISMATCH')
     value = identity(request, files['inputs/photo.png'], read(root / 'manifests/weights_manifest.json'), read(root / 'manifests/patch_manifest.json'))
-    cached = root / '.local/state/inverse-cache' / key(value)
+    cached = cache_directory(root) / key(value)
     record = validate(cached, value)
     requirement = request['requiredInverseReuse']
     if requirement != {'key': key(value), 'source': record['source']} or json.loads(files['reuse-inverse/inverse-complete.json']) != record:
@@ -313,7 +329,7 @@ def extract_stage_evidence(archive, destination, request, *, root=None):
         value = identity(request, (destination / 'inputs/photo.png').read_bytes(),
                          read(root / 'manifests/weights_manifest.json'), read(root / 'manifests/patch_manifest.json'))
         record = validate(source, value)
-        target = root / '.local/state/inverse-cache' / key(value)
+        target = cache_directory(root) / key(value)
         target.parent.mkdir(parents=True, exist_ok=True)
         if record['source']['taskId'] == request['taskId']:
             if record['source']['nonce'] != request['nonce']:

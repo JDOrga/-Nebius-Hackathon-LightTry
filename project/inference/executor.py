@@ -43,11 +43,11 @@ class GuardedCosmosExecutor:
             return
         if [p['id'] for p in request['presets']] != config.get('required_preset_ids'):
             raise ValueError('AUTHORIZED_BATCH_PRESETS_REQUIRED')
-        from .driver import ROOT
+        from .driver import ROOT, cache_directory
         from .reuse import identity, key, validate
         value = identity(request, (folder / 'inputs/photo.png').read_bytes(),
                          read(ROOT / 'manifests/weights_manifest.json'), read(ROOT / 'manifests/patch_manifest.json'))
-        record = validate(ROOT / '.local/state/inverse-cache' / key(value), value)
+        record = validate(cache_directory(ROOT) / key(value), value)
         if requirement != {'key': key(value), 'source': record['source']}:
             raise ValueError('REQUIRED_INVERSE_REUSE_UNAVAILABLE_NO_COLD_FALLBACK')
         request['requiredInverseReuse'] = requirement
@@ -72,7 +72,7 @@ class GuardedCosmosExecutor:
             release, beat = read(run / 'independent-stopped-release.json'), read(run / 'heartbeat.json')
             if digest((run / 'launch.json').read_bytes()) != binding['launchSha256']:
                 return False
-            from .driver import ROOT
+            from .driver import ROOT, cache_directory
             sys.path.insert(0, str(ROOT / 'scripts'))
             from weights import parse_deadline
             launch = read(run / 'launch.json')

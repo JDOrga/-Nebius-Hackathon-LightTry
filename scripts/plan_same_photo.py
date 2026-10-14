@@ -6,6 +6,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'project'))
+from inference.driver import cache_directory
 from inference.jobs import ID, read
 from inference.reuse import identity, key, validate, safe_file
 
@@ -21,7 +22,7 @@ def plan(task_id, preset_ids, cold=False):
     request = read(safe_file(source, 'request.json'))
     value = identity(request, safe_file(source, 'inputs/photo.png').read_bytes(),
                      read(ROOT / 'manifests/weights_manifest.json'), read(ROOT / 'manifests/patch_manifest.json'))
-    registry = ROOT / '.local/state/inverse-cache' / key(value)
+    registry = cache_directory(ROOT) / key(value)
     reusable = None
     if not cold and registry.exists():
         try: reusable = validate(registry, value)['source']

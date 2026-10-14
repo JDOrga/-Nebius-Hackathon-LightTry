@@ -11,6 +11,7 @@ import tarfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'project'))
+from inference.driver import cache_directory
 from inference.jobs import read, ID
 from inference.images import digest
 from inference.reuse import identity, key, artifacts, complete, copy_completed, validate, safe_file
@@ -75,7 +76,7 @@ def import_task(task_id, run_id):
         (r['sha256'], r['bytes'], 'inverse/gbuffer_frames/' + r['path']) for r in records):
         raise ValueError('HISTORICAL_GBUFFER_RECEIPT_MISMATCH')
     value = identity(request, payload, weights, patch)
-    target = ROOT / '.local/state/inverse-cache' / key(value)
+    target = cache_directory(ROOT) / key(value)
     target.parent.mkdir(exist_ok=True)
     if target.exists():
         return validate(target, value)

@@ -1,41 +1,36 @@
 # LightTry
 
-本地照片光照预览工作室：Nemotron 提供文字方案，Cosmos 提供受守护的光照预览。不是物理精确渲染；细字、纹理、材质和灯光效果有已知限制。
+本地照片光照预览工作室。Nemotron 只提文字方案；Cosmos 提供受守护的 AI 重布光。不是物理精确渲染，文字、纹理和材质可能变化。
 
-## 本地启动
+## 唯一启动入口
 
 ```powershell
 python -X utf8 -B start.py
 ```
 
-打开 http://127.0.0.1:8785 。普通启动不读取 Key、不连接云端、不启动 GPU。Python 环境需已有 NumPy/Pillow；不会自动安装依赖。
+打开 http://127.0.0.1:8785 。普通启动不读取 Key、不连接云端、不启动 GPU，不安装依赖。`npm start` 使用同一入口。
 
-本机路径集中在被忽略的 `.local/studio.json`；模板见 `config/studio.example.json`。命令行 `--assets-dir` 等显式参数优先。`python -B start.py --paths` 只展示路径，不启动服务。无配置时素材默认 `project/demo-assets/`，任务默认 `.local/state/tasks/`；缺素材明确报错，不回退到历史目录。
+本机路径仅在被忽略的 `.local/studio.json`；模板见 `config/studio.example.json`。`python -B start.py --paths` 只展示路径。`python` 指已有产品 CPU 环境，`offline_python` 指已有基础离线环境；venv 不搬迁。`assets_dir`、`tasks_dir`、`inverse_cache_dir` 指唯一实际数据目录，现有本机复用原数据，不再复制一份；新环境默认任务/缓存在 `.local/state/`。
 
-配置可指定已有 `python`（产品/CPU）和 `offline_python`（基础离线回归）环境；入口和自检复用它们，不搬迁 venv，也不自动安装依赖。
+## 目录与职责
 
-## 唯一正式源码
+- `project/studio.py` / `shared_http.py`：工作室及共享 HTTP 接口；`project/web/` 是唯一前端。
+- `scheme_store.py` / `recipe_language.py` / `language.py`：方案持久化、上下文校验、文字协议与预算。
+- `project/inference/`：共享任务、照片、缓存、守护校验和打包/提取；`runtime/`：参数化与联合实验适配。
+- `project/experiments/`、`scripts/`、`cloud/`：实验和显式云工具，不属于普通启动链。
+- `prototype/`、`patches/`、`manifests/`、`third_party/`：正式推理仍使用的 HDR 适配及固定来源/许可，不能因名称像旧稿就删。
 
-- `project/studio.py`：HTTP 工作室入口；`shared_http.py`：共享素材/任务接口。
-- `project/web/`：唯一前端；`scheme_store.py`、`recipe_language.py`：方案与文字建议。
-- `project/inference/`：共享任务、守护校验、打包/提取；`runtime/`：参数化及联合实验适配。
-- `project/experiments/`、`scripts/`、`cloud/`：实验与显式云执行工具，非普通启动链。
-- `prototype/`、`patches/`、`manifests/`：固定上游 HDR 适配和来源校验，不是另一套产品。
-
-## 验证
+## 验证与维护
 
 ```powershell
 python -X utf8 -B scripts/selftest.py
 npm test
 ```
 
-Python 自检发现三个测试区域：`prototype/`、`tests/`、`project/tests/`；Node 测试覆盖正式前端。部分 CPU 测试需既有 PyTorch、NumPy/Pillow/PyYAML 和 Windows PowerShell；离线替身不是实机验收。
+自检覆盖 `prototype/`、`tests/`、`project/tests/`；基础组用配置中的离线环境，产品组用 CPU 环境。素材检查显式设置 `LIGHTTRY_DEMO_ASSETS`。离线替身/CPU 检查不等于实机视觉验收。
 
-## 只读这些当前文档
+当前说明只维护此首页与 [云执行规范](docs/EXECUTION_FLOW.md)，不再追加平行交付、收尾、final 文档或 next 产品树。运行证据追加原账本；可执行回退复用项目外同一事务。只清理已确认冗余的副本/缓存，不删除原始素材、任务、账本、失败和停机证据。
 
-- [架构与目录边界](docs/ARCHITECTURE.md)
-- [本地开发与维护规则](docs/DEVELOPMENT.md)
-- [云执行规范](docs/EXECUTION_FLOW.md)：收费、登录、开停机前必读；历史授权不可复用。
-- [历史记录索引](docs/history/README.md)：旧文档仅作证据，不是当前启动说明。
+旧说明和冻结清单原文移到被忽略的 `.local/history/documents/`，路径映射在其中的 `paths.json`；需要时只读查询，不作为当前启动或授权。素材公开分发许可仍未完全核实。原始云实验和已验收包保留原处、原字节；读取器兼容旧冻结包布局，源代码改变不能复用已关闭预算或主机信任。
 
-素材、任务、原始云结果、账本和失败证据不入库，不因结构清理而删除。既有运行记录仍在本地历史目录；正式状态依据 `.local/calibration-20261013/checkpoint.json` 及其指针读取，遇到摘要不同步保留原证据，不伪造实机成功。公开分发素材的许可边界仍见历史许可记录。
+云执行前先读上述规范与 `.local/calibration-20261013/checkpoint.json` 指向的最新状态；摘要不一致保留原证据，未知结果写未知。本轮结构维护不调用云端、不收费、不代表新的实机成功。

@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parent
-FIELDS = {'python', 'offline_python', 'assets_dir', 'tasks_dir', 'evidence_config', 'accepted_packages'}
+FIELDS = {'python', 'offline_python', 'assets_dir', 'tasks_dir', 'evidence_config', 'accepted_packages', 'inverse_cache_dir'}
 
 def local_options(argv):
     parser = argparse.ArgumentParser(add_help=False)
@@ -29,6 +29,7 @@ def local_options(argv):
         return str((p if p.is_absolute() else ROOT/p).resolve())
     effective = {'assets_dir': path(cfg.get('assets_dir', 'project/demo-assets')),
                  'tasks_dir': path(cfg.get('tasks_dir', '.local/state/tasks')),
+                 'inverse_cache_dir': path(cfg.get('inverse_cache_dir', '.local/state/inverse-cache')),
                  'accepted_packages': [path(p) for p in cfg.get('accepted_packages', [])]}
     for name in ('python', 'offline_python', 'evidence_config'):
         if name in cfg: effective[name] = path(cfg[name])
@@ -43,6 +44,7 @@ def main():
     if runtime and Path(sys.executable).resolve() != Path(runtime):
         if not Path(runtime).is_file(): raise FileNotFoundError('CONFIGURED_PYTHON_MISSING')
         os.execv(runtime, [runtime, '-X', 'utf8', '-B', str(Path(__file__).resolve()), *sys.argv[1:]])
+    os.environ['LIGHTTRY_INVERSE_CACHE'] = cfg['inverse_cache_dir']
     sys.path.insert(0, str(ROOT/'project'))
     from studio import main as serve
     args = ['--assets-dir', cfg['assets_dir'], '--tasks-dir', cfg['tasks_dir']]

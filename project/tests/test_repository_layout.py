@@ -91,4 +91,24 @@ class RepositoryLayoutTests(unittest.TestCase):
             self.assertEqual(row['python_executable'],'SYNTHETIC_CPU_PYTHON')
             self.assertEqual(row['exit_code'],0)
 
+    def test_cache_reuses_configured_original_without_copying(self):
+        from inference.driver import cache_directory
+        with tempfile.TemporaryDirectory() as t, patch.dict('os.environ',{},clear=True):
+            root=Path(t);config=root/'.local/studio.json';config.parent.mkdir()
+            config.write_text(json.dumps({'inverse_cache_dir':'project/.inverse-cache'}))
+            self.assertEqual(cache_directory(root),(root/'project/.inverse-cache').resolve())
+            self.assertFalse((root/'project/.inverse-cache').exists())
+            self.assertFalse((root/'.local/state').exists())
+            config.write_text(json.dumps({'inverse_cache_dir':'../outside'}))
+            with self.assertRaisesRegex(ValueError,'OUTSIDE_WORKSPACE'):cache_directory(root)
+
+    def test_cache_environment_override_remains_workspace_bounded(self):
+        from inference.driver import cache_directory
+        with tempfile.TemporaryDirectory() as t:
+            root=Path(t)
+            with patch.dict('os.environ',{'LIGHTTRY_INVERSE_CACHE':str(root/'explicit-cache')}):
+                self.assertEqual(cache_directory(root),(root/'explicit-cache').resolve())
+            with patch.dict('os.environ',{'LIGHTTRY_INVERSE_CACHE':str(root.parent/'outside-cache')}):
+                with self.assertRaisesRegex(ValueError,'OUTSIDE_WORKSPACE'):cache_directory(root)
+
 if __name__=='__main__':unittest.main()

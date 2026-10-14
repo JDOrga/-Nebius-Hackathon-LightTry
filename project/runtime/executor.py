@@ -4,7 +4,7 @@ import subprocess
 import sys
 
 from inference.executor import GuardedCosmosExecutor
-from inference.driver import authorization,ROOT
+from inference.driver import cache_directory, authorization,ROOT
 from inference.jobs import read,atomic
 from inference.images import digest
 from inference.reuse import identity,key,validate
@@ -37,7 +37,7 @@ class SchemeExecutor(GuardedCosmosExecutor):
         if requirement is not None:
             value=identity(request,(folder/'inputs/photo.png').read_bytes(),
                 read(ROOT/'manifests/weights_manifest.json'),read(ROOT/'manifests/patch_manifest.json'))
-            record=validate(ROOT/'.local/state/inverse-cache'/key(value),value)
+            record=validate(cache_directory(ROOT)/key(value),value)
             if requirement!={'key':key(value),'source':record['source']}:
                 raise ValueError('STRICT_REQUIRED_INVERSE_REUSE_MISMATCH_NO_COLD_FALLBACK')
             request['requiredInverseReuse']=requirement
