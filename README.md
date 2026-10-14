@@ -203,6 +203,9 @@ CPU进程以显式server heartbeat接口续30秒短租约；它只表示当前CP
 # CPU 镜像构建与本地容器验证（2026-10-14）
 
 镜像版本 `lighttry-cpu:2026.10.14-cpu.1`。入口仍为根 `start.py --service`，容器内监听 `0.0.0.0:8080`。
+已构建镜像归档位于 `deploy/images/lighttry-cpu-2026.10.14-cpu.1.tar.gz`（76,764,481字节），校验文件为同目录 `SHA256SUMS`。
+在 Linux 执行 `cd deploy/images && sha256sum -c SHA256SUMS && docker load -i lighttry-cpu-2026.10.14-cpu.1.tar.gz` 即可导入，不必重新构建。
+导入后镜像 ID 应为 `sha256:d6ac0b3cee445fa5f9d335f8241a566069db2e393a5134d2d7519e790a9bb5b2`；镜像不包含运行时数据、账户文件或模型权重。
 基础镜像为固定摘要的 Python 3.14.0 / Debian bookworm slim；Python 依赖见根 `requirements-cpu.txt`，全部固定版本。
 构建上下文采用 `.dockerignore` 逐层白名单：不包括 `.local`、历史报告、私钥、任务、照片、测试替身或模型权重。
 约 60GB 权重仍留在 GPU 存储，CPU 镜像不含 CUDA、模型权重和云凭据。
