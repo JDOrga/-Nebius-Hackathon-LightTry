@@ -7,7 +7,7 @@ import threading
 import time
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
-import server
+import shared_http as server
 from serve_fixture import FixtureStore
 from batch_fixture import BatchFixtureExecutor
 

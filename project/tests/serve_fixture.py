@@ -7,7 +7,7 @@ from http.server import ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import server
+import shared_http as server
 from inference.jobs import TaskStore
 from inference_fixture import OfflineExecutor
 

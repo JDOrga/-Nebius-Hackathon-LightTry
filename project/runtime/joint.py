@@ -7,6 +7,7 @@ from pathlib import Path
 import time
 
 from inference.jobs import atomic, read
+from runtime.layout import packet_runtime_file
 from inference.reuse import safe_file
 from lighting import identity
 from light_console import normalize, initial, synthesize, encode_hdr, preprocessing_parameters
@@ -48,9 +49,9 @@ def energy(array):
 
 def verify_joint(prep):
     plan = read(safe_file(prep, 'joint.json'))
-    envs = {e['id']: e for e in read(prep / 'project/next/runtime/environments.json')}
+    envs = {e['id']: e for e in read(packet_runtime_file(prep, 'environments.json'))}
     if plan['version'] in ('direction-energy-key-unknowns-v1','direction-energy-calibration-five-v2'):
-        from next.runtime.key_unknowns import recipes
+        from runtime.key_unknowns import recipes
         expected=recipes(envs, repeat=plan['version']=='direction-energy-calibration-five-v2')
         if len(plan['cases'])!=len(expected):raise ValueError('JOINT_PLAN_VERSION_OR_COUNT')
     elif plan['version']==VERSION and 6<=len(plan['cases'])<=7:
@@ -177,7 +178,7 @@ def strict_condition(original, recipe, hdr, expected_hash, directory, timeline, 
 
 
 def session(args, module, timeline, state_root, validate_output):
-    from next.runtime.entry import _original_run_forward
+    from runtime.entry import _original_run_forward
     from experiments.controls import summarize_tensor
     import numpy as np
     prep = state_root.parent.parent

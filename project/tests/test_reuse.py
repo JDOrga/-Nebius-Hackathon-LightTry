@@ -236,7 +236,7 @@ class ReuseTests(unittest.TestCase):
         self.assertFalse((destination / 'result.jpg').exists())
         self.assertTrue((destination / 'remote-evidence/presets/0/complete.json').exists())
         self.assertEqual(read(destination / 'remote-evidence/presets/2/state.json')['status'], 'pending')
-        self.assertEqual(record, validate(self.root / 'project/.inverse-cache' / record['key'], record['identity']))
+        self.assertEqual(record, validate(self.root / '.local/state/inverse-cache' / record['key'], record['identity']))
 
     def test_reused_receipt_requires_valid_source_and_no_fictional_inverse_exit(self):
         from inference.jobs import TaskStore

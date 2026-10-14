@@ -31,7 +31,7 @@ $q | Add-Member -NotePropertyName runId -NotePropertyValue (Split-Path $run -Lea
 $q | Add-Member -NotePropertyName deadlineUtc -NotePropertyValue $script:RemoteDeadline.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.ffffffzzz',[Globalization.CultureInfo]::InvariantCulture)
 $req=@{image=$target.image;ssh_user=$target.ssh_user;container_python=$snapshot.container_python;container_request=$q;
  probe_source=(ConvertTo-Base64 (Get-Content (Join-Path $PSScriptRoot 'remote_probe.py') -Raw));
- container_program=(ConvertTo-Base64 (Get-Content (Join-Path $root 'project/next/runtime/joint_watch.py') -Raw))}
+ container_program=(ConvertTo-Base64 (Get-Content (Join-Path $root 'project/runtime/joint_watch.py') -Raw))}
 $program=Get-Content (Join-Path $PSScriptRoot 'joint_watch_bridge.py') -Raw
 $command=New-EncodedShellCommand $program (ConvertTo-Base64 ($req|ConvertTo-Json -Depth 8 -Compress))
 if($command.Length -gt 28000){throw 'NATIVE_COMMAND_TOO_LARGE'}

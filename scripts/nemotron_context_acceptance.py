@@ -9,9 +9,9 @@ import sys
 import uuid
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'project'))
 from inference.jobs import atomic,read
-from next.language import RecipeLanguage,MODEL
-from next.accepted import load_accepted,measured_context
-from next.runtime.joint import changes
+from recipe_language import RecipeLanguage,MODEL
+from accepted import load_accepted,measured_context
+from runtime.joint import changes
 from lighting import normalize_scheme
 from light_console import normalize
 
@@ -32,7 +32,7 @@ def semantic(before, proposal, phase, environments):
 
 
 def prepare(state,package):
-    import server
+    import shared_http as server
     catalog=server.load_catalog(ROOT/'.local/demo-candidate-20261010/demo-assets')
     studies,_,schemes=load_accepted(package,catalog);cases=measured_context(studies)
     if len(cases)!=7:raise ValueError('SEVEN_MEASURED_OBSERVATIONS_REQUIRED')
@@ -74,7 +74,7 @@ def confirmed(state,phase,value=None):
 
 def run(o):
     state=o.state.resolve();scope=read(state/'scope.json')
-    envs={e['id']:e for e in read(ROOT/'project/next/runtime/environments.json')}
+    envs={e['id']:e for e in read(ROOT/'project/runtime/environments.json')}
     if o.apply:
         value=read(state/(o.phase+'-proposal.json'))
         if not o.confirm_operation or o.confirm_operation!=value['operationId']:raise ValueError('CONFIRM_EXACT_OPERATION_REQUIRED')
@@ -101,7 +101,7 @@ def run(o):
     key=os.environ.get('LIGHTTRY_TOKEN_FACTORY_KEY','')
     if not key and os.environ.get('LIGHTTRY_KEY_FILE'):key=Path(os.environ['LIGHTTRY_KEY_FILE']).read_text(encoding='utf-8-sig').strip()
     if not key:raise ValueError('EXISTING_KEY_REQUIRED')
-    policy=read(ROOT/'project/next/runtime/policy.json');policy['parameterized']=True
+    policy=read(ROOT/'project/runtime/policy.json');policy['parameterized']=True
     ledger=state/'provider-ledger.json'
     if ledger.exists() and read(ledger)['calls']> (0 if o.phase=='first' else 2):raise ValueError('NO_OLD_ADDITIONAL_SCOPE')
     service=RecipeLanguage(list(envs.values()),policy,key,ledger,max_calls=4,budget=.08,

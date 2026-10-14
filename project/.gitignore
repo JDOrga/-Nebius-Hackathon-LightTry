@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 .tasks/
 inference.local.json
+
+# Per-machine language settings must never be published.
+language.local.json

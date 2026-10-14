@@ -33,7 +33,7 @@ def dependency_issues():
 
 def discover_commands(root=ROOT):
     commands = []
-    for folder in ('prototype', 'tests'):
+    for folder in ('prototype', 'tests', 'project/tests'):
         for path in sorted((root / folder).glob('test_*.py')):
             # Existing standalone integration scripts and new unittest modules
             # are both discovered without a filename registry.
@@ -47,7 +47,7 @@ def discover_commands(root=ROOT):
                 uses_unittest = False
             argv = (['-m', 'unittest', 'discover', '-s', folder, '-p', path.name, '-v']
                     if uses_unittest else [path.relative_to(root).as_posix()])
-            commands.append((folder + '-' + path.stem, argv))
+            commands.append((folder.replace('/', '-') + '-' + path.stem, argv))
     return commands
 
 
@@ -55,11 +55,11 @@ def output_text(value):
     return value.decode('utf-8', errors='replace') if isinstance(value, bytes) else (value or '')
 
 
-def run_group(name, argv, directory, timeout):
+def run_group(name, argv, directory, timeout, python_executable=None):
     before = time.monotonic()
-    row = {'name': name, 'command': argv, 'exit_code': None, 'status': 'failed'}
+    row = {'name': name, 'command': argv, 'python_executable': str(python_executable or sys.executable), 'exit_code': None, 'status': 'failed'}
     try:
-        result = subprocess.run([sys.executable, '-B', *argv], cwd=ROOT,
+        result = subprocess.run([str(python_executable or sys.executable), '-B', *argv], cwd=ROOT,
                                 capture_output=True, text=True, encoding='utf-8',
                                 errors='replace', timeout=timeout)
         row.update(exit_code=result.returncode, status='passed' if result.returncode == 0 else 'failed')
@@ -78,8 +78,22 @@ def run_group(name, argv, directory, timeout):
 
 
 def main():
+    # Reuse path-only local configuration; never install dependencies or read keys.
+    configured_product = None
+    configured = ROOT / '.local/studio.json'
+    if configured.is_file():
+        sys.path.insert(0, str(ROOT))
+        from start import local_options
+        _, paths, _ = local_options([])
+        configured_product = paths.get('python')
+        offline = paths.get('offline_python')
+        if __name__ == '__main__' and offline and Path(offline).resolve() != Path(sys.executable).resolve():
+            if not Path(offline).is_file(): raise FileNotFoundError('CONFIGURED_OFFLINE_PYTHON_MISSING')
+            os.execv(offline, [offline, '-X', 'utf8', '-B', str(Path(__file__).resolve()), *sys.argv[1:]])
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', type=Path, default=ROOT / '.local/selftest.json')
+    parser.add_argument('--product-python', type=Path, default=configured_product,
+                        help='Existing CPU product-test runtime; no automatic installation.')
     args = parser.parse_args()
     args.out.parent.mkdir(parents=True, exist_ok=True)
     report = {'offline': True, 'cloud_calls': 0, 'passed': False, 'status': 'checking_dependencies',
@@ -102,7 +116,8 @@ def main():
     report.update(status='running', discovered_groups=len(commands))
     save()
     for name, argv in commands:
-        row = run_group(name, argv, args.out.parent, timeout=240)
+        runtime = args.product_python if name.startswith('project-tests-') else None
+        row = run_group(name, argv, args.out.parent, timeout=240, python_executable=runtime)
         report['groups'].append(row)
         save()
         print(json.dumps(row), flush=True)

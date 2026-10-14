@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {upgrade,zone,differences} from '../next/web/console.js';
-import {allowed,matchingTask,validateLibrary} from '../next/web/scheme-state.js';
+import {upgrade,zone,differences} from '../web/console.js';
+import {allowed,matchingTask,validateLibrary} from '../web/scheme-state.js';
 test('old draft upgrade preserves literal input meaning without mutating original',()=>{const old={environmentId:'sunny',offsetDeg:45,strength:.7};const p=upgrade(old,[{id:'sunny',sha256:'a'.repeat(64)}]);assert.equal(p.offsetDeg,45);assert.equal(p.strength,.7);assert.equal(old.schemaVersion,undefined);});
 test('v2 bounded manual controls and recursive AI diff cover zones',()=>{const p=upgrade({environmentId:'sunny',offsetDeg:123.4,strength:Math.SQRT1_2},[{id:'sunny',sha256:'a'.repeat(64)}]);assert.ok(allowed(p,{}));assert.ok(!allowed({...p,strength:Infinity},{}));assert.ok(!allowed({...p,strength:4.1},{}));const q=structuredClone(p);q.zones=[zone()];assert.ok(differences(p,q).some(s=>s.includes('zones.0')));});
 test('new recipe cannot match old nominal photo',()=>{const p={schemaVersion:2,mode:'procedural',offsetDeg:0,strength:1};const task={input:{id:'x'},status:'succeeded',expiresAt:Date.now()/1000+60,preset:{id:'sunny'},result:{taskId:'t',inputId:'x',presetId:'sunny'}};assert.equal(matchingTask(task,'x',p),null);});

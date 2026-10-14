@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {allowed,createScheme,revise,variant,sameParameters,matchingTask,validateLibrary,referenceKey,restoreInputStub} from '../next/web/scheme-state.js';
+import {allowed,createScheme,revise,variant,sameParameters,matchingTask,validateLibrary,referenceKey,restoreInputStub} from '../web/scheme-state.js';
 const policy={approvedVariants:{sunny:[[0,.7],[45,1]]}};
 test('closed dimensions and combinations are rejected',()=>{assert(allowed({environmentId:'sunny',offsetDeg:0,strength:.7},policy));assert(!allowed({environmentId:'sunny',offsetDeg:0,strength:1.4},policy));assert(!allowed({environmentId:'sunny',offsetDeg:45,strength:.7},policy));assert(!allowed({environmentId:'sunny',offsetDeg:0,strength:true},policy));});
 test('edit creates lineage and clone creates independent family',()=>{const s=createScheme('sunny','A','b'.repeat(32));const n=revise(s,{...s.parameters,strength:.7});assert.equal(s.version,1);assert.equal(n.version,2);assert.equal(n.parentVersion,1);assert.equal(variant(s,'B').version,1);assert.notEqual(variant(s,'B').planId,s.planId);assert.notEqual(referenceKey(s,s.inputId),referenceKey(n,n.inputId));});

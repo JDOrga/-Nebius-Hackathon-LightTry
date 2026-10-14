@@ -15,7 +15,7 @@ import numpy as np
 
 class ConsoleTests(unittest.TestCase):
     def setUp(self):
-        self.envs={e['id']:e for e in json.loads((ROOT/'project/next/runtime/environments.json').read_text())}
+        self.envs={e['id']:e for e in json.loads((ROOT/'project/runtime/environments.json').read_text())}
         self.p=c.initial(self.envs['sunny'])
         self.policy={'revision':'parameterized-engineering-v2','legacyRevision':'sunny-bounded-approximate-preview-v1','parameterized':True,'approvedVariants':{'sunny':[[0,.7],[45,1]]}}
     def procedural(self):
@@ -86,7 +86,7 @@ class ConsoleTests(unittest.TestCase):
         self.assertNotIn("request['preset']",inspect.getsource(identity))
         self.assertNotIn('lightingAdapterVersion',inspect.getsource(identity))
     def test_offline_ai_contract_preserves_reference(self):
-        from next.language import RecipeLanguage
+        from recipe_language import RecipeLanguage
         sent=[]
         proposal={'status':'ready','action':'revise','parameters':{'operations':[{'op':'rotate','delta':30},{'op':'exposure','delta':-.5}]},'name':'','reason':'旋转环境并降低输入强度，尚未应用。','question':''}
         def transport(payload,remaining):sent.append(payload);return json.dumps(proposal,ensure_ascii=False)
@@ -97,8 +97,8 @@ class ConsoleTests(unittest.TestCase):
             self.assertEqual(value['parameters']['offsetDeg'],30);self.assertEqual(value['parameters']['strength'],2**-.5);self.assertEqual(scheme['parameters']['offsetDeg'],0)
             context=json.loads(sent[0]['messages'][1]['content']);self.assertFalse(context['photosReceived']);self.assertIsNone(context['allowedCombinations'])
     def test_real_store_and_executor_derived_wiring_restart(self):
-        from next.store import SchemeStore
-        from next.runtime.executor import SchemeExecutor
+        from scheme_store import SchemeStore
+        from runtime.executor import SchemeExecutor
         from PIL import Image
         class DispatchOnly:
             supports_lighting_parameters=True
@@ -121,7 +121,7 @@ class ConsoleTests(unittest.TestCase):
                 self.assertEqual((folder/'request.json').read_bytes(),original);self.assertIn(p['id'],store.presets)
             finally:store.close()
     def test_bounded_session_one_constructor_math_stub_only(self):
-        from next.runtime import entry
+        from runtime import entry
         from types import SimpleNamespace
         roots=[];events=[];count=[]
         class ModelStub:

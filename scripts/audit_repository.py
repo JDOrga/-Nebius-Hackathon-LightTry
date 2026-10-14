@@ -21,7 +21,8 @@ def candidate_files():
     code,names=git('ls-files','--cached','--others','--exclude-standard')
     if code:raise ValueError('GIT_REPOSITORY_REQUIRED')
     _,deleted=git('diff','--cached','--name-only','--diff-filter=D')
-    return sorted(set(names)-set(deleted))
+    _,removed=git('ls-files','--deleted')
+    return sorted(set(names)-set(deleted)-set(removed))
 
 def scan(names):
     risks=[];records=[]

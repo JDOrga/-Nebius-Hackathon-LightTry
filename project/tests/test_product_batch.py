@@ -109,7 +109,7 @@ class RegistrationTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.register()
         self.assertFalse((self.store.root/TASK).exists())
     def test_batch_http_results_and_no_local_path_endpoint(self):
-        import server,threading
+        import shared_http as server,threading
         from http.server import ThreadingHTTPServer
         from urllib.request import urlopen
         from urllib.error import HTTPError

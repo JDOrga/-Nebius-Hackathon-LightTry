@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/*.test.js",
-    "start": "python -B start_studio.py"
+    "test": "node --test project/tests/*.test.js",
+    "start": "python -X utf8 -B start.py"
   }
 }

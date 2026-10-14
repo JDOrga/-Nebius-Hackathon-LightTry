@@ -134,7 +134,7 @@ class RecipeLanguage:
         self.synthetic=transport is not None
         self.chat_lock=threading.Lock();self.chat_requests={}
         self.lock=threading.Lock();self.frozen={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in
-            (Path(__file__),Path(__file__).parents[1]/'language.py')}
+            (Path(__file__),Path(__file__).parent/'language.py')}
         if self.ledger_path.exists():
             ledger=read(self.ledger_path)
             if ledger.get('model')!=MODEL or ledger.get('maxCalls')!=max_calls or ledger.get('budgetEnvelopeUsd')!=budget:
@@ -194,7 +194,7 @@ class RecipeLanguage:
             rec=accepted[op['operationId']]
             if rec['selectedReference']['inputId']!=current['inputId'] or rec['selectedReference']['planId']!=current['planId']:
                 raise LanguageError('INVALID_CHAT_OPERATION','建议不属于当前照片与方案会话。',400)
-            from next.runtime.joint import changes
+            from runtime.joint import changes
             proposal=rec['proposal']
             verified.append({'operationId':op['operationId'],'reportedState':op['state'],
                 'proposal':{'status':proposal['status'],'action':proposal['action'],'reason':proposal['reason'],

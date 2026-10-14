@@ -8,7 +8,7 @@ from http.server import ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import server
+import shared_http as server
 from language import LanguageAdapter, LanguageError
 from language_contract import exact_operation, constraints
 from serve_fixture import FixtureStore

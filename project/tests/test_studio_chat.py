@@ -1,7 +1,7 @@
 import copy,json,sys,tempfile,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
-from next.language import RecipeLanguage,validate
+from recipe_language import RecipeLanguage,validate
 from lighting import normalize_scheme
 from language import LanguageError
 class ChatTests(unittest.TestCase):

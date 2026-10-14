@@ -17,9 +17,9 @@ from language import LanguageAdapter
 
 FILES = [
     'project/language.py', 'project/language_contract.py', 'project/language.example.json',
-    'project/server.py', 'project/next/web/index.html', 'project/next/web/workbench.js',
-    'project/next/web/workbench.css', 'project/next/web/chat.js', 'project/next/web/console.js',
-    'project/next/web/scheme-state.js',
+    'project/shared_http.py', 'project/web/index.html', 'project/web/workbench.js',
+    'project/web/workbench.css', 'project/web/chat.js', 'project/web/console.js',
+    'project/web/scheme-state.js',
 
     'project/data/catalog.json', 'project/data/demo-package.json',
     'project/tests/language_cases.json', 'project/tests/language_regressions.json',

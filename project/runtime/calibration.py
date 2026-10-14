@@ -5,8 +5,9 @@ import html
 import json
 from pathlib import Path
 from inference.jobs import atomic, read
-from next.runtime.joint import changes
-from next.runtime.joint_results import validate_case
+from runtime.layout import packet_runtime_file
+from runtime.joint import changes
+from runtime.joint_results import validate_case
 
 VERSION = 'direction-energy-calibration-five-v2'
 IDS = ['C-repeat', 'direction-225', 'direction-315', 'width-45', 'width-70']
@@ -29,7 +30,7 @@ def bind_references(package):
                  'configuration': str(package/'execution/results/configuration.json'),
                  'plan': str(package/'packet/joint.json')}
         for name in ('joint_worker.py','joint_entry.py','joint.py','entry.py'):
-            paths['code-'+name]=str(package/'packet/project/next/runtime'/name)
+            paths['code-'+name]=str(packet_runtime_file(package/'packet', name))
         references.append({'caseId': case['id'], 'parameters': case['parameters'],
             'recipeKey': case['recipeKey'], 'hdrSha256': case['hdrSha256'],
             'outputSha256': result['sha256'], 'paths': paths,
@@ -40,7 +41,7 @@ def bind_references(package):
 
 def prepare_review(packet, output):
     from PIL import Image, ImageDraw
-    root = Path(__file__).resolve().parents[3]
+    root = Path(__file__).resolve().parents[2]
     source = root/'controlled-tests/20261007-four-materials/prepared_inputs.json'
     p = read(source)['images'][0]
     rois = p['derived_roi_xyxy']
@@ -111,7 +112,7 @@ def identity_audit(packet, root):
         'modelConditionDiff':changes(old_model,new_model),
         'conditionFieldDiff':changes(old_cond['fields'],new_cond['fields']),
         'codeVersions':{n:{'historicalSha256':historical['hashes']['code-'+n],
-            'currentSha256':sha(packet/'project/next/runtime'/n)} for n in ('joint_worker.py','joint_entry.py','joint.py','entry.py')},
+            'currentSha256':sha(packet_runtime_file(packet, n))} for n in ('joint_worker.py','joint_entry.py','joint.py','entry.py')},
         'rngPolicyHistorical':old_complete.get('randomPolicy'), 'rngPolicyCurrent':current.get('randomPolicy'),
         'sameSeedDoesNotGuaranteeByteEquality':True}
 
@@ -191,9 +192,9 @@ def finalize(package, review_path=None):
 
 def stage_import(package):
     """Reuse the verified additive studio loader; do not pretend a browser merged."""
-    from next.accepted import load_accepted_many
-    import server
-    root=Path(__file__).resolve().parents[3]
+    from accepted import load_accepted_many
+    import shared_http as server
+    root=Path(__file__).resolve().parents[2]
     historical=root/'.local/lighttry-joint-20261012/ai-confirmed-package'
     catalog=server.load_catalog(root/'.local/demo-candidate-20261010/demo-assets')
     a,b,c=load_accepted_many([historical,package],catalog)

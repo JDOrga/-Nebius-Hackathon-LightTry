@@ -2,8 +2,8 @@
 import base64,copy,hashlib,importlib.util,io,json,pathlib,subprocess,sys,tempfile,types,unittest
 from unittest.mock import patch,mock_open
 ROOT=pathlib.Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT/'project'))
-from next.runtime.joint_bundle import build,MAX_ARCHIVE
-from next.runtime.joint_results import extract
+from runtime.joint_bundle import build,MAX_ARCHIVE
+from runtime.joint_results import extract
 BASE=ROOT/'.local/lighttry-joint-20261012/ai-confirmed-package';RESULTS=BASE/'execution/results';PLAN=json.loads((BASE/'packet/joint.json').read_text())
 def module(path,name):
  spec=importlib.util.spec_from_file_location(name,path);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);return m
@@ -25,14 +25,14 @@ class BatchTests(unittest.TestCase):
  def test_wrong_task_rejected(self):
   with self.assertRaisesRegex(ValueError,'IDENTITY'):build(RESULTS,BASE/'packet','wrong',PLAN['nonce'])
  def test_running_and_unknown_process_rejected(self):
-  import next.runtime.joint_bundle as b
+  import runtime.joint_bundle as b
   actual=b.read
   for e in [{'status':'running','executionStopped':False},{'status':'failed','executionStopped':False}]:
    event={**actual(RESULTS/'execution.json'),**e}
    with patch.object(b,'read',side_effect=lambda p:event if p.name=='execution.json' else actual(p)):
     with self.assertRaisesRegex(ValueError,'TERMINAL'):self.pack()
  def test_failed_partial_preserves_completed_only(self):
-  import next.runtime.joint_bundle as b
+  import runtime.joint_bundle as b
   original_read=b.read;original_exists=pathlib.Path.exists
   event={**original_read(RESULTS/'execution.json'),'status':'failed','executionStopped':True}
   def exists(p):
@@ -40,10 +40,10 @@ class BatchTests(unittest.TestCase):
   with patch.object(b,'read',side_effect=lambda p:event if p.name=='execution.json' else original_read(p)),patch.object(pathlib.Path,'exists',exists):
    data,m=self.pack();self.assertEqual(m['completed'],['A','B']);self.assertEqual(m['status'],'failed')
  def test_overflow_fails_no_chunk_fallback(self):
-  with patch('next.runtime.joint_bundle.MAX_ARCHIVE',1):
+  with patch('runtime.joint_bundle.MAX_ARCHIVE',1):
    with self.assertRaisesRegex(ValueError,'NO_CHUNK_FALLBACK'):self.pack()
  def test_missing_hdr_proof_fails(self):
-  import next.runtime.joint_results as r
+  import runtime.joint_results as r
   actual=r.read
   def read(p):
    q=actual(p)
@@ -65,9 +65,9 @@ class BatchTests(unittest.TestCase):
   import shutil,datetime
   data,m=self.pack()
   with tempfile.TemporaryDirectory() as t:
-   t=pathlib.Path(t);cloud=t/'cloud';cloud.mkdir();run=t/'cloud-runs'/('b'*32);run.mkdir(parents=True);(t/'project/next/runtime').mkdir(parents=True)
+   t=pathlib.Path(t);cloud=t/'cloud';cloud.mkdir();run=t/'cloud-runs'/('b'*32);run.mkdir(parents=True);(t/'project/runtime').mkdir(parents=True)
    shutil.copyfile(ROOT/'cloud/Retrieve-JointBundle.ps1',cloud/'Retrieve-JointBundle.ps1')
-   (cloud/'remote_probe.py').write_text('pass');(cloud/'joint_bundle_bridge.py').write_text('pass');(t/'project/next/runtime/joint_bundle.py').write_text('pass')
+   (cloud/'remote_probe.py').write_text('pass');(cloud/'joint_bundle_bridge.py').write_text('pass');(t/'project/runtime/joint_bundle.py').write_text('pass')
    now=datetime.datetime.now(datetime.timezone.utc)
    values={'host-trust.json':{'user_confirmed':True,'vm_id':'vm-fixture','ip':'127.0.0.1','pin_path':'pin'},
     'heartbeat.json':{'offline':False,'sleep_held':True,'stopped_verified':False,'supervision_stop_latched':False,'utc':now.isoformat(),'pid':__import__('os').getpid()},

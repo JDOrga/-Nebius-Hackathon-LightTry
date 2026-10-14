@@ -10,7 +10,7 @@ import sys
 import tarfile
 import time
 if '__file__' in globals():
-    sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
+    sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 else:  # existing native transport executes the reviewed program via python -c
     q=json.loads(base64.b64decode(sys.argv[1]))
     prep=Path(q['root']).resolve().parent
@@ -96,7 +96,7 @@ def validate_case(packet,root,case):
 def comparison(packet,target,root):
     plan=read(packet/'joint.json');items=[];records=[]
     if plan.get('version')=='direction-energy-calibration-five-v2':
-        from next.runtime.calibration import comparison_page
+        from runtime.calibration import comparison_page
         comparison_page(packet,target,root)
         return [validate_case(packet,root,c) for c in plan['cases'] if root and (root/'cases'/c['id']/'0/complete.json').exists()]
     for case in plan['cases']:

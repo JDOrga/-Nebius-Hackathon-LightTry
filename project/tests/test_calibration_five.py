@@ -11,12 +11,12 @@ import unittest
 from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT/'project'));sys.path.insert(0,str(ROOT/'project/tests'))
 from inference.jobs import atomic,read
-from next.runtime.key_unknowns import recipes
-from next.runtime.joint import energy,verify_joint,changes
-from next.runtime.calibration import pixel_difference,roi_metrics,IDS,VERSION
+from runtime.key_unknowns import recipes
+from runtime.joint import energy,verify_joint,changes
+from runtime.calibration import pixel_difference,roi_metrics,IDS,VERSION
 from light_console import synthesize,encode_hdr,decode_hdr
-from next.language import RecipeLanguage
-from next.accepted import load_accepted_many
+from recipe_language import RecipeLanguage
+from accepted import load_accepted_many
 import test_joint
 ENVS=test_joint.ENVS
 spec=importlib.util.spec_from_file_location('context_acceptance',ROOT/'scripts/nemotron_context_acceptance.py')
@@ -62,7 +62,7 @@ class FiveTests(unittest.TestCase):
 
     def test_rng_order_independent_noise_not_gpu_equality(self):
         import numpy as np
-        from next.runtime.entry import observe_generation
+        from runtime.entry import observe_generation
         calls=[]
         p=types.SimpleNamespace(generate_video=lambda self: calls.append(np.random.rand(8)))
         module=types.SimpleNamespace(misc=types.SimpleNamespace(set_random_seed=np.random.seed))
@@ -89,13 +89,13 @@ class FiveTests(unittest.TestCase):
             self.assertEqual(roi_metrics(a,roi),roi_metrics(b,roi))
 
     def test_historical_import_duplicate_idempotent(self):
-        import server
+        import shared_http as server
         base=ROOT/'.local/lighttry-joint-20261012/ai-confirmed-package';catalog=server.load_catalog(ROOT/'.local/demo-candidate-20261010/demo-assets')
         studies,files,schemes=load_accepted_many([base,base],catalog)
         self.assertEqual((len(studies),len(files),len(schemes)),(7,7,7))
 
     def synthetic_finalize(self, review=None):
-        from next.runtime import calibration
+        from runtime import calibration
         import shutil
         temp=tempfile.TemporaryDirectory();base=Path(temp.name);packet=base/'packet';packet.mkdir();job=base/'execution';root=job/'results';root.mkdir(parents=True)
         plan=read(PACKAGE/'packet/joint.json');atomic(packet/'joint.json',plan)
@@ -157,7 +157,7 @@ class ContextTests(unittest.TestCase):
         p=copy.deepcopy(self.f);p['zones'][1]['strength']=.9;sent=[]
         def wire(payload,remaining):sent.append(copy.deepcopy(payload));return json.dumps(self.proposal(p),ensure_ascii=False)
         with tempfile.TemporaryDirectory() as t:
-            policy=read(ROOT/'project/next/runtime/policy.json');policy['parameterized']=True
+            policy=read(ROOT/'project/runtime/policy.json');policy['parameterized']=True
             ledger=Path(t)/'ledger.json';service=RecipeLanguage(list(ENVS.values()),policy,'OFFLINE_SYNTHETIC',ledger,max_calls=4,budget=.08,transport=wire,measured_cases=self.scope['cases'],full_procedural_recipe=True,
                 acceptance_validator=lambda p:TEXT.semantic(self.f,p,'first',ENVS))
             result=service.recommend({'currentScheme':self.scope['scheme'],'currentResult':{'status':'historical-F','kind':'study','artifactId':self.scope['historicalFOutputSha256']},'text':TEXT.FIRST,'history':[],'replyLanguage':'zh'})

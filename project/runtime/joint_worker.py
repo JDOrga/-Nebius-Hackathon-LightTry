@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT.parent / 'scripts'))
 from inference.jobs import atomic, read
@@ -89,7 +89,7 @@ def main():
     process = None
     try:
         plan = verify_packet(prep)
-        from next.runtime.joint import verify_joint
+        from runtime.joint import verify_joint
         joint = verify_joint(prep)
         event.update(taskId=joint['taskId'], nonce=joint['nonce'])
         atomic(run / 'execution.json', event)
@@ -150,7 +150,7 @@ def main():
         if (states / 'identities.json').exists() and read(states / 'identities.json') != identities:
             raise ValueError('RESUME_SOURCE_IDENTITY_MISMATCH')
         atomic(states / 'identities.json', identities)
-        argv = [sys.executable, '-u', '-B', str(prep / 'project/next/runtime/joint_entry.py'),
+        argv = [sys.executable, '-u', '-B', str(prep / 'project/runtime/joint_entry.py'),
             '--phase', 'forward', '--timing', str(run / 'forward-timing.jsonl'),
             '--state-root', str(states), '--checkpoint_dir', runtime['checkpoint_dir'],
             '--diffusion_transformer_dir', 'Diffusion_Renderer_Forward_Cosmos_7B',

@@ -10,7 +10,7 @@ import tarfile
 import time
 
 if '__file__' in globals():
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 else:
     q = json.loads(base64.b64decode(sys.argv[1]))
     prep = Path(q['root']).resolve().parent
@@ -19,7 +19,7 @@ else:
     sys.path.insert(0, str(prep / 'project'))
 from inference.jobs import read
 from inference.reuse import safe_file
-from next.runtime.joint_results import validate_case
+from runtime.joint_results import validate_case
 
 MAX_ARCHIVE = 700 * 1024  # base64 plus framing stays below existing 1 MiB capture
 

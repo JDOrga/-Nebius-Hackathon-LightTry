@@ -6,10 +6,10 @@ from pathlib import Path
 import sys
 import uuid
 import hashlib
-sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from inference.jobs import atomic,read
-from next.language import RecipeLanguage,MODEL
-from next.runtime.joint import changes
+from recipe_language import RecipeLanguage,MODEL
+from runtime.joint import changes
 from light_console import normalize,initial
 from lighting import normalize_scheme,identity
 
@@ -121,8 +121,8 @@ def run(options):
     reference_path=root/'selected-reference.json'
     if reference_path.exists():reference=read(reference_path)
     else:
-        packet=options.packet.resolve() if options.packet else Path(__file__).resolve().parents[3]/'.local/lighttry-joint-20261012/manual-package-release/packet'
-        from next.runtime.joint import verify_joint
+        packet=options.packet.resolve() if options.packet else Path(__file__).resolve().parents[2]/'.local/lighttry-joint-20261012/manual-package-release/packet'
+        from runtime.joint import verify_joint
         prepared=verify_joint(packet)
         reference={'planId':uuid.uuid4().hex,'inputId':prepared['input']['sha256'][:32],
             'inputSha256':prepared['input']['sha256'],'preparationTaskId':prepared['taskId']}

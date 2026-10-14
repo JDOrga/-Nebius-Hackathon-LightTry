@@ -35,14 +35,14 @@ def audit(package,output):
         commands.append({'argv':args,'stdout':p.stdout,'stderr':p.stderr,'exitStatus':p.returncode})
         if p.returncode:raise ValueError('OFFLINE_ENTRY_CHECK_FAILED')
         return p.stdout
-    script="import sys,json;from pathlib import Path;sys.path.insert(0,sys.argv[1]);from next.runtime.joint import verify_joint;p=verify_joint(Path(sys.argv[2]));print(json.dumps({'version':p['version'],'cases':[c['id'] for c in p['cases']],'counts':[p['initializationsTarget'],p['forwardTarget'],p['inverseExecutionsTarget']]}))"
+    script="import sys,json;from pathlib import Path;sys.path.insert(0,sys.argv[1]);from runtime.joint import verify_joint;p=verify_joint(Path(sys.argv[2]));print(json.dumps({'version':p['version'],'cases':[c['id'] for c in p['cases']],'counts':[p['initializationsTarget'],p['forwardTarget'],p['inverseExecutionsTarget']]}))"
     actual=json.loads(run([sys.executable,'-X','utf8','-B','-c',script,str(unpack/'project'),str(unpack)]))
     if actual['counts']!=[1,5,0] or actual['cases']!=['C-repeat','direction-225','direction-315','width-45','width-70']:raise ValueError('UNPACKED_BATCH_UNSUPPORTED')
-    help_text=run([sys.executable,'-X','utf8','-B',str(unpack/'project/next/runtime/joint_worker.py'),'--help'])
+    help_text=run([sys.executable,'-X','utf8','-B',str(unpack/'project/runtime/joint_worker.py'),'--help'])
     if 'five-case calibration' not in help_text:raise ValueError('WRONG_WORKER_ENTRY')
     # Exercise the unpacked actual launch function, but intercept the OS launch.
     sys.path.insert(0,str(unpack/'scripts'))
-    spec=importlib.util.spec_from_file_location('unpacked_launch',unpack/'project/next/runtime/joint_launch.py')
+    spec=importlib.util.spec_from_file_location('unpacked_launch',unpack/'project/runtime/joint_launch.py')
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
     with tempfile.TemporaryDirectory() as t:
         base=Path(t);prep=base/'packet';prep.mkdir()
@@ -55,12 +55,12 @@ def audit(package,output):
             module.main(q)
             dispatched=launch.call_args.args[0]
         if '--joint' not in dispatched or not dispatched[3].endswith('joint_worker.py'):raise ValueError('WRONG_DISPATCH_WORKER')
-    for src,needle in [('project/next/runtime/joint_worker.py','joint_entry.py'),('project/next/runtime/joint_entry.py','entry.run_forward = session')]:
+    for src,needle in [('project/runtime/joint_worker.py','joint_entry.py'),('project/runtime/joint_entry.py','entry.run_forward = session')]:
         if needle not in (unpack/src).read_text(encoding='utf-8'):raise ValueError('WRONG_FORWARD_ENTRY')
     record={'status':'OFFLINE_PACKAGE_AUDIT_PASSED','archive':str(archive),'archiveSha256':digest(archive),
         'archiveBytes':archive.stat().st_size,'archiveFiles':inventory,'actualUnpackedPlan':actual,
-        'workerSha256':digest(unpack/'project/next/runtime/joint_worker.py'),
-        'workerMatchesWorkspace':digest(unpack/'project/next/runtime/joint_worker.py')==digest(Path(__file__).resolve().parents[1]/'project/next/runtime/joint_worker.py'),
+        'workerSha256':digest(unpack/'project/runtime/joint_worker.py'),
+        'workerMatchesWorkspace':digest(unpack/'project/runtime/joint_worker.py')==digest(Path(__file__).resolve().parents[1]/'project/runtime/joint_worker.py'),
         'realEntryChain':['scripts/run_joint_batch.py','joint_launch.py','joint_worker.py --joint','joint_entry.py','joint.session'],
         'dispatchFixture':'OFFLINE_SYNTHETIC; Popen intercepted; NO VM/GPU/provider launch','interceptedArgv':dispatched,
         'commands':commands,'realGPUVerified':False}

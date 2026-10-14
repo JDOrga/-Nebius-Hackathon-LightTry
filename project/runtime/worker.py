@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 import sys
 
-PROJECT=Path(__file__).resolve().parents[2]
+PROJECT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(PROJECT))
 from inference import worker, batch
 from inference.jobs import read, atomic
@@ -57,7 +57,7 @@ def main():
     try:
         install_legacy_imports()
         worker.main()  # original commit/blob/patch/HDR/weight/inverse/deadline checks
-        prep=Path(__file__).resolve().parents[3];run=prep/'run'
+        prep=Path(__file__).resolve().parents[2];run=prep/'run'
         directory=run/'presets'/str(p['index'])
         condition=read(directory/'condition.json');model=read(directory/'model-condition.json')
         from light_console import preprocessing_parameters
@@ -73,7 +73,7 @@ def main():
         if finished is None:raise ValueError('ORIGINAL_EXECUTION_COMPLETION_MISSING')
         original_atomic(run/'execution.json',finished)
     except BaseException as error:
-        prep=Path(__file__).resolve().parents[3]
+        prep=Path(__file__).resolve().parents[2]
         if (prep/'run').is_dir():
             message=str(error)
             atomic(prep/'run/facade-error.json',{'type':type(error).__name__,
@@ -83,7 +83,7 @@ def main():
         if finished is not None:
             # Original model children already exited; reject a missing/mismatched
             # parameter proof rather than publishing an early success event.
-            prep=Path(__file__).resolve().parents[3]
+            prep=Path(__file__).resolve().parents[2]
             event={**finished,'status':'failed','stage':'validating','executionStopped':True,
                    'error':'PARAMETER_PROOF_REJECTED_'+type(error).__name__}
             original_atomic(prep/'run/execution.json',event)

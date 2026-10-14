@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {mergeAcceptedLibrary,schemePresentation,validateLibrary,schemeWire} from '../next/web/scheme-state.js';
+import {mergeAcceptedLibrary,schemePresentation,validateLibrary,schemeWire} from '../web/scheme-state.js';
 const imported={schemaVersion:1,planId:'a'.repeat(32),version:1,name:'AI · 2026-10-12实测',inputId:'b'.repeat(32),parameters:{schemaVersion:2,mode:'procedural',environmentId:null,offsetDeg:0,strength:1},importedResultSha256:'c'.repeat(64),provenance:{caseId:'AI'}};
 test('idempotent import preserves user library',()=>{const user={...structuredClone(imported),planId:'d'.repeat(32),name:'我的方案'};const once=mergeAcceptedLibrary([user],[imported]);assert.equal(once.length,2);assert.deepEqual(mergeAcceptedLibrary(once,[imported]),once);assert.equal(once[0].name,'我的方案');assert.equal(validateLibrary(once,['sunny']).length,2)});
 test('identity collision fails without overwriting',()=>{const wrong={...structuredClone(imported),inputId:'f'.repeat(32)};assert.throws(()=>mergeAcceptedLibrary([wrong],[imported]),/身份冲突/);assert.equal(wrong.inputId,'f'.repeat(32))});

@@ -47,7 +47,7 @@ class GuardedCosmosExecutor:
         from .reuse import identity, key, validate
         value = identity(request, (folder / 'inputs/photo.png').read_bytes(),
                          read(ROOT / 'manifests/weights_manifest.json'), read(ROOT / 'manifests/patch_manifest.json'))
-        record = validate(ROOT / 'project/.inverse-cache' / key(value), value)
+        record = validate(ROOT / '.local/state/inverse-cache' / key(value), value)
         if requirement != {'key': key(value), 'source': record['source']}:
             raise ValueError('REQUIRED_INVERSE_REUSE_UNAVAILABLE_NO_COLD_FALLBACK')
         request['requiredInverseReuse'] = requirement

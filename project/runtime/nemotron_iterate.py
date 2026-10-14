@@ -6,10 +6,10 @@ import os
 from pathlib import Path
 import sys
 import time
-sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from inference.jobs import atomic,read
-from next.language import RecipeLanguage,MODEL
-from next.runtime.joint_language import FIRST,SECOND,semantic
+from recipe_language import RecipeLanguage,MODEL
+from runtime.joint_language import FIRST,SECOND,semantic
 from light_console import initial
 from lighting import normalize_scheme
 

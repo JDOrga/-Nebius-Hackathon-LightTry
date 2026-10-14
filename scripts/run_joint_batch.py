@@ -9,11 +9,11 @@ import sys
 import time
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'project'))
 from inference.jobs import atomic,read
-from next.runtime.driver import authorization
-from next.runtime.joint import verify_joint
-from next.runtime.joint_results import extract,comparison,validate_case,PARTS
+from runtime.driver import authorization
+from runtime.joint import verify_joint
+from runtime.joint_results import extract,comparison,validate_case,PARTS
 from inference.timing import Timeline
-from next.runtime.status_stream import observe
+from runtime.status_stream import observe
 
 def shutdown(run,job,timing):
     """Early completion signals the pre-armed guard; independently verify release."""
@@ -69,7 +69,7 @@ def consume_bundle(package,job,root,remote,metadata):
             case['recipeKey']+'; HDR SHA '+case['hdrSha256']+'</p></section>')
     (job/'comparison.html').write_text('<!doctype html><meta charset="utf-8"><h1>LightTry 整包取回</h1><p>方位坐标未校准；结构通过不等于视觉可控。角尺寸改变总能量，不能独立证明物理柔光。</p>'+''.join(sections),encoding='utf-8')
     if plan.get('version')=='direction-energy-calibration-five-v2':
-        from next.runtime.calibration import finalize
+        from runtime.calibration import finalize
         finalize(package)
     return {case['id'] for case,record in records}
 
@@ -83,11 +83,11 @@ def execute(package,config_path):
             raise ValueError('EXACT_JOINT_PACKAGE_AUTHORIZATION_REQUIRED')
         bundle=read(package/'bundle.json');data=(package/'inference-code.tar.gz').read_bytes()
         if hashlib.sha256(data).hexdigest()!=bundle['sha256']:raise ValueError('FROZEN_JOINT_ARCHIVE_CHANGED')
-        for name in ('cloud/install_bundle.py','project/next/runtime/joint_launch.py',
-            'project/next/runtime/joint_inspect.py','project/next/runtime/joint_results.py', 'project/next/runtime/joint_bundle.py',
+        for name in ('cloud/install_bundle.py','project/runtime/joint_launch.py',
+            'project/runtime/joint_inspect.py','project/runtime/joint_results.py', 'project/runtime/joint_bundle.py',
             'cloud/Retrieve-JointBundle.ps1', 'cloud/joint_bundle_bridge.py',
             'cloud/Prepare-JointWatch.ps1', 'cloud/joint_watch_bridge.py',
-            'project/next/runtime/joint_watch.py', 'project/next/runtime/status_stream.py'):
+            'project/runtime/joint_watch.py', 'project/runtime/status_stream.py'):
             if (ROOT/name).read_bytes()!=(package/'packet'/name).read_bytes():
                 raise ValueError('TRANSPORT_PROGRAM_CHANGED_REPREPARE_BEFORE_START')
         for p in (run/'inference-code.tar.gz',run/'bundle.json'):
@@ -117,7 +117,7 @@ def execute(package,config_path):
             'checkpoint_dir':settings['container_checkpoint_dir'],'cuda_home':settings['cuda_home'],'model_license_ack':True,'weights_mode':'historical_metadata'}
         # Persistent attempt BEFORE launch: unknown response must never relaunch.
         atomic(job/'launch-attempt.json',q)
-        try:call('launch','project/next/runtime/joint_launch.py',q)
+        try:call('launch','project/runtime/joint_launch.py',q)
         except ValueError:timer.emit('launch_response_uncertain_inspect_only')
         retrieved=set();root=job/'results';root.mkdir()
         spec=call('prepare_watch',value={'prep':prep,'taskId':plan['taskId'],'nonce':plan['nonce']})
@@ -144,7 +144,7 @@ def execute(package,config_path):
     finally:
         if authorized:shutdown(run,job,timing)
     if plan.get('version')=='direction-energy-calibration-five-v2':
-        from next.runtime.calibration import stage_import
+        from runtime.calibration import stage_import
         stage_import(package)
 
 if __name__=='__main__':

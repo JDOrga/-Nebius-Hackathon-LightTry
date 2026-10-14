@@ -1,10 +1,10 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-const html=readFileSync(new URL('../next/web/index.html',import.meta.url),'utf8');
-const css=readFileSync(new URL('../next/web/workbench.css',import.meta.url),'utf8');
-const work=readFileSync(new URL('../next/web/workbench.js',import.meta.url),'utf8');
-const consoleCode=readFileSync(new URL('../next/web/console.js',import.meta.url),'utf8');
+const html=readFileSync(new URL('../web/index.html',import.meta.url),'utf8');
+const css=readFileSync(new URL('../web/workbench.css',import.meta.url),'utf8');
+const work=readFileSync(new URL('../web/workbench.js',import.meta.url),'utf8');
+const consoleCode=readFileSync(new URL('../web/console.js',import.meta.url),'utf8');
 test('preview precedes full-width editing; library is a modal drawer rather than a main row',()=>{assert.ok(html.indexOf('class="preview"')<html.indexOf('id="editor"'));assert.ok(html.indexOf('</main>')<html.indexOf('id="library-drawer"'));assert.ok(css.includes('.work-grid{grid-template-columns:minmax(0,1fr)'));assert.ok(html.includes('id="open-library"'));});
 test('console has source, condition and selected properties regions using original fields',()=>{for(const section of ['console-sources','console-direction','console-properties'])assert.ok(consoleCode.includes(section));for(const field of ['zone.azimuthDeg','zone.elevationDeg','zone.strength','zone.color','zone.sizeDeg','offsetDeg','ev','strength'])assert.ok(consoleCode.includes(field));assert.ok(consoleCode.includes('data-zone'));});
 test('reset apply generate share sticky action bar and remain separate business operations',()=>{const bar=html.slice(html.indexOf('class="console-actionbar"'),html.indexOf('<details id="full-scheme-name"'));for(const id of ['reset-light','apply-light','generate','save'])assert.ok(bar.includes('id="'+id+'"'));assert.ok(css.includes('.console-actionbar{position:sticky;bottom:0'));assert.ok(work.includes("$('generate-dialog').showModal()"));assert.ok(consoleCode.includes("api('/api/lighting/normalize'"));});

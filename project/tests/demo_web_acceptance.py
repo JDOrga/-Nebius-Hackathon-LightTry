@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT/'tests'))
-import server
+import shared_http as server
 from language import LanguageError
 from language_contract import language_review
 from candidate_budget import BudgetLedger, AuthorizedAdapter, verify_candidate

@@ -11,7 +11,7 @@ import sys
 import uuid
 import time
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from inference.jobs import atomic, read
 from inference.reuse import safe_file, key
 from inference.images import digest
@@ -184,7 +184,7 @@ def _scheme_forward(args, module, timeline, state_root, validate_output):
         import inspect
         original_helper=helper;signature=inspect.signature(original_helper)
         derived=state_root/'lighting.hdr'
-        if not derived.exists():derived=Path(__file__).resolve().parents[3]/'inputs/lighting.hdr'
+        if not derived.exists():derived=Path(__file__).resolve().parents[2]/'inputs/lighting.hdr'
         if derived.is_symlink():raise ValueError('UNSAFE_DERIVED_HDR')
         if digest(derived.read_bytes())!=p['derivedHdrSha256']:raise ValueError('DERIVED_HDR_CHANGED')
         def helper(*a,**kw):

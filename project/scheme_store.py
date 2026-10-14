@@ -114,7 +114,7 @@ class SchemeStore(TaskStore):
             if (task['status']!='failed' or task.get('executionUncertain') or task.get('error',{}).get('code')!='EXECUTION_FAILED' or
                 event.get('stage')!='transferring' or event.get('executionStopped') is not True):
                 raise JobError('RECOVERY_NOT_ALLOWED','仅恢复已结束且仅取回失败的任务；超时/未知执行不反转。',409)
-            root=Path(__file__).resolve().parents[2];run=root/'cloud-runs'/recovery_run_id
+            root=Path(__file__).resolve().parents[1];run=root/'cloud-runs'/recovery_run_id
             release=read(run/'independent-stopped-release.json');beat=read(run/'heartbeat.json');binding=read(folder/'runtime-binding.json')
             proof=read(folder/'result-recovery.json');receipt=read(folder/'receipt.json');remote=proof['remoteExecution']
             if (release.get('independent_api') is not True or release.get('id')!=binding['resourceId'] or release.get('state')!='STOPPED' or

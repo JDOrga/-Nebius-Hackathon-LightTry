@@ -2,8 +2,8 @@
 import base64,contextlib,datetime,io,json,os,pathlib,subprocess,sys,tempfile,types,unittest
 from unittest.mock import patch
 ROOT=pathlib.Path(__file__).resolve().parents[2];sys.path[:0]=[str(ROOT/'project'),str(ROOT/'scripts')]
-from next.runtime.status_stream import observe
-from next.runtime.joint_watch import watch
+from runtime.status_stream import observe
+from runtime.joint_watch import watch
 PLAN={'taskId':'a'*32,'nonce':'b'*32,'cases':[{'id':'C'}]}
 class WatchTests(unittest.TestCase):
  def setup(self,t):
@@ -15,13 +15,13 @@ class WatchTests(unittest.TestCase):
  def test_one_owned_process_many_events_then_terminal(self):
   with tempfile.TemporaryDirectory() as t:
    r,j=self.setup(t)
-   with patch('next.runtime.status_stream.subprocess.Popen',wraps=subprocess.Popen) as launch:
+   with patch('runtime.status_stream.subprocess.Popen',wraps=subprocess.Popen) as launch:
     result=observe(self.spec([self.frame(),self.frame(),self.frame('succeeded',True)]),r,PLAN,__import__('time').time()+10,j)
    self.assertEqual(launch.call_count,1);self.assertEqual(result['status'],'succeeded');self.assertEqual(len((j/'watch-events.jsonl').read_text().splitlines()),3)
  def test_disconnect_no_reconnect(self):
   with tempfile.TemporaryDirectory() as t:
    r,j=self.setup(t)
-   with patch('next.runtime.status_stream.subprocess.Popen',wraps=subprocess.Popen) as launch:
+   with patch('runtime.status_stream.subprocess.Popen',wraps=subprocess.Popen) as launch:
     with self.assertRaisesRegex(ValueError,'NO_RECONNECT'):observe(self.spec([self.frame()]),r,PLAN,__import__('time').time()+10,j)
    self.assertEqual(launch.call_count,1)
  def test_wrong_task_and_watch_nonce_rejected(self):
@@ -36,13 +36,13 @@ class WatchTests(unittest.TestCase):
  def test_local_guard_missing_prevents_process(self):
   with tempfile.TemporaryDirectory() as t:
    r,j=self.setup(t);beat=json.loads((r/'heartbeat.json').read_text());beat['sleep_held']=False;(r/'heartbeat.json').write_text(json.dumps(beat))
-   with patch('next.runtime.status_stream.subprocess.Popen') as launch:
+   with patch('runtime.status_stream.subprocess.Popen') as launch:
     with self.assertRaisesRegex(ValueError,'GUARD'):observe(self.spec([]),r,PLAN,__import__('time').time()+10,j)
     launch.assert_not_called()
  def test_guard_loss_during_stream_kills_owned_process(self):
   with tempfile.TemporaryDirectory() as t:
    r,j=self.setup(t);p=r/'heartbeat.json';code="import pathlib,time,json;print("+repr(json.dumps(self.frame()))+",flush=True);p=pathlib.Path("+repr(str(p))+");q=json.loads(p.read_text());q['sleep_held']=False;p.write_text(json.dumps(q));time.sleep(20)"
-   with patch('next.runtime.status_stream.subprocess.Popen',wraps=subprocess.Popen) as launch:
+   with patch('runtime.status_stream.subprocess.Popen',wraps=subprocess.Popen) as launch:
     with self.assertRaisesRegex(ValueError,'GUARD'):observe({'executable':sys.executable,'arguments':['-u','-c',code],'watchNonce':'c'*32},r,PLAN,__import__('time').time()+10,j)
     self.assertEqual(launch.call_count,1)
  def test_fixed_deadline_kills_no_retry(self):
@@ -60,13 +60,13 @@ class WatchTests(unittest.TestCase):
  def test_expired_deadline_never_starts_connection(self):
   with tempfile.TemporaryDirectory() as t:
    r,j=self.setup(t)
-   with patch('next.runtime.status_stream.subprocess.Popen') as launch:
+   with patch('runtime.status_stream.subprocess.Popen') as launch:
     with self.assertRaisesRegex(TimeoutError,'DEADLINE'):observe(self.spec([]),r,PLAN,__import__('time').time()-1,j)
     launch.assert_not_called()
  def test_native_prepare_offline_once_and_no_ssh(self):
   import shutil
   with tempfile.TemporaryDirectory() as t:
-   t=pathlib.Path(t);cloud=t/'cloud';cloud.mkdir();run=t/'cloud-runs'/('d'*32);run.mkdir(parents=True);source=t/'project/next/runtime';source.mkdir(parents=True)
+   t=pathlib.Path(t);cloud=t/'cloud';cloud.mkdir();run=t/'cloud-runs'/('d'*32);run.mkdir(parents=True);source=t/'project/runtime';source.mkdir(parents=True)
    shutil.copyfile(ROOT/'cloud/Prepare-JointWatch.ps1',cloud/'Prepare-JointWatch.ps1');(cloud/'remote_probe.py').write_text('pass');(cloud/'joint_watch_bridge.py').write_text('pass');(source/'joint_watch.py').write_text('pass')
    now=datetime.datetime.now(datetime.timezone.utc)
    values={'host-trust.json':{'user_confirmed':True,'vm_id':'vm-fixture','ip':'127.0.0.1','pin_path':'pin'},'heartbeat.json':{'offline':False,'sleep_held':True,'stopped_verified':False,'supervision_stop_latched':False,'utc':now.isoformat(),'pid':os.getpid()},'launch.json':{'offline':False,'single_run':True,'budget_usd_including_tax':3,'approval_reference':'OFFLINE','deadline_utc':(now+datetime.timedelta(minutes=10)).isoformat()},'timing.json':{'work_deadline_utc':(now+datetime.timedelta(minutes=8)).isoformat()},'live-settings.json':{'known_hosts_path':'pin','container_python':'python'},'request.json':{'prep':'/home/jovyan/preview-'+'d'*32,'taskId':PLAN['taskId'],'nonce':PLAN['nonce']}}

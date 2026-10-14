@@ -221,12 +221,3 @@ class Handler(BaseHTTPRequestHandler):
             # A canceled browser recommendation may finish after disconnect.
             # Do not turn it into a second HTTP error write or a traceback.
             self.close_connection = True
-
-
-
-if __name__ == '__main__':
-    # Compatibility CLI uses the same studio/identity store; legacy Handler remains shared.
-    import runpy
-    if '--language-service' in sys.argv:
-        raise SystemExit('旧 --language-service 已停用；请使用 next/server.py 的显式文字配置。')
-    runpy.run_path(str(ROOT / 'start_studio.py'), run_name='__main__')

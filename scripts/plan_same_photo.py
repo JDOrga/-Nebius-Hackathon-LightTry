@@ -21,7 +21,7 @@ def plan(task_id, preset_ids, cold=False):
     request = read(safe_file(source, 'request.json'))
     value = identity(request, safe_file(source, 'inputs/photo.png').read_bytes(),
                      read(ROOT / 'manifests/weights_manifest.json'), read(ROOT / 'manifests/patch_manifest.json'))
-    registry = ROOT / 'project/.inverse-cache' / key(value)
+    registry = ROOT / '.local/state/inverse-cache' / key(value)
     reusable = None
     if not cold and registry.exists():
         try: reusable = validate(registry, value)['source']

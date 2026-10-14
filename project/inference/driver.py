@@ -54,7 +54,10 @@ def authorization(config_path):
     return run, config, read(run / 'live-settings.json'), timing, deadline
 
 
-def build_bundle(job, run, config=None):
+
+def build_bundle(job, run, config=None, *, root=None, bundle_files=None, include_derived_hdr=False):
+    root = ROOT if root is None else root
+    bundle_files = BUNDLE_FILES if bundle_files is None else bundle_files
     request = read(job / 'request.json')
     payload = (job / 'inputs/photo.png').read_bytes()
     if digest(payload) != request['input']['sha256']:
@@ -65,9 +68,9 @@ def build_bundle(job, run, config=None):
     entries = []
     references = {}
     from inference.reuse import identity, key, validate, safe_file
-    value = identity(request, payload, read(ROOT / 'manifests/weights_manifest.json'),
-                     read(ROOT / 'manifests/patch_manifest.json'))
-    cached = ROOT / 'project/.inverse-cache' / key(value)
+    value = identity(request, payload, read(root / 'manifests/weights_manifest.json'),
+                     read(root / 'manifests/patch_manifest.json'))
+    cached = root / '.local/state/inverse-cache' / key(value)
     reusable = None
     if (config or {}).get('reuse_inverse', True) and cached.exists():
         try:
@@ -90,7 +93,7 @@ def build_bundle(job, run, config=None):
         from inference.weights_reuse import validate_reference
         paths = [Path(config[key]).resolve() for key in
                  ('historical_weights_manifest', 'historical_weights_receipt', 'historical_weights_reference')]
-        validate_reference(ROOT / 'manifests/weights_manifest.json', *paths)
+        validate_reference(root / 'manifests/weights_manifest.json', *paths)
         references['weight-reference/manifest.json'] = paths[0].read_bytes()
         references['weight-reference/receipt.json'] = paths[1].read_bytes()
         ref = read(paths[2])
@@ -102,8 +105,8 @@ def build_bundle(job, run, config=None):
             info = tarfile.TarInfo(name); info.size = len(data)
             tar.addfile(info, io.BytesIO(data))
             entries.append({'path': name, 'sha256': digest(data)})
-        for rel in BUNDLE_FILES:
-            path = ROOT / rel
+        for rel in bundle_files:
+            path = root / rel
             if path.is_symlink():
                 raise ValueError('SYMLINK_FORBIDDEN')
             add(rel, path.read_bytes())
@@ -112,6 +115,12 @@ def build_bundle(job, run, config=None):
         minimal['input'] = {k: v for k, v in request['input'].items() if k not in ('name', 'url', 'originalUrl')}
         add('request.json', json.dumps(minimal).encode())
         add('inputs/photo.png', payload)
+        if include_derived_hdr and request['preset'].get('derivedHdrSha256'):
+            from light_console import sha
+            data = (job/'inputs/lighting.hdr').read_bytes()
+            if sha(data) != request['preset']['derivedHdrSha256']:
+                raise ValueError('DERIVED_HDR_CHANGED')
+            add('inputs/lighting.hdr', data)
         for name, data in references.items():
             add(name, data)
         info = tarfile.TarInfo('bundle_contents.json')
@@ -121,13 +130,16 @@ def build_bundle(job, run, config=None):
                                'sha256': digest(archive.read_bytes())})
 
 
-def bind_prepared_bundle(job, run, config):
+
+def bind_prepared_bundle(job, run, config, *, root=None, bundle_files=None):
+    root = ROOT if root is None else root
+    bundle_files = BUNDLE_FILES if bundle_files is None else bundle_files
     """Bind a locally frozen reviewed package to a NEW approved run; no rebuild."""
     import shutil
     from inference.reuse import identity, key, validate, safe_file
     from inference.weights_reuse import validate_reference
     source = Path(config['prepared_bundle_directory']).resolve()
-    if not source.is_relative_to(ROOT / '.local'):
+    if not source.is_relative_to(root / '.local'):
         raise ValueError('LOCAL_PREPARED_PACKAGE_REQUIRED')
     archive = safe_file(source, 'inference-code.tar.gz')
     fingerprint = digest(archive.read_bytes())
@@ -149,18 +161,18 @@ def bind_prepared_bundle(job, run, config):
         raise ValueError('PREPARED_CONTENTS_MISMATCH')
     if json.loads(files['request.json']) != minimal or files['inputs/photo.png'] != (job / 'inputs/photo.png').read_bytes():
         raise ValueError('PREPARED_TASK_INPUT_MISMATCH')
-    for name in BUNDLE_FILES:
-        if files.get(name) != (ROOT / name).read_bytes():
+    for name in bundle_files:
+        if files.get(name) != (root / name).read_bytes():
             raise ValueError('PREPARED_CODE_CHANGED_REPREPARE_BEFORE_START')
     paths = [Path(config[k]).resolve() for k in ('historical_weights_manifest', 'historical_weights_receipt', 'historical_weights_reference')]
-    validate_reference(ROOT / 'manifests/weights_manifest.json', *paths)
+    validate_reference(root / 'manifests/weights_manifest.json', *paths)
     reference = read(paths[2])
     reference = {k: reference[k] for k in ('weights_manifest_sha256', 'receipt_sha256', 'historical_run_id')}
     if (config.get('weights_mode') != 'historical_metadata' or files['weight-reference/manifest.json'] != paths[0].read_bytes() or
             files['weight-reference/receipt.json'] != paths[1].read_bytes() or json.loads(files['weight-reference/reference.json']) != reference):
         raise ValueError('PREPARED_WEIGHT_POLICY_MISMATCH')
-    value = identity(request, files['inputs/photo.png'], read(ROOT / 'manifests/weights_manifest.json'), read(ROOT / 'manifests/patch_manifest.json'))
-    cached = ROOT / 'project/.inverse-cache' / key(value)
+    value = identity(request, files['inputs/photo.png'], read(root / 'manifests/weights_manifest.json'), read(root / 'manifests/patch_manifest.json'))
+    cached = root / '.local/state/inverse-cache' / key(value)
     record = validate(cached, value)
     requirement = request['requiredInverseReuse']
     if requirement != {'key': key(value), 'source': record['source']} or json.loads(files['reuse-inverse/inverse-complete.json']) != record:
@@ -176,13 +188,15 @@ def bind_prepared_bundle(job, run, config):
     atomic(run / 'bundle.json', {'archive': target.name, 'archive_path': str(target), 'sha256': fingerprint})
 
 
-def extract_result(archive, destination, *, require_gbuffers=False):
+
+def extract_result(archive, destination, *, require_gbuffers=False, extra_audit=()):
     # Never extract arbitrary paths or intermediate historical files. Fixed names only.
     expected = {'result.jpg', 'receipt.json', 'execution.json'}
     audit = {'configuration.json', 'weights_verification.json', 'inverse_acceptance.json',
              'preflight.json', 'inverse.log', 'forward.log', 'preflight.log',
              'inverse/inverse-complete.json', 'inverse-timing.jsonl', 'forward-timing.jsonl',
              'orchestration-timing.jsonl', 'worker-timing.jsonl'}
+    audit.update(extra_audit)
     with tarfile.open(archive, 'r:gz') as tar:
         files = {}
         total = 0
@@ -247,7 +261,9 @@ def extract_result(archive, destination, *, require_gbuffers=False):
         return json.loads(files['execution.json'])
 
 
-def extract_stage_evidence(archive, destination, request):
+
+def extract_stage_evidence(archive, destination, request, *, root=None):
+    root = ROOT if root is None else root
     """Retain completed stages even when a later forward failed. Never publish a result."""
     from inference.reuse import identity, key, validate, copy_completed
     fixed = {'configuration.json', 'weights_verification.json', 'inverse_acceptance.json',
@@ -295,10 +311,10 @@ def extract_stage_evidence(archive, destination, request):
     source = evidence / 'inverse'
     if (source / 'inverse-complete.json').exists():
         value = identity(request, (destination / 'inputs/photo.png').read_bytes(),
-                         read(ROOT / 'manifests/weights_manifest.json'), read(ROOT / 'manifests/patch_manifest.json'))
+                         read(root / 'manifests/weights_manifest.json'), read(root / 'manifests/patch_manifest.json'))
         record = validate(source, value)
-        target = ROOT / 'project/.inverse-cache' / key(value)
-        target.parent.mkdir(exist_ok=True)
+        target = root / '.local/state/inverse-cache' / key(value)
+        target.parent.mkdir(parents=True, exist_ok=True)
         if record['source']['taskId'] == request['taskId']:
             if record['source']['nonce'] != request['nonce']:
                 raise ValueError('INVERSE_SOURCE_NONCE_MISMATCH')
@@ -313,6 +329,7 @@ def extract_stage_evidence(archive, destination, request):
             copy_completed(source, target, value)
         return record
     return None
+
 
 
 def run_driver(job, config_path):
@@ -464,6 +481,7 @@ def run_driver(job, config_path):
                     event['status'] == 'succeeded' else 'unsafe or unresolved execution failure'})
         except (KeyError, OSError, ValueError):
             pass
+
 
 
 if __name__ == '__main__':

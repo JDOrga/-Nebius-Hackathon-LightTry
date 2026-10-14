@@ -2,7 +2,7 @@
 import io,json,sys,tarfile,tempfile,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT/'project'))
-from next.runtime.export_product_chunks import payload,combine,PARTS
+from runtime.export_product_chunks import payload,combine,PARTS
 class ProductChunkTests(unittest.TestCase):
  def test_exact_union_keeps_proof_gbuffers_canonical_not_duplicate_or_tensor(self):
   with tempfile.TemporaryDirectory() as tmp:

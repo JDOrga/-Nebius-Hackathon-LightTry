@@ -98,3 +98,6 @@ dist/
 /scripts/verify_local.py
 /tests/test_lifecycle_adapter.py
 /tests/test_runtime_speed.py
+
+# Stable product state/configuration lives under the already ignored .local/.
+/.structure-cleanup-tmp/

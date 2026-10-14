@@ -1,0 +1,206 @@
+{
+  "project/docs/CALIBRATION_FIVE_20261013.md": {
+    "path": "docs/history/product/CALIBRATION_FIVE_20261013.md",
+    "sha256": "b5dd7fa7cc41d9d289f40db2fe1a6fb1672086fd86dedb381be2030908d374ee"
+  },
+  "project/docs/CONTROL_EXPERIMENT_20261011.md": {
+    "path": "docs/history/product/CONTROL_EXPERIMENT_20261011.md",
+    "sha256": "6be1c65f2396f6f33ff6cc020a901fb49f262a4ed9692bdd21105839448177c7"
+  },
+  "project/docs/DELIVERY_BOUNDARIES.md": {
+    "path": "docs/history/product/DELIVERY_BOUNDARIES.md",
+    "sha256": "ab9fa93dcfc152117eb217cbf43ffbdbfb5a143db1650bf7539ad7059f1f15d1"
+  },
+  "project/docs/DELIVERY_FILES.md": {
+    "path": "docs/history/product/DELIVERY_FILES.md",
+    "sha256": "c72eb5e6d70bdcf9d90be8b3b860320b03e34a71cc26943a57b134a9a8618b1e"
+  },
+  "project/docs/DEMO_ASSET_LICENSES.md": {
+    "path": "docs/history/product/DEMO_ASSET_LICENSES.md",
+    "sha256": "a3098c67d1f0004a119c276f936c996be52633162066b4a266d75bd67ad2b293"
+  },
+  "project/docs/DEMO_CANDIDATE_BASELINE_20261010.md": {
+    "path": "docs/history/product/DEMO_CANDIDATE_BASELINE_20261010.md",
+    "sha256": "5163be94d850494c5df521c07f667277a922d14e351003aac016603d14e503aa"
+  },
+  "project/docs/DEMO_HANDOFF_20261010.md": {
+    "path": "docs/history/product/DEMO_HANDOFF_20261010.md",
+    "sha256": "af685340e525f689b8de3d7fdc8a5fafdf926fdf871ce58e3399c22c71d99308"
+  },
+  "project/docs/HOST_VALIDATION_FIX_20261010.md": {
+    "path": "docs/history/product/HOST_VALIDATION_FIX_20261010.md",
+    "sha256": "d667bc412abea917ab6f73b3a378e52507f353900845202d2431108be5b29a90"
+  },
+  "project/docs/INFERENCE_INTERFACE.md": {
+    "path": "docs/history/product/INFERENCE_INTERFACE.md",
+    "sha256": "118e831b12d2b09f71d74c7be0c69933fbfe614ab9590e8176b4f5bad76b9e8f"
+  },
+  "project/docs/INFERENCE_READINESS.md": {
+    "path": "docs/history/product/INFERENCE_READINESS.md",
+    "sha256": "a9dc88a90205c1c312dbe8e03248db64f324557b3b9cd96ee6b882721844fe7f"
+  },
+  "project/docs/JOINT_READINESS_20261012.md": {
+    "path": "docs/history/product/JOINT_READINESS_20261012.md",
+    "sha256": "229e19c79ccfdb77f88cddc596fddb598d0293287ca42e7466368cc3a46d01c5"
+  },
+  "project/docs/LANGUAGE_ACCEPTANCE_20261010.md": {
+    "path": "docs/history/product/LANGUAGE_ACCEPTANCE_20261010.md",
+    "sha256": "4ca7dad6a8a64e0fda7fdae7669eeb1ac1f0e0eb6c434b7879362a66c980b654"
+  },
+  "project/docs/LANGUAGE_AUTHORIZED_R2_20261011.md": {
+    "path": "docs/history/product/LANGUAGE_AUTHORIZED_R2_20261011.md",
+    "sha256": "8e827e158f1f8fe1b698d8e51f5a0ab9931b89da29201552a2933f39d2ac14a8"
+  },
+  "project/docs/LANGUAGE_CANDIDATE_20261011.json": {
+    "path": "docs/history/product/LANGUAGE_CANDIDATE_20261011.json",
+    "sha256": "f5802cb45b7428c13d80216394d3f1d9698c8845f3704a95338e9c501063ddc3"
+  },
+  "project/docs/LANGUAGE_CANDIDATE_20261011_DEMO.json": {
+    "path": "docs/history/product/LANGUAGE_CANDIDATE_20261011_DEMO.json",
+    "sha256": "5c5b69339ecf21d9729309c8c2c44d93df385eefe8766c8ff1ed1afb9966ff61"
+  },
+  "project/docs/LANGUAGE_CANDIDATE_20261011_R2.json": {
+    "path": "docs/history/product/LANGUAGE_CANDIDATE_20261011_R2.json",
+    "sha256": "8a73a4513e0d1648e73ab52f2869affaff668f239f1cd424f77d4fea5eae7b18"
+  },
+  "project/docs/LANGUAGE_CONTROL_20261010.md": {
+    "path": "docs/history/product/LANGUAGE_CONTROL_20261010.md",
+    "sha256": "a7a2a495354c9a15471e35dca8ab17a1d127200f24ec5e102fc896f73cf44181"
+  },
+  "project/docs/LANGUAGE_DEMO_PREPARATION_20261011.md": {
+    "path": "docs/history/product/LANGUAGE_DEMO_PREPARATION_20261011.md",
+    "sha256": "90c4f0655bcfdb41527faa12fd16b6259f82f1e0d94b4b2fb45a9ab2eac08305"
+  },
+  "project/docs/LANGUAGE_DEMO_REAL_RESULT_20261011.md": {
+    "path": "docs/history/product/LANGUAGE_DEMO_REAL_RESULT_20261011.md",
+    "sha256": "3dc1381346209815879bcc0dc0f2886392c7bd34e1f4d656e00a28f2b68f2458"
+  },
+  "project/docs/LANGUAGE_DEMO_WEB_ACCEPTANCE_20261011.md": {
+    "path": "docs/history/product/LANGUAGE_DEMO_WEB_ACCEPTANCE_20261011.md",
+    "sha256": "2b23d3c29e3842cb3adb85e38f3b6b1f6c622e5e6407369e4a75a285d4524d13"
+  },
+  "project/docs/LANGUAGE_LOCAL_CLOSEOUT_20261011.md": {
+    "path": "docs/history/product/LANGUAGE_LOCAL_CLOSEOUT_20261011.md",
+    "sha256": "966e9fa90ad179bc3a8c28207b8ab0de4353e86af3c38db75c4ee36546c8bfa8"
+  },
+  "project/docs/LANGUAGE_NEXT_ACCEPTANCE_20261011.md": {
+    "path": "docs/history/product/LANGUAGE_NEXT_ACCEPTANCE_20261011.md",
+    "sha256": "53cadd3cde3fc791f7364c40e018ac5461e972f4a3ca638e31bee7d1aaa01586"
+  },
+  "project/docs/LANGUAGE_PROTOCOL_INVESTIGATION_20261011.md": {
+    "path": "docs/history/product/LANGUAGE_PROTOCOL_INVESTIGATION_20261011.md",
+    "sha256": "5ca0ec95175338ebefd4fa9318ab31de7b9301cc98d62156a37f79d6cc545016"
+  },
+  "project/docs/LANGUAGE_R2_REAL_RESULT_20261011.md": {
+    "path": "docs/history/product/LANGUAGE_R2_REAL_RESULT_20261011.md",
+    "sha256": "6dbbd90e4b8db32ed893b104ca940fca29978bd145bc8c331f026d39436aacad"
+  },
+  "project/docs/LANGUAGE_REAL_ACCEPTANCE_20261011.md": {
+    "path": "docs/history/product/LANGUAGE_REAL_ACCEPTANCE_20261011.md",
+    "sha256": "2aff6fae286f44c9651c51c3cf72c7231ac6b742743fa4e2f258a848af674b94"
+  },
+  "project/docs/LANGUAGE_REAL_SUMMARY_20261011.md": {
+    "path": "docs/history/product/LANGUAGE_REAL_SUMMARY_20261011.md",
+    "sha256": "c06c45e6b4c1c1fb205759d1507a60d2e77b89f574fcdbfd038d436ebb7a8dc3"
+  },
+  "project/docs/LIGHTING_SCHEME_V1.md": {
+    "path": "docs/history/product/LIGHTING_SCHEME_V1.md",
+    "sha256": "f4cd6b70bf3650939a338a3599299b9ff0e27061e196fa11fcc032ef5974f18a"
+  },
+  "project/docs/LIGHTTRY_DELIVERY_20261011.md": {
+    "path": "docs/history/product/LIGHTTRY_DELIVERY_20261011.md",
+    "sha256": "3fe308d2e68d27d3b72b5b3272a0f6820f8981f7f11427c4054792b5dc434bea"
+  },
+  "project/docs/LIGHT_CONSOLE_20261012.md": {
+    "path": "docs/history/product/LIGHT_CONSOLE_20261012.md",
+    "sha256": "ddd2486c5e8d04f0ca75e6eb1f8475d80a365d39e3710831525a8d66a5a28b7a"
+  },
+  "project/docs/LOCAL_DEMO_MIGRATION.md": {
+    "path": "docs/history/product/LOCAL_DEMO_MIGRATION.md",
+    "sha256": "b831911a45bcee5e8ef758b3cd1a268e1d1843b36b7f7614c9cf6dd7e74baa60"
+  },
+  "project/docs/PRODUCT_BATCH_ACCEPTANCE_20261010.md": {
+    "path": "docs/history/product/PRODUCT_BATCH_ACCEPTANCE_20261010.md",
+    "sha256": "f4ec3ce45379a504315b0579403b1860fcdd0db91a17ed7f76b64c19a64a84ec"
+  },
+  "project/docs/REUSE_BENCHMARK_PRESTART.md": {
+    "path": "docs/history/product/REUSE_BENCHMARK_PRESTART.md",
+    "sha256": "6d829d386206d0f16beb91d8130b6883a407bb942b6f3030351b1f3ffc5530bd"
+  },
+  "project/docs/REUSE_BENCHMARK_RESULT_20261010.md": {
+    "path": "docs/history/product/REUSE_BENCHMARK_RESULT_20261010.md",
+    "sha256": "6092b32ed23cf34404db157ce22aff65be4933ebdda3eeab42da95a8f74c9fdd"
+  },
+  "project/docs/REUSE_PREPARATION.md": {
+    "path": "docs/history/product/REUSE_PREPARATION.md",
+    "sha256": "5627077983340641af859d87154984d5cf5c58416b284c553b8019c2287ab6b2"
+  },
+  "project/docs/STUDIO_CHAT_20261012.md": {
+    "path": "docs/history/product/STUDIO_CHAT_20261012.md",
+    "sha256": "cd4774fa633d1f96ce7d0a2540c7d715c1e64eeb434d47a7b542b32bcfa90ec7"
+  },
+  "project/docs/STUDIO_INTEGRATION_20261011.md": {
+    "path": "docs/history/product/STUDIO_INTEGRATION_20261011.md",
+    "sha256": "c1bdecf7571fa0af4c3d5918d28a57918140b7da43bb8c4d535877fa3a01dae0"
+  },
+  "project/docs/WEB_BATCH_ACCEPTANCE_RETRY2_20261010.md": {
+    "path": "docs/history/product/WEB_BATCH_ACCEPTANCE_RETRY2_20261010.md",
+    "sha256": "c6fe7b31f5c878a78b3cf71be76f1fb63f5c4c29a5ffb4da56916db725b2b9b3"
+  },
+  "project/docs/WEB_BATCH_PRESTART_20261010.md": {
+    "path": "docs/history/product/WEB_BATCH_PRESTART_20261010.md",
+    "sha256": "9fd82f5b754b06519bec0aec49d5532e5493486ee4c520cf4a38ca56bd17a26e"
+  },
+  "project/docs/WEB_BATCH_RESULT_20261010.md": {
+    "path": "docs/history/product/WEB_BATCH_RESULT_20261010.md",
+    "sha256": "94d52529679ce7b59e4f015c077bdc146f23dee3c29359b308a81343d11db551"
+  },
+  "project/DEVELOPMENT.md": {
+    "path": "docs/history/product/project-DEVELOPMENT.md",
+    "sha256": "c86c5c862269f448669228c144cab868611d7dd11e5eaad575b81318e5462dfa"
+  },
+  "project/next/README.md": {
+    "path": "docs/history/product/project-next-README.md",
+    "sha256": "bf69d87af1bc1a6be09606d90482e46400f36f4104ffdb2fdfd45f8c47920dd7"
+  },
+  "project/README.md": {
+    "path": "docs/history/product/project-README.md",
+    "sha256": "f6a6d581a37bf916e34dcd5ba7235f4603523cdf3c9d4782d2f9189c480799f2"
+  },
+  "docs/ARCHITECTURE.md": {
+    "path": "docs/history/platform/ARCHITECTURE.md",
+    "sha256": "291e8f9dfaa3e14c9151cdcf5e5c7d0085a7c43a48b8a319c088fda190ae9899"
+  },
+  "docs/CANDIDATES.md": {
+    "path": "docs/history/platform/CANDIDATES.md",
+    "sha256": "efcf73a123a7326381237bb976d5e9b00f463b8b7b064c14d995e2f5d3ff579a"
+  },
+  "docs/CLOUD.md": {
+    "path": "docs/history/platform/CLOUD.md",
+    "sha256": "95ac1d065da8a0c44ca29d9201a177253ecf98a17c1479464190ef327fe80df9"
+  },
+  "docs/DEPENDENCIES.md": {
+    "path": "docs/history/platform/DEPENDENCIES.md",
+    "sha256": "68dc2c639d25d5dc6828d8019c62ca3a0e24d309d00fb20f925f5eea49ab1750"
+  },
+  "docs/MIGRATION.md": {
+    "path": "docs/history/platform/MIGRATION.md",
+    "sha256": "113c40aefdb7e827ce9557801a860e20e667e42a0e2190a58d4187cd2ec44fff"
+  },
+  "docs/THIRD_PARTY.md": {
+    "path": "docs/history/platform/THIRD_PARTY.md",
+    "sha256": "120bffaccef3a123b0a8b425cac27a8edcb89510d722444767eb513ea4e18361"
+  },
+  "docs/TROUBLESHOOTING.md": {
+    "path": "docs/history/platform/TROUBLESHOOTING.md",
+    "sha256": "ccddb71e9b8abecab5601d9a910e59e982e8aac9aa73b73dc05896e5c62bf2e9"
+  },
+  "docs/VALIDATION.md": {
+    "path": "docs/history/platform/VALIDATION.md",
+    "sha256": "fc2b00f980bd1515cf86d7802cdae4d8e257b900a252fc7c06f34b4838cf08d0"
+  },
+  "README.md": {
+    "path": "docs/history/platform/README-before-cleanup.md",
+    "sha256": "ca259fcd289f53be6fb8a95e4631f0e185f03e99c5a2e2b1593de11f54b20466"
+  }
+}

@@ -10,15 +10,15 @@ import types
 import unittest
 from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from next.runtime import joint
-from next.runtime.joint_language import semantic,verify_applied
-from next.runtime.joint_results import payload,extract,validate_case
+from runtime import joint
+from runtime.joint_language import semantic,verify_applied
+from runtime.joint_results import payload,extract,validate_case
 from inference.jobs import atomic,read
 from inference.timing import Timeline
 from light_console import synthesize,encode_hdr,initial,preprocessing_parameters
 from lighting import identity
 
-ENVS={e['id']:e for e in read(Path(__file__).resolve().parents[1]/'next/runtime/environments.json')}
+ENVS={e['id']:e for e in read(Path(__file__).resolve().parents[1]/'runtime/environments.json')}
 
 class MatrixTests(unittest.TestCase):
     def test_single_factors(self):
@@ -130,7 +130,7 @@ class SessionTests(unittest.TestCase):
         self.run_session();shutil.copyfile(self.prep/'timing.jsonl',self.prep/'run/forward-timing.jsonl')
         package=self.prep/'package';packet=package/'packet';packet.mkdir(parents=True)
         atomic(packet/'joint.json',self.plan)
-        for name in ('cloud/install_bundle.py','project/next/runtime/joint_launch.py','project/next/runtime/joint_inspect.py','project/next/runtime/joint_results.py'):
+        for name in ('cloud/install_bundle.py','project/runtime/joint_launch.py','project/runtime/joint_inspect.py','project/runtime/joint_results.py'):
             dst=packet/name;dst.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(repo/name,dst)
         data=b'EXPLICIT_OFFLINE_SYNTHETIC_ARCHIVE';(package/'inference-code.tar.gz').write_bytes(data)
         digest=hashlib.sha256(data).hexdigest();atomic(package/'bundle.json',{'sha256':digest,'archive':'inference-code.tar.gz'})

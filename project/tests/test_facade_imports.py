@@ -1,7 +1,7 @@
 import sys,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT/'project'))
-from next.runtime.worker import install_legacy_imports
+from runtime.worker import install_legacy_imports
 class FacadeImportTests(unittest.TestCase):
  def test_standalone_legacy_import_resolves_exact_bundled_module(self):
   from inference import weights_reuse

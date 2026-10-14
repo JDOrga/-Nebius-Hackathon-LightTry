@@ -9,9 +9,9 @@ import sys
 import time
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'project'))
 from inference.jobs import atomic,read
-from next.runtime.driver import authorization
-from next.runtime.joint import verify_joint
-from next.runtime.joint_results import extract,comparison,validate_case,PARTS
+from runtime.driver import authorization
+from runtime.joint import verify_joint
+from runtime.joint_results import extract,comparison,validate_case,PARTS
 from inference.timing import Timeline
 
 def shutdown(run,job,timing):
@@ -47,8 +47,8 @@ def execute(package,config_path):
             raise ValueError('EXACT_JOINT_PACKAGE_AUTHORIZATION_REQUIRED')
         bundle=read(package/'bundle.json');data=(package/'inference-code.tar.gz').read_bytes()
         if hashlib.sha256(data).hexdigest()!=bundle['sha256']:raise ValueError('FROZEN_JOINT_ARCHIVE_CHANGED')
-        for name in ('cloud/install_bundle.py','project/next/runtime/joint_launch.py',
-            'project/next/runtime/joint_inspect.py','project/next/runtime/joint_results.py'):
+        for name in ('cloud/install_bundle.py','project/runtime/joint_launch.py',
+            'project/runtime/joint_inspect.py','project/runtime/joint_results.py'):
             if (ROOT/name).read_bytes()!=(package/'packet'/name).read_bytes():
                 raise ValueError('TRANSPORT_PROGRAM_CHANGED_REPREPARE_BEFORE_START')
         for p in (run/'inference-code.tar.gz',run/'bundle.json'):
@@ -76,17 +76,17 @@ def execute(package,config_path):
             'checkpoint_dir':settings['container_checkpoint_dir'],'cuda_home':settings['cuda_home'],'model_license_ack':True,'weights_mode':'historical_metadata'}
         # Persistent attempt BEFORE launch: unknown response must never relaunch.
         atomic(job/'launch-attempt.json',q)
-        try:call('launch','project/next/runtime/joint_launch.py',q)
+        try:call('launch','project/runtime/joint_launch.py',q)
         except ValueError:timer.emit('launch_response_uncertain_inspect_only')
         retrieved=set();root=job/'results';root.mkdir()
         while True:
-            remote=call('inspect','project/next/runtime/joint_inspect.py',{'prep':prep})
+            remote=call('inspect','project/runtime/joint_inspect.py',{'prep':prep})
             if (remote['taskId'],remote['nonce'])!=(plan['taskId'],plan['nonce']):raise ValueError('REMOTE_JOINT_IDENTITY_MISMATCH')
             atomic(job/'last-observed.json',remote)
             for name in remote['completed']:
                 if name in retrieved:continue
                 part=next(p for p,n in PARTS.items() if n==name)
-                metadata=call('export_control_chunk','project/next/runtime/joint_results.py',{'root':prep+'/run','data_root':settings['container_data_dir'],'part':part},part=part)
+                metadata=call('export_control_chunk','project/runtime/joint_results.py',{'root':prep+'/run','data_root':settings['container_data_dir'],'part':part},part=part)
                 atomic(job/('export-'+part+'.json'),metadata)
                 call('download_control_chunk',flag='-DownloadResults',part=part)
                 archive=run/('control-canonical-'+run.name+'-'+part+'.tar.gz')
@@ -96,7 +96,7 @@ def execute(package,config_path):
                 atomic(job/(name+'-retrieval.json'),record);retrieved.add(name)
                 comparison(package/'packet',job/'comparison.html',root)
             if remote['status'] in ('succeeded','failed'):
-                metadata=call('export_control_chunk','project/next/runtime/joint_results.py',{'root':prep+'/run','data_root':settings['container_data_dir'],'part':'metadata'},part='metadata')
+                metadata=call('export_control_chunk','project/runtime/joint_results.py',{'root':prep+'/run','data_root':settings['container_data_dir'],'part':'metadata'},part='metadata')
                 call('download_control_chunk',flag='-DownloadResults',part='metadata')
                 extract(run/('control-canonical-'+run.name+'-metadata.tar.gz'),root,metadata['sha256'])
                 if remote['status']=='failed':raise ValueError('JOINT_WORKER_FAILED_PREVIOUS_COMPLETED_RESULTS_PRESERVED')

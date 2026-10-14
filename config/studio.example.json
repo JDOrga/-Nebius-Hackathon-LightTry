@@ -1,0 +1,5 @@
+{
+  "assets_dir": "project/demo-assets",
+  "tasks_dir": ".local/state/tasks",
+  "accepted_packages": []
+}

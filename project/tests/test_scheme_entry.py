@@ -2,7 +2,7 @@ import io,json,sys,tempfile,unittest
 from pathlib import Path
 from types import SimpleNamespace
 ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT/'project'))
-from next.runtime import entry
+from runtime import entry
 from inference.jobs import atomic,read
 from inference.timing import Timeline
 from inference.batch import validate_forward_result
@@ -12,7 +12,7 @@ class SchemeEntryTests(unittest.TestCase):
   import torch
   from PIL import Image
   torch.set_num_threads(2)
-  envs={v['id']:v for v in read(ROOT/'project/next/runtime/environments.json')};policy=read(ROOT/'project/next/runtime/policy.json')
+  envs={v['id']:v for v in read(ROOT/'project/runtime/environments.json')};policy=read(ROOT/'project/runtime/policy.json')
   for offset,strength in [(0,1),(0,.7),(45,1)]:
    with self.subTest(offset=offset,strength=strength),tempfile.TemporaryDirectory() as tmp:
     root=Path(tmp);state=root/'presets';state.mkdir();raw={'environmentId':'sunny','offsetDeg':offset,'strength':strength};atomic(state/'identities.json',{'0':{'hdr':{'scheme':{'parameters':raw},'parameters':normalize_parameters(raw,envs,policy)}}})

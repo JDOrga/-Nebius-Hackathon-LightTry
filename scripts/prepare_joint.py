@@ -12,8 +12,8 @@ import uuid
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'project'))
 from inference.jobs import atomic,read
-from next.runtime.driver import BUNDLE_FILES
-from next.runtime.joint import matrix,changes,energy,VERSION,verify_joint
+from runtime.driver import BUNDLE_FILES
+from runtime.joint import matrix,changes,energy,VERSION,verify_joint
 from experiments.worker import verify_packet
 from light_console import synthesize,encode_hdr,decode_hdr
 from lighting import identity
@@ -38,17 +38,17 @@ def prepare(output, applied=None):
     historical=verify_packet(source)
     for name in ('proof','inverse','inputs','weight-reference'):
         shutil.copytree(source/name,packet/name)
-    names=set(BUNDLE_FILES)|{'project/experiments/worker.py','project/next/runtime/joint.py',
-        'project/next/runtime/joint_entry.py','project/next/runtime/joint_worker.py',
-        'project/next/runtime/joint_launch.py','project/next/runtime/joint_inspect.py',
-        'project/next/runtime/joint_results.py','project/next/runtime/joint_bundle.py','project/next/runtime/key_unknowns.py','project/next/runtime/calibration.py','project/next/runtime/joint_watch.py','project/next/runtime/status_stream.py','cloud/Prepare-JointWatch.ps1','cloud/joint_watch_bridge.py','cloud/Retrieve-JointBundle.ps1','cloud/joint_bundle_bridge.py','cloud/install_bundle.py'}
+    names=set(BUNDLE_FILES)|{'project/experiments/worker.py','project/runtime/joint.py',
+        'project/runtime/joint_entry.py','project/runtime/joint_worker.py',
+        'project/runtime/joint_launch.py','project/runtime/joint_inspect.py',
+        'project/runtime/joint_results.py','project/runtime/joint_bundle.py','project/runtime/key_unknowns.py','project/runtime/calibration.py','project/runtime/joint_watch.py','project/runtime/status_stream.py','cloud/Prepare-JointWatch.ps1','cloud/joint_watch_bridge.py','cloud/Retrieve-JointBundle.ps1','cloud/joint_bundle_bridge.py','cloud/install_bundle.py'}
     for name in sorted(names):
         dst=packet/name;dst.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(ROOT/name,dst)
-    envs={e['id']:e for e in read(ROOT/'project/next/runtime/environments.json')}
+    envs={e['id']:e for e in read(ROOT/'project/runtime/environments.json')}
     recipes=matrix(envs);records=[]
     if applied:
         value=read(applied)
-        from next.runtime.joint_language import verify_applied
+        from runtime.joint_language import verify_applied
         verify_applied(value)
         if value.get('photoBinding',{}).get('inputSha256')!=historical['input']['sha256']:
             raise ValueError('REAL_AI_PHOTO_REFERENCE_MISMATCH')
@@ -81,7 +81,7 @@ def prepare(output, applied=None):
     atomic(output/'preparation.json',joint)
     atomic(output/'execution-disabled.json',{'enabled':False,'model_license_ack':False,'guard_run_directory':'HOST_CURRENT_CONFIRMED_RUN',
         'jointTaskId':joint['taskId'],'jointPackageSha256':read(output/'bundle.json')['sha256']})
-    from next.runtime.joint_results import comparison
+    from runtime.joint_results import comparison
     comparison(packet,output/'comparison.html',None)
     print('PREPARED_NOT_AUTHORIZED',str(output.resolve()),'inverse=0; forward='+str(len(records))+'; initialization target=1')
 

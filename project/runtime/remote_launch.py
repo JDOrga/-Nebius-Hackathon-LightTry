@@ -25,8 +25,8 @@ def main(q):
     with (prep / 'guard-receipt.json').open('x') as stream:
         json.dump(receipt, stream)
     with (prep / 'worker.log').open('x') as stream:
-        p = subprocess.Popen([sys.executable, '-u', '-B', str(prep / 'project/next/runtime/joint_worker.py'),
-            '--joint', '--prep', str(prep), '--runtime', str(prep / 'runtime.json'),
+        p = subprocess.Popen([sys.executable, '-u', '-B', str(prep / 'project/runtime/worker.py'),
+            '--request', str(prep / 'request.json'), '--runtime', str(prep / 'runtime.json'),
             '--receipt', str(prep / 'guard-receipt.json')], stdin=subprocess.DEVNULL,
             stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
     print(json.dumps({'workerPid': p.pid, 'prep': str(prep)}))

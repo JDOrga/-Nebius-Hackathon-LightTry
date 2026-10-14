@@ -21,7 +21,7 @@ from inference.images import decode, prepare, digest, InputError, MAX_BYTES
 from inference.jobs import TaskStore, JobError, read, atomic
 from inference.driver import build_bundle, extract_result, authorization, run_driver
 from inference_fixture import OfflineExecutor, image_bytes
-import server
+import shared_http as server
 
 PRESETS = json.loads((ROOT / 'data/catalog.json').read_text(encoding='utf-8'))['presets']
 

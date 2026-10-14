@@ -14,7 +14,7 @@ from http.server import ThreadingHTTPServer
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from language import LanguageAdapter, LanguageError, validate_plan, strict_json, response_audit
-import server
+import shared_http as server
 PRESETS = json.loads((ROOT/'data/catalog.json').read_text(encoding='utf-8'))['presets']
 PLAN = {'status':'ready','presetIds':['sunrise','sunny'], 'reasons':['粉色晨光的近似氛围，不保证暖色。','自然日光氛围。'], 'excludedIds':[], 'unsupported':[], 'question':''}
 BODY = {'text':'想要温暖一点', 'currentPlan':{'presetIds':['sunny'], 'excludedIds':[]}, 'compareThree':False}

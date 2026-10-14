@@ -7,15 +7,15 @@ import re
 from urllib.parse import urlsplit
 from http.server import ThreadingHTTPServer
 
-PROJECT = Path(__file__).resolve().parents[1]
+PROJECT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT))
-import server as legacy
+import shared_http as shared
 from inference.jobs import JobError
 from inference.images import digest
 from inference.images import crop_photo_region
-from next.store import SchemeStore
-from next.evidence import load_evidence
-from next.accepted import load_accepted, load_accepted_many, measured_context
+from scheme_store import SchemeStore
+from evidence import load_evidence
+from accepted import load_accepted, load_accepted_many, measured_context
 from lighting import normalize_scheme
 from light_console import EnvironmentLibrary, MAX_BYTES, normalize, synthesize, encode_hdr, decode_hdr, sha
 import io
@@ -23,7 +23,7 @@ from PIL import Image
 import numpy as np
 
 
-class Handler(legacy.Handler):
+class Handler(shared.Handler):
     lighting_capabilities = None
     studies = []
     study_files = {}
@@ -65,7 +65,7 @@ class Handler(legacy.Handler):
             sample=next((s for s in self.catalog['samples'] if s['id']==parts[1]),None)
             record=sample and (sample['input'] if parts[2]=='input' else sample['results'].get(parts[2]))
             if not record or not sample.get('canvas'):return self.send_error(404)
-            data=legacy.asset_path(self.assets_dir,self.catalog['assets'][record['assetId']]).read_bytes()
+            data=shared.asset_path(self.assets_dir,self.catalog['assets'][record['assetId']]).read_bytes()
             if digest(data)!=record['sha256']:return self.job_error(JobError('ASSET_CHANGED','历史素材校验失败。',409))
             cropped=crop_photo_region(data,sample['canvas'])
             return self.send_bytes(cropped,'image/png',parts[1]+'-'+parts[2]+'-region.png' if urlsplit(self.path).query=='download=1' else None)
@@ -104,7 +104,7 @@ class Handler(legacy.Handler):
                     if self.recipe_language:self.recipe_language.environments[value['id']]=value
                     return self.json_response(value)
                 if self.headers.get('Content-Type')!='application/json':raise ValueError('JSON_REQUIRED')
-                recipe=normalize(legacy.strict_json(data.decode('utf-8')),self.environment_library.environments)
+                recipe=normalize(shared.strict_json(data.decode('utf-8')),self.environment_library.environments)
                 derived=self.environment_library.derived(recipe)
                 if derived is None:return self.json_response({'recipe':recipe,'status':'bundled-environment','modelExecuted':False})
                 a=decode_hdr(derived);from light_console import loaded_latlong
@@ -118,7 +118,7 @@ class Handler(legacy.Handler):
             try:
                 size=int(self.headers.get('Content-Length','0'))
                 if not 0<size<=1024 or self.headers.get('Transfer-Encoding') or self.headers.get('Content-Type')!='application/json':raise ValueError()
-                self.connection.settimeout(5);body=legacy.strict_json(self.rfile.read(size).decode('utf-8'))
+                self.connection.settimeout(5);body=shared.strict_json(self.rfile.read(size).decode('utf-8'))
                 if set(body)!={'recoveryGuardRunId'}:raise ValueError()
                 return self.json_response(self.task_store.recover_transferred_result(recovery[1],body['recoveryGuardRunId']))
             except JobError as e:return self.job_error(e)
@@ -128,15 +128,15 @@ class Handler(legacy.Handler):
                     self.headers.get('Origin') not in (None, 'http://' + self.headers.get('Host', ''))):
                 return self.job_error(JobError('INVALID_ORIGIN', '请从当前本机应用提交。', 403))
             try:
-                if self.recipe_language is None: raise legacy.LanguageError('LANGUAGE_NOT_CONFIGURED','Nemotron 未启用。',503)
+                if self.recipe_language is None: raise shared.LanguageError('LANGUAGE_NOT_CONFIGURED','Nemotron 未启用。',503)
                 size=int(self.headers.get('Content-Length','0'))
-                if size>8192:raise legacy.LanguageError('CONTEXT_TOO_LONG','文字上下文超过8KiB，请缩短历史或当前需求。',400)
+                if size>8192:raise shared.LanguageError('CONTEXT_TOO_LONG','文字上下文超过8KiB，请缩短历史或当前需求。',400)
                 if not 0<size<=8192 or self.headers.get('Transfer-Encoding') or self.headers.get('Content-Type')!='application/json':raise ValueError()
                 self.connection.settimeout(5);raw=self.rfile.read(size)
                 if len(raw)!=size:raise ValueError()
-                body=legacy.strict_json(raw.decode('utf-8'))
+                body=shared.strict_json(raw.decode('utf-8'))
                 return self.json_response(self.recipe_language.recommend(body))
-            except legacy.LanguageError as e:return self.job_error(e)
+            except shared.LanguageError as e:return self.job_error(e)
             except (ValueError,KeyError,TypeError,UnicodeError,RecursionError):return self.job_error(JobError('INVALID_LANGUAGE_REQUEST','文字方案请求无效。',400))
         if urlsplit(self.path).path == '/api/lighting/normalize':
             if (not self.valid_host() or self.headers.get('X-LightTry-Token') != self.csrf_token or
@@ -150,7 +150,7 @@ class Handler(legacy.Handler):
                 if self.headers.get('Transfer-Encoding'): raise ValueError()
                 raw = self.rfile.read(size)
                 if len(raw) != size: raise ValueError()
-                body = legacy.strict_json(raw.decode('utf-8'))
+                body = shared.strict_json(raw.decode('utf-8'))
                 value = normalize_scheme(body, self.environment_library.environments, self.lighting_capabilities)
                 return self.json_response(value)
             except (ValueError, KeyError, TypeError, UnicodeError, RecursionError):
@@ -164,15 +164,15 @@ def main():
     p.add_argument('--assets-dir', required=True)
     p.add_argument('--evidence-config', type=Path)
     p.add_argument('--accepted-package', type=Path, action='append')
-    p.add_argument('--tasks-dir', type=Path, default=PROJECT.parent / '.local/lighttry-development-20261011/workbench-tasks')
+    p.add_argument('--tasks-dir', type=Path, default=PROJECT.parent / '.local/state/tasks')
     p.add_argument('--inference-config', type=Path)
     p.add_argument('--language-key-file', type=Path, help='程序直接读取本机 Key 文件；不显示、不入库。仅显式使用时启用。')
     p.add_argument('--language-ledger', type=Path, help='本轮独立账本；不复用旧文字预算。')
     p.add_argument('--language-max-calls', type=int, default=12)
     p.add_argument('--language-budget', type=float, default=.20)
     a = p.parse_args()
-    Handler.assets_dir = legacy.resolve_assets_dir(a.assets_dir)
-    Handler.catalog = legacy.load_catalog(Handler.assets_dir)
+    Handler.assets_dir = shared.resolve_assets_dir(a.assets_dir)
+    Handler.catalog = shared.load_catalog(Handler.assets_dir)
     Handler.lighting_capabilities, Handler.studies, Handler.study_files = load_evidence(a.evidence_config)
     accepted, accepted_files, Handler.imported_schemes = load_accepted_many(a.accepted_package, Handler.catalog)
     Handler.studies.extend(accepted); Handler.study_files.update(accepted_files)
@@ -182,14 +182,14 @@ def main():
         if not a.language_ledger: raise ValueError('NEW_LANGUAGE_LEDGER_REQUIRED')
         key=a.language_key_file.read_text(encoding='utf-8-sig').strip()
         if not key.isascii() or not 20<=len(key)<=4096 or any(c.isspace() for c in key):raise ValueError('KEY_FILE_FORMAT_INVALID_NO_REQUEST')
-        from next.language import RecipeLanguage
+        from recipe_language import RecipeLanguage
         Handler.recipe_language=RecipeLanguage(Handler.catalog['presets'],Handler.lighting_capabilities,key,a.language_ledger,
             max_calls=a.language_max_calls,budget=a.language_budget, measured_cases=measured_context(accepted))
     executor = None
     if a.inference_config:
         # A separate reviewed parameter adapter is required, never the old driver
         # that would accept a field and silently ignore it.
-        from next.runtime.executor import SchemeExecutor
+        from runtime.executor import SchemeExecutor
         executor = SchemeExecutor(a.inference_config)
     Handler.task_store = SchemeStore(a.tasks_dir, Handler.catalog['presets'], executor,
                                     lighting_capabilities=Handler.lighting_capabilities,

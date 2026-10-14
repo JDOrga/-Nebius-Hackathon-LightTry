@@ -2,7 +2,7 @@
 import sys,unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT/'project'))
-from next.runtime.driver import retryable_archive_failure
+from runtime.driver import retryable_archive_failure
 class ArchiveRetryTests(unittest.TestCase):
  def test_same_channel_closed_export_has_one_retry_only(self):
   s={'exit_code':255,'stderr_categories':['CONNECTION_CLOSED'],'cleanup_incomplete':False,'remaining_owned_processes':0,'process_exited':True,'output_complete':True}

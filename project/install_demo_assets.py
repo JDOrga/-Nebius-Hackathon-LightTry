@@ -6,7 +6,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from server import ROOT, load_catalog, resolve_assets_dir
+from shared_http import ROOT, load_catalog, resolve_assets_dir
 
 
 def install(archive, destination):

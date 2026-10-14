@@ -12,7 +12,7 @@ from urllib.request import urlopen
 from http.server import ThreadingHTTPServer
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('preview_server', ROOT / 'server.py')
+spec = importlib.util.spec_from_file_location('preview_server', ROOT / 'shared_http.py')
 server = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(server)
 

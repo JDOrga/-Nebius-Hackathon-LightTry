@@ -9,7 +9,7 @@ import unittest
 
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'project'))
-from next.store import SchemeStore
+from scheme_store import SchemeStore
 from inference.jobs import JobError
 
 

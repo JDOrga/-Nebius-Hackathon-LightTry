@@ -75,7 +75,7 @@ def import_task(task_id, run_id):
         (r['sha256'], r['bytes'], 'inverse/gbuffer_frames/' + r['path']) for r in records):
         raise ValueError('HISTORICAL_GBUFFER_RECEIPT_MISMATCH')
     value = identity(request, payload, weights, patch)
-    target = ROOT / 'project/.inverse-cache' / key(value)
+    target = ROOT / '.local/state/inverse-cache' / key(value)
     target.parent.mkdir(exist_ok=True)
     if target.exists():
         return validate(target, value)

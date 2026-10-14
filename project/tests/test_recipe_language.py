@@ -2,7 +2,7 @@ import json,sys,tempfile,unittest,copy
 from pathlib import Path
 from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT/'project'))
-from next.language import RecipeLanguage,validate,RESERVE
+from recipe_language import RecipeLanguage,validate,RESERVE
 from language import LanguageError
 class RecipeLanguageTests(unittest.TestCase):
  def setUp(self):
@@ -46,7 +46,7 @@ class RecipeLanguageTests(unittest.TestCase):
   self.assertEqual(len(self.sent),2)
  def test_shared_deadline_no_late_second_send(self):
   a=self.adapter(['not json'])
-  with patch('next.language.time.monotonic',side_effect=[0,0,0,61,61]):
+  with patch('recipe_language.time.monotonic',side_effect=[0,0,0,61,61]):
    with self.assertRaises(LanguageError):a.recommend(self.body)
   self.assertEqual(len(self.sent),1)
  def test_input_history_and_unknown_fields_rejected(self):
@@ -82,14 +82,14 @@ class RecipeLanguageTests(unittest.TestCase):
   self.assertEqual(caught.exception.code,'SEMANTIC_SCOPE_MISMATCH');self.assertEqual(len(self.sent),1)
   self.assertEqual(json.loads(a.ledger_path.read_text())['records'][0]['outcome'],'SEMANTIC_SCOPE_MISMATCH')
  def test_joint_full_recipe_schema_without_operations(self):
-  from next.language import schema
+  from recipe_language import schema
   p=schema(self.env,{**self.policy,'parameterized':True},full_procedural_recipe=True)['properties']['parameters']['anyOf'][1]
   self.assertNotIn('oneOf',p);self.assertEqual(p['properties']['mode'],{'const':'procedural'})
   self.assertEqual(p['properties']['environmentId'],{'const':None});self.assertEqual(len(p['required']),11)
   self.assertEqual(len(p['properties']['zones']['items']['required']),8)
  def test_missing_recipe_field_diagnosis_is_exact_without_raw_reply(self):
-  from next.runtime.joint import matrix
-  from next.language import proposal_diagnosis
+  from runtime.joint import matrix
+  from recipe_language import proposal_diagnosis
   v=copy.deepcopy(self.good);v['parameters']=matrix(self.env)['F'];v['parameters'].pop('synthesizerVersion')
   diagnosis=proposal_diagnosis(v);self.assertEqual(diagnosis['parameterShape']['missingRecipeFields'],['synthesizerVersion'])
   with self.assertRaises(LanguageError) as caught:validate(v,self.env,{**self.policy,'parameterized':True})
@@ -99,7 +99,7 @@ class RecipeLanguageTests(unittest.TestCase):
   with self.assertRaises(LanguageError) as caught:a.recommend(self.body)
   self.assertEqual(caught.exception.code,'SCHEMA_FORM_MISMATCH');self.assertEqual(len(self.sent),1)
  def test_joint_full_recipe_forces_exact_tool_not_auto(self):
-  from next.runtime.joint import matrix
+  from runtime.joint import matrix
   v={**self.good,'parameters':matrix(self.env)['F']};a=self.adapter([v]);a.policy['parameterized']=True;a.full_procedural_recipe=True;a.repair_limit=0
   a.recommend(self.body)
   self.assertEqual(self.sent[0]['tool_choice'],{'type':'function','function':{'name':'propose_lighting_plan'}})

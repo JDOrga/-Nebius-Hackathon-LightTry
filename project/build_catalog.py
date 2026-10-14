@@ -1,6 +1,6 @@
 """Verify independent demo assets. No history lookup, conversion, models or network."""
 import argparse
-from server import load_catalog
+from shared_http import load_catalog
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)

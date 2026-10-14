@@ -1,7 +1,7 @@
 """Four new forwards only: two missing azimuths, two equal-emitted-energy widths."""
 import copy
 from light_console import synthesize, encode_hdr, decode_hdr, normalize
-from next.runtime.joint import matrix, energy
+from runtime.joint import matrix, energy
 
 LEGACY_VERSION = 'direction-energy-key-unknowns-v1'
 VERSION = 'direction-energy-calibration-five-v2'

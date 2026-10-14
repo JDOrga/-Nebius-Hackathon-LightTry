@@ -3,11 +3,11 @@ import argparse,json,sys,time
 from pathlib import Path
 from http.server import ThreadingHTTPServer
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
-import server as legacy
-from next.server import Handler
-from next.store import SchemeStore
-from next.evidence import load_evidence
-from next.language import RecipeLanguage
+import shared_http as legacy
+from studio import Handler
+from scheme_store import SchemeStore
+from evidence import load_evidence
+from recipe_language import RecipeLanguage
 from language import LanguageError
 
 def wire(payload,timeout):

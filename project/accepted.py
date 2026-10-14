@@ -4,8 +4,8 @@ import hashlib
 from pathlib import Path
 from inference.jobs import read
 from inference.reuse import safe_file
-from next.runtime.joint import verify_joint
-from next.runtime.joint_results import validate_case
+from runtime.joint import verify_joint
+from runtime.joint_results import validate_case
 
 
 def load_accepted(package, catalog):

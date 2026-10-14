@@ -30,7 +30,7 @@ if(Test-Path $dest){throw 'PRESERVE_EXISTING_DOWNLOAD'}
 $nonce=[Guid]::NewGuid().ToString('N')
 $req=@{nonce=$nonce;image=$target.image;ssh_user=$target.ssh_user;run_id=(Split-Path $run -Leaf);container_python=$snapshot.container_python;
  container_request=$q;probe_source=(ConvertTo-Base64 (Get-Content (Join-Path $PSScriptRoot 'remote_probe.py') -Raw));
- container_program=(ConvertTo-Base64 (Get-Content (Join-Path $root 'project/next/runtime/joint_bundle.py') -Raw))}
+ container_program=(ConvertTo-Base64 (Get-Content (Join-Path $root 'project/runtime/joint_bundle.py') -Raw))}
 $program=Get-Content (Join-Path $PSScriptRoot 'joint_bundle_bridge.py') -Raw
 $command=New-EncodedShellCommand $program (ConvertTo-Base64 ($req|ConvertTo-Json -Depth 8 -Compress))
 if($command.Length -gt 28000){throw 'NATIVE_COMMAND_TOO_LARGE'}
