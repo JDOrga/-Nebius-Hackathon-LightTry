@@ -46,9 +46,11 @@ npm test
 ```text
 /opt/lighttry/                  # 只读代码 + 独立 Linux Python venv
 /var/lib/lighttry/              # 私有持久化根，目录 0700
-  workspace.sqlite3            # SQLite：方案版本、照片身份/哈希/元数据
+  workspace.sqlite3            # SQLite：方案版本、照片元数据、归属、限流窗口、GPU队列
   workspace.sqlite3-wal/-shm    # SQLite 运行文件；备份必须保持一致
-  photos/<sha256>              # 原始照片字节，只经认证的 /api/photos/<id> 读取
+  auth/accounts.json           # 运行时账号哈希，0600，不进镜像/Git
+  queue/<job-id>/original       # 私有排队原图；派发前核验，未知派发锁存
+  photos/<sha256>              # 原始照片字节，只经认证及归属检查读取
   environments-v2/             # 导入 HDR 原件、派生 HDR 和元数据
   tasks/<task-id>/              # 原照片、预处理输入、request/task/execution JSON
                                # 结果、receipt、执行证据；保持既有验证语义
@@ -75,7 +77,7 @@ export LIGHTTRY_PUBLIC_ORIGIN=https://YOUR_HOST
 
 无 `--assets-dir` 时为空演示目录模式，能直接用用户照片，不依赖本机演示包。可选 `--assets-dir /只读授权素材目录` 和 `--accepted-package /只读验收包` 仍需许可/清单/哈希验证；不复制本机路径或已关闭云授权。内置 HDR 缩略图需要对应经许可的 `upstream/asset/examples/hdri_examples` 文件，默认镜像不带这些媒体；缺失时不会用假图冒充。用户导入 HDR 独立保存在私有数据根。
 
-访问账号为 `lighttry`，密码由 `LIGHTTRY_ACCESS_PASSWORD` 提供（最少24位；未配置或仍为占位密码则拒绝启动）。浏览器 HTTP Basic 登录后，所有静态页面、照片、HDR、任务与结果 API 均受认证保护。直接 HTTP 仅用于受信任的私网/本机验收；公网必须先配 HTTPS。`LIGHTTRY_PUBLIC_ORIGIN` 是精确的受信任入口，例如 `https://studio.example.com`；Host、Origin 和原 CSRF token 都继续校验。HTTPS 代理保留真实 Host/Origin，不依赖随意改写 Origin，也不信任客户端 Forwarded 头。防火墙限制8080只允许指定入口访问。这是单用户/可信小组共享工作区，不是多租户隔离服务。
+当前临时账号为 `lighttry`，运行时账号文件由 `LIGHTTRY_ACCOUNTS_FILE` 提供（创建和交付见下文）；兼容受控的 `LIGHTTRY_ACCESS_PASSWORD` 环境注入，未配置或仍为占位密码则拒绝启动。浏览器 HTTP Basic 登录后，所有静态页面、照片、HDR、任务与结果 API 均受认证保护。直接 HTTP 仅用于受信任的私网/本机验收；公网必须先配 HTTPS。`LIGHTTRY_PUBLIC_ORIGIN` 是精确的受信任入口，例如 `https://studio.example.com`；Host、Origin 和原 CSRF token 都继续校验。HTTPS 代理保留真实 Host/Origin，不依赖随意改写 Origin，也不信任客户端 Forwarded 头。防火墙限制8080只允许指定入口访问。这是单用户/可信小组共享工作区，不是多租户隔离服务。
 
 ### systemd 服务化与镜像边界
 
@@ -106,3 +108,95 @@ sudo systemctl restart lighttry
 ### 验证范围
 
 新增 `project/tests/test_linux_service.py` 验证认证、Host/Origin/CSRF、路径隔离、SQLite版本冲突/事务回退、照片哈希和真实 Linux Waitress 进程重启。重启验收使用明确标注的离线执行替身生成测试图片，不能当作 Cosmos 实机成功。浏览器迁移纯逻辑测试见 `workspace-portability.test.js`；真实浏览器交互和目标主机上线仍需独立验收。本轮不创建云实例、不复用历史授权、不收费。
+
+## 临时账号与服务安全边界
+
+部署入口仍是 `start.py --service`，页面、静态脚本、业务 API、照片、HDR、任务和结果下载统一先认证；没有公开照片目录或例外下载入口。认证失败为401，限流为429（Retry-After:60），不存在/非本账号对象统一404。HTTP Basic 只用于本机/可信私网；公网必须经过 HTTPS 和防火墙，不能在公网明文发送登录密码。
+
+### 运行时临时账号
+
+可在服务账号下执行一次以下命令，创建7天有效的 `lighttry` 普通用户账号；不启动服务、不读取云凭据、不启用收费：
+
+```sh
+.venv/bin/python -X utf8 -B start.py --service --init-account \
+  --data-root /var/lib/lighttry --account-output /var/lib/lighttry/private-temporary-login.txt
+```
+
+登录密码为随机生成的高熵密码，只写指定的私有交付文件，不打印到 stdout；服务保存独立随机盐的 scrypt 哈希于 `/var/lib/lighttry/auth/accounts.json`（0600）。账号文件与交付文件须由服务 UID 持有，私有目录0700。已有文件拒绝覆盖。通过 `LIGHTTRY_ACCOUNTS_FILE=/var/lib/lighttry/auth/accounts.json` 注入，模板见 `deploy/service.env.example`；旧 `LIGHTTRY_ACCESS_PASSWORD` 环境注入仅作为受控兼容，不存在源码默认密码。改账号后重启 CPU 服务；退出/撤销不能仅靠关掉浏览器标签，HTTP Basic 缓存需由浏览器清除，服务端账号期限仍强制检查。
+
+账号角色由受保护运行时文件提供，不接受网页修改/注册。临时账号角色为 user；operator 也不能绕过未配置的守护、预算或当前主机确认。`GET /api/me` 只返回用户名/角色，不返回密码、哈希或云凭据。
+
+### 归属、限额与路径
+
+SQLite ownership 表绑定照片、方案、导入 HDR 和任务。任务/结果/下载/请求恢复先检查当前账号归属，猜到别人的 UUID 也不可读取。共享许可演示样例可由已登录者浏览；历史验收包与实测结果仅给配置的旧数据 owner。旧工作区启动迁移用 `LIGHTTRY_LEGACY_OWNER`（默认 lighttry，必须是已配置账号），只补齐未绑定对象，不改写已有归属、任务事实或原始证据。换账号时浏览器缓存按用户名分开；旧未分账号库使用“导出未分账号的旧浏览器库”后显式导入，不自动收编为另一个账号所有。
+
+照片最大20MiB，只接受与声明 MIME 一致的单帧 JPG/PNG/WebP，宽高32..16384、最多4000万像素；HDR最大32MiB，限Radiance RGBE、指定2:1布局和解码维度/扫描行；方案 JSON 最大1MiB，文字/条件 JSON 最大8KiB。至多两个并行解码通道，忙时429。每账号最多200个私有照片身份，照片字节总配额512MiB。文件名不作为磁盘路径：照片用SHA，任务用服务生成UUID；禁止路径遍历、编码绕过、任意文件下载及符号链接，并核验原图/结果哈希。HTTP缓冲仍受Waitress 32MiB上限控制；在代理侧也应限制请求体、连接数和超时，应用认证不能阻止HTTP服务器先接收请求体。
+
+限流存入SQLite，CPU服务重启不重置窗口；按真实网络REMOTE_ADDR而非客户端X-Forwarded-For计数。每分钟上限：IP240、账号120、登录失败10、写请求30、上传8、生成/文字建议3；限流失败不继续解码或派发。反向代理下IP预算会共享，需由部署入口补充可信代理/WAF策略，不能为了绕限流直接信任客户端转发头。
+
+### 单 GPU 串行队列与收费边界
+
+`POST /api/tasks` 需认证、同源、CSRF、对象归属及服务端逐项授权；浏览器不能传owner、命令、预算、云控制或守护替代字段。持久化FIFO队列最多20项，跨账号只有一条GPU执行通道；同账号requestId幂等，任务身份由服务生成并在派发前持久化。队列读取是只读，真正派发只由独立服务器工作线程执行；每次派发重新检查 adapter.authorize_job 的当前范围/预算/守护授权。现有真实适配器未接入该授权协议，默认仍为OFF；提供凭据不等于提供授权。
+
+原任务库单进程OS锁和串行检查继续生效。派发前提交dispatching闩锁；异常、进程退出或执行状态未知会阻塞通道，不自动重发launch；已有旧执行/未知执行也会占住通道。只有执行端真实结束且结果通过原校验，才推进下一项。等待项授权撤销/过期则不派发，不继承旧实验的预算或时限。队列验证用离线替身，不能当成GPU实机验收。
+
+生成、启动、停止没有普通页面GET控制路径；GET控制请求为404/405。普通账号POST云start/stop为403，operator仍因未接入受审计控制器而503，绝不隐式调用CLI。任何后续真实云控制都必须重新走 `docs/EXECUTION_FLOW.md`，本轮不登录、不收费、不启停GPU。
+
+### Nemotron / Nebius 凭据
+
+只支持受保护的服务端运行时文件 `LIGHTTRY_NEMOTRON_KEY_FILE`、`LIGHTTRY_NEBIUS_CREDENTIAL_FILE`，或服务端环境 `NEMOTRON_API_KEY`、`NEBIUS_IAM_TOKEN`。文件必须在代码树外、普通文件、无符号链接、0600；建议只读挂载到 `/run/secrets/`，而非复制进镜像。代码只保存变量名与接口，不保存实际值，不从网页提供/返回凭据，也不记录请求正文、Authorization、URL查询或异常原文。账号文件、交付文件和service.env不入Git；镜像允许清单不含这些文件。环境/文件读取入口已离线验证，实际服务仍未开启两家收费适配器。
+
+验证：`test_service_security.py` 覆盖匿名访问、GET/POST收费控制、越权对象、重启后限流、上传/路径限制、FIFO串行/不确定闩锁和凭据泄露检查；Linux真实HTTP重启检查继续验证原图、HDR、方案及结果找回。本轮临时账号由本机Linux运行时生成，私有交付路径不纳入源码、补丁或验证正文。
+
+## CPU→GPU HTTPS 协议与独立守护（仅离线验收）
+
+当前代码新增 `worker_link.py`、`gpu_session.py`、`guard_runtime.py`，仍由唯一根入口 `start.py` 分流。没有注册真实 Nebius 控制器、真实模型执行器或新的收费授权；默认 Web 服务仍拒绝实际启动/生成。现有安全队列不因本节或凭据存在而自动连接真实 GPU。下面“通过”只指离线替身/本机进程实验，不是云启动、模型加载或停机实机验收。
+
+### 接口与身份
+
+选择受认证的 HTTPS worker，而不是从网页传 SSH 命令。CPU `HTTPSWorker` 强制 https、CA/主机名校验、精确 origin，无账号嵌入 URL、无重定向、无自动重试；单次网络超时5秒（最大10秒）。worker token 仅通过服务端运行时私有文件 `LIGHTTRY_WORKER_TOKEN_FILE` 提供，不复用浏览器登录密码，不返回页面，不记录到日志。TLS 入口只将认证后的指定 `/v1/` 路由转发到 worker 的本机127.0.0.1:9080，9080不对公网开放。
+
+| 接口 | 行为 |
+| --- | --- |
+| GET /v1/health | sessionId/resourceId/模型状态，仅查询，不加载模型 |
+| PUT /v1/blobs/{sha256} | ≤32MiB、内容哈希命名的受认证制品上传；无文件路径/命令字段 |
+| POST /v1/jobs | 精确 jobId/sessionId/resourceId/artifactSha256/requestSha256 绑定 |
+| GET /v1/jobs/{jobId} | 查询原任务，恢复响应丢失；不产生执行 |
+| GET /api/gpu/status | CPU 登录后读SQLite快照，不轮询云、不续租、不启动 |
+| POST /api/gpu/start | operator + 同源/CSRF；仅接受requestId；范围/预算来自服务端 |
+| POST /api/gpu/confirm-host | operator 确认本会话首次可靠RUNNING的当前主机身份 |
+| POST /api/gpu/stop | operator 指定当前sessionId；持久化单次stop闩锁 |
+
+未配置控制器时POST控制仍503；普通账号仍403，未登录仍401，控制GET仍404/405。离线HTTPS协议测试使用明确的连接替身，不宣称已部署真实TLS入口。`start.py --worker --data-root /var/lib/lighttry-worker --session-id SESSION --resource-id RESOURCE --worker-token-file /run/secrets/worker-token` 可运行受保护协议壳；默认模型适配器未设置，不会加载/执行GPU模型。制品内的模型请求/结果收据导入需要后续正式适配器遵守现有哈希、原图、配方和实际结果验证，不能用worker成功状态替代产品视觉验收。
+
+### 持久化会话与单次副作用
+
+会话数据库在私有guard目录 `sessions.sqlite3`：保存session/scope/resource、七种状态、首个启动时间、首次可靠RUNNING时间、固定截止、空闲期限、主机确认、启动/停机闩锁、任务派发表和逐步事件。worker另存 `worker.sqlite3` 和只读内容寻址制品。SQLite同步提交，更新使用revision比较，跨进程的过期快照不能覆盖新状态。
+
+状态为 STOPPED停止、STARTING启动中、LOADING模型加载中、READY就绪、EXECUTING执行中、STOPPING停机中、UNKNOWN异常待核实。初始STOPPED只是未建立软件会话，providerState=null、verifiedStopped=false，不代表云API已确认资源停止。
+
+同一服务端scopeId无论多少点击/requestId/标签页都复用一个sessionId；启动前先持久化会话和start-attempt，独立守护/整机兜底ready且独立预检STOPPED+空实例后，只发一次start。启动响应丢失或断线记UNKNOWN，后续只观察原资源/操作，不能restart。已关闭scope不会因再次点击创建新会话；新范围必须另获新的服务端授权，未确认停机的资源禁止新scope。
+
+任务先按原jobId查询，再持久化attempted后仅POST一次。若提交响应丢失，重启后查询同一jobId和完整哈希绑定；即使返回404，也不能证明前一个请求没有被接收，保留uncertain，不自动重POST。worker相同jobId相同哈希幂等，改内容409；真正执行前保存dispatching，进程退出后的dispatching变uncertain并占住单通道，不能靠重启再执行。模型调用只由受审计的服务器执行器触发，GET从不调用run_one。
+
+### 独立守护与不可续期时间
+
+当前默认上限沿用 `docs/EXECUTION_FLOW.md`：启动等待600秒；首次可靠独立API RUNNING起算工作18分钟、停机25分钟、核验27分钟；绝对保护取初始40分钟与本轮授权截止的较早值。worker ready不等于资源RUNNING。加载/空闲默认由本次服务端范围指定10..300秒；任务完成后才建立新的空闲期限，绝不延长会话工作/绝对截止。GET、浏览器刷新、应用/守护重启和心跳均不重置上述时间，也不继承主机确认到新会话。
+
+CPU进程以显式server heartbeat接口续30秒短租约；它只表示当前CPU存活，不续绝对时间。该心跳需要未来可信服务端接线/定时器调用，不能由普通页面GET代发。本轮默认控制器未接线，不能假称该生产链路已经运行。守护进程独立于Web进程，`deploy/lighttry-guard.service` 无 PartOf/BindsTo lighttry.service。绑定配置是代码树外0600的受保护文件，factory必须是经过审计的provider/worker/fallback适配器；未配置就拒绝启动，不猜CLI，不自动找历史profile。唯一命令入口：
+
+```sh
+.venv/bin/python -X utf8 -B start.py --guard --data-root /var/lib/lighttry/guard --guard-config /etc/lighttry/guard.json
+```
+
+守护独占观察职责；Web只读快照，不再加云轮询。STOPPING普通等待上限120秒，同时不超过原verify/absolute界限。到界限立即持久化UNKNOWN/STOPPING_BOUND_EXCEEDED，不伪称成功、不延长工作/核验；之后独立监督继续仅核实停机，晚到STOPPED+instances=[]仍可确认。安全收尾另外需要外部监督者证明守护PID已退出、防休眠已释放；守护不能在还活着时自称退出。这里不获取防休眠锁，sleepHeld=false仍须与部署方式核实。
+
+### CPU整台失联的兜底方案
+
+同机systemd守护只防Web进程退出，**不防CPU整机断电、网络失联或磁盘丢失**。真实启动前必须在CPU/GPU之外的管理主机或供应商独立控制平面预置stop-only租约：绑定resource/session与不晚于40分钟的绝对截止，CPU心跳30秒过期即执行同一幂等stop操作；管理主机使用单独的最小停机权限和独立持久盘。必须先拿到经认证、与本会话/资源/截止完全匹配的ready收据，再允许云start。若无法预置，启动拒绝，不能降级为只靠CPU/GPU自身shutdown。
+
+离线 `Deadman` 参考实现展示不可延长的绝对截止、短租约失联触发、停机闩锁和独立STOPPED+空实例核实；本地替身标记simulation=true，不能充当真实异机部署证明。`deploy/lighttry-deadman.service` 只能装在独立管理主机，入口 `start.py --deadman`，真实provider/factory、认证收据通道和供应商侧定时停机保底尚需后续部署验收。若管理主机或供应商API也同时失联，软件不能保证账单硬封顶；必须预置供应商侧硬到期/定时停机（若支持并验证）、控制面告警和人工停机流程。未知stop响应不写成功、不发新start；真实兜底未就绪则不开GPU。
+
+### 本轮验证
+
+`test_worker_guard.py` 覆盖七状态、24次并发/多标签启动只有一次模拟start、启动ACK丢失、断线、重启固定截止、任务ACK丢失先查询、404/不确定不重跑、worker执行闩锁、STOPPING有界等待后停机核实、CPU整机失联的异机兜底逻辑、时钟回退和未ready截断。独立进程用真实本机Linux CPU HTTP服务及守护进程，provider/模型仍是离线替身；不把这项本机进程通过写成真实云验收。后续真实接线必须重新完成当前授权、独立预检、守护ready、单次启动、当前主机确认与四项释放，不能使用旧已关闭预算。

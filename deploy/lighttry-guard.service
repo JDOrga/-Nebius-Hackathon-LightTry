@@ -1,0 +1,26 @@
+[Unit]
+Description=LightTry independent stop-only GPU deadline supervisor
+After=network.target
+# Intentionally no PartOf/BindsTo dependency on lighttry.service.
+
+[Service]
+Type=simple
+User=lighttry
+Group=lighttry
+WorkingDirectory=/opt/lighttry
+EnvironmentFile=/etc/lighttry/service.env
+ExecStart=/opt/lighttry/.venv/bin/python -X utf8 -B /opt/lighttry/start.py --guard --data-root /var/lib/lighttry/guard --guard-config /etc/lighttry/guard.json
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/lighttry
+TimeoutStopSec=15
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

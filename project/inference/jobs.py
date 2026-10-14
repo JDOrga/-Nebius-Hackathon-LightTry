@@ -80,7 +80,7 @@ class TaskStore:
                   'presets', 'presetResults', 'registeredAt', 'registration')
         return copy.deepcopy({key: task[key] for key in fields if key in task})
 
-    def submit(self, data, metadata, mime):
+    def submit(self, data, metadata, mime, *, reserved_task_id=None):
         with self.mutex:
             if not self.executor:
                 raise JobError('SERVICE_NOT_CONNECTED', '真实推理默认关闭；本机预览不会上传或生成。', 503)
@@ -127,7 +127,9 @@ class TaskStore:
             except InputError as error:
                 raise JobError('INVALID_IMAGE', str(error), 422)
             now = self.clock()
-            task_id = uuid.uuid4().hex
+            task_id = reserved_task_id or uuid.uuid4().hex
+            if not ID.fullmatch(task_id) or (self.root/task_id).exists():
+                raise JobError('TASK_ID_CONFLICT','任务身份已使用；禁止再次派发。',409)
             folder = self.root / task_id
             folder.mkdir()
             try:

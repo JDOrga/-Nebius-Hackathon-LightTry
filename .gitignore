@@ -101,3 +101,9 @@ dist/
 
 # Stable product state/configuration lives under the already ignored .local/.
 /.structure-cleanup-tmp/
+
+# Runtime-only accounts, temporary login handoffs and service secret files.
+accounts.json
+temporary-login*.txt
+service.env
+*.credentials

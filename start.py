@@ -36,6 +36,10 @@ def local_options(argv):
     return options, effective, remaining
 
 def main():
+    if any(a in sys.argv[1:] for a in ('--worker','--guard','--deadman')):
+        sys.path.insert(0, str(ROOT/'project'))
+        from guard_runtime import main as serve_runtime
+        return serve_runtime(sys.argv[1:])
     # Service mode is explicit and never reads machine-local Windows configuration.
     if '--service' in sys.argv[1:]:
         sys.path.insert(0, str(ROOT/'project'))

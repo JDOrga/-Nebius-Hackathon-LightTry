@@ -43,9 +43,9 @@ class SchemeStore(TaskStore):
             raise ValueError('STORED_SCHEME_IDENTITY_MISMATCH')
         self.presets[preset['id']] = copy.deepcopy(preset)
 
-    def submit(self, data, metadata, mime):
+    def submit(self, data, metadata, mime, *, reserved_task_id=None):
         if 'lightingScheme' not in metadata:
-            return super().submit(data, metadata, mime)  # old three-preset requests unchanged
+            return super().submit(data, metadata, mime, reserved_task_id=reserved_task_id)  # old three-preset requests unchanged
         with self.mutex:
             try:
                 scheme = normalize_scheme(metadata['lightingScheme'], self.environments,
@@ -86,7 +86,7 @@ class SchemeStore(TaskStore):
                 value.update(presetId=preset['id'], presetIds=[preset['id']])
             except (ValueError, KeyError, TypeError):
                 raise JobError('INVALID_LIGHTING_SCHEME', '方案版本、输入关联或参数范围无效；未执行。', 422)
-            return super().submit(data, value, mime)
+            return super().submit(data, value, mime, reserved_task_id=reserved_task_id)
 
     def capabilities(self):
         return {**super().capabilities(), 'maxSchemesPerSubmit': 1,
