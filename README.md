@@ -200,3 +200,44 @@ CPU进程以显式server heartbeat接口续30秒短租约；它只表示当前CP
 ### 本轮验证
 
 `test_worker_guard.py` 覆盖七状态、24次并发/多标签启动只有一次模拟start、启动ACK丢失、断线、重启固定截止、任务ACK丢失先查询、404/不确定不重跑、worker执行闩锁、STOPPING有界等待后停机核实、CPU整机失联的异机兜底逻辑、时钟回退和未ready截断。独立进程用真实本机Linux CPU HTTP服务及守护进程，provider/模型仍是离线替身；不把这项本机进程通过写成真实云验收。后续真实接线必须重新完成当前授权、独立预检、守护ready、单次启动、当前主机确认与四项释放，不能使用旧已关闭预算。
+# CPU 镜像构建与本地容器验证（2026-10-14）
+
+镜像版本 `lighttry-cpu:2026.10.14-cpu.1`。入口仍为根 `start.py --service`，容器内监听 `0.0.0.0:8080`。
+基础镜像为固定摘要的 Python 3.14.0 / Debian bookworm slim；Python 依赖见根 `requirements-cpu.txt`，全部固定版本。
+构建上下文采用 `.dockerignore` 逐层白名单：不包括 `.local`、历史报告、私钥、任务、照片、测试替身或模型权重。
+约 60GB 权重仍留在 GPU 存储，CPU 镜像不含 CUDA、模型权重和云凭据。
+
+以下命令在安装 Docker Engine 的 Linux 主机运行；只新增此前获准的 Docker 系统运行组件及上述固定依赖。
+
+```sh
+docker build -f deploy/Dockerfile -t lighttry-cpu:2026.10.14-cpu.1 .
+sudo install -d -m 700 -o 10001 -g 10001 /srv/lighttry-data
+docker run --rm --network none -v /srv/lighttry-data:/var/lib/lighttry \
+  lighttry-cpu:2026.10.14-cpu.1 python -B start.py --service \
+  --init-account --account-output /var/lib/lighttry/temporary-login.txt
+# 配置只含绑定路径，不把密码/云凭据放进 env 文件或命令行。
+sudo install -m 600 deploy/service.env.example /etc/lighttry-cpu.env
+docker run -d --name lighttry-cpu --restart unless-stopped \
+  --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --pids-limit 128 --memory 512m -p 127.0.0.1:8080:8080 \
+  --env-file /etc/lighttry-cpu.env \
+  -v /srv/lighttry-data:/var/lib/lighttry lighttry-cpu:2026.10.14-cpu.1
+docker logs lighttry-cpu
+docker restart lighttry-cpu
+```
+
+临时账号7天到期，交付文件仅在私有挂载目录读取，不贴入日志或 Git。将 `LIGHTTRY_PUBLIC_ORIGIN` 改为实际外部 HTTPS origin；生产由受控 TLS 反向代理转发到本地8080。
+HTTP Basic 只能用于本机 HTTP 测试；远程必须 HTTPS。账户文件、SQLite、照片、HDR、方案版本、任务结果和必要日志均在挂载目录。
+挂载目录必须归 UID10001 所有；备份时停服务或用 SQLite backup，不只复制主数据库而忽略 WAL。
+换浏览器通过同一账号读取服务端方案；未迁移的浏览器方案先导出 JSON 后导入，私人素材不放在网页静态目录。
+
+本地真实容器验收（需要 Linux Python 和固定依赖，仅作测试客户端）：
+
+```sh
+sudo env PYTHON=/path/to/validated/python RUN=/var/tmp/lighttry-fresh-acceptance \
+  sh deploy/verify_container.sh
+```
+
+验收使用外部只读挂载的合成任务替身，不改变生产镜像，也无生产启用开关。
+脚本测试网页、登录、上传、方案保存、任务提交/合成结果下载；随后移除替身改用生产入口并重新创建和重启容器，检查持久化数据及原始/结果哈希。
+普通生产入口收费服务仍关闭；真实 GPU、云认证、异机守护和公网 TLS 部署不属于本次容器验收。
