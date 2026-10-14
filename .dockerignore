@@ -1,0 +1,23 @@
+# Allow-list the CPU service source. Never include photos, tasks, personal config,
+# venvs, accepted results, cloud evidence or arbitrary static/media directories.
+**
+!start.py
+!requirements-cpu.txt
+!project/
+!project/*.py
+!project/web/
+!project/web/*.html
+!project/web/*.css
+!project/web/*.js
+!project/data/
+!project/data/catalog.json
+!project/data/demo-package.json
+!project/inference/
+!project/inference/*.py
+!project/runtime/
+!project/runtime/*.py
+!project/runtime/*.json
+!project/experiments/
+!project/experiments/*.py
+!deploy/
+!deploy/Dockerfile

@@ -31,6 +31,14 @@ BUNDLE_FILES = ['scripts/run_experiment.py', 'scripts/weights.py', 'scripts/vali
 def cache_directory(root=None):
     """Reuse one configured cache; no copy, credentials, or cloud activity."""
     root = ROOT if root is None else Path(root)
+    # Deployment owns an explicit private persistent root outside the code tree.
+    persistent = os.environ.get('LIGHTTRY_DATA_ROOT')
+    if persistent:
+        base = Path(persistent).resolve()
+        value = Path(os.environ.get('LIGHTTRY_INVERSE_CACHE', str(base/'inverse-cache'))).resolve()
+        if not value.is_relative_to(base) or any(p.is_symlink() for p in (value, *value.parents)):
+            raise ValueError('CACHE_OUTSIDE_PERSISTENT_ROOT')
+        return value
     config = root / '.local/studio.json'
     value = os.environ.get('LIGHTTRY_INVERSE_CACHE')
     if value is None:

@@ -1,0 +1,32 @@
+[Unit]
+Description=LightTry private CPU web service
+After=network.target
+
+[Service]
+Type=simple
+User=lighttry
+Group=lighttry
+WorkingDirectory=/opt/lighttry
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+Environment=LIGHTTRY_DATA_ROOT=/var/lib/lighttry
+Environment=LIGHTTRY_PUBLIC_ORIGIN=http://localhost:8080
+EnvironmentFile=/etc/lighttry/service.env
+ExecStart=/opt/lighttry/.venv/bin/python -X utf8 -B /opt/lighttry/start.py --service
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+StateDirectory=lighttry
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/lighttry
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

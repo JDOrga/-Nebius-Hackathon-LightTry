@@ -65,6 +65,9 @@ class Handler(BaseHTTPRequestHandler):
     def valid_host(self):
         return self.headers.get('Host') in (f'127.0.0.1:{self.server.server_port}', f'localhost:{self.server.server_port}')
 
+    def valid_origin(self):
+        return self.headers.get('Origin') in (None, 'http://' + self.headers.get('Host', ''))
+
     def json_response(self, value, status=200):
         return self.send_bytes(json.dumps(value, ensure_ascii=False).encode(), 'application/json; charset=utf-8', status=status)
 
@@ -75,7 +78,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.valid_host():
             return self.job_error(JobError('INVALID_HOST', '只接受本机地址。', 403))
         expected_origin = f'http://{self.headers.get("Host")}'
-        if (self.headers.get('Origin') not in (None, expected_origin) or
+        if (not self.valid_origin() or
                 self.headers.get('X-LightTry-Token') != self.csrf_token):
             return self.job_error(JobError('INVALID_ORIGIN', '请从当前本机应用提交任务。', 403))
         route = urlsplit(self.path).path

@@ -35,7 +35,7 @@ class Handler(shared.Handler):
             return self.job_error(JobError('INVALID_HOST', '只接受本机地址。', 403))
         route = urlsplit(self.path).path
         static = {'/': 'index.html', '/index.html': 'index.html',
-                  '/workbench.js': 'workbench.js', '/scheme-state.js': 'scheme-state.js', '/chat.js': 'chat.js', '/console.js':'console.js', '/workbench.css': 'workbench.css'}
+                  '/workbench.js': 'workbench.js', '/workspace-portability.js': 'workspace-portability.js', '/scheme-state.js': 'scheme-state.js', '/chat.js': 'chat.js', '/console.js':'console.js', '/workbench.css': 'workbench.css'}
         if route in static:
             return self.send_file(Path(__file__).parent / 'web' / static[route])
         if route == '/api/accepted-results':
@@ -88,7 +88,7 @@ class Handler(shared.Handler):
     def do_POST(self):
         route=urlsplit(self.path).path
         if route in ('/api/environments/import','/api/lighting/condition'):
-            if not self.valid_host() or self.headers.get('X-LightTry-Token')!=self.csrf_token or self.headers.get('Origin') not in (None,'http://'+self.headers.get('Host','')):
+            if not self.valid_host() or self.headers.get('X-LightTry-Token')!=self.csrf_token or not self.valid_origin():
                 return self.job_error(JobError('INVALID_ORIGIN','仅接受当前本机应用。',403))
             try:
                 size=int(self.headers.get('Content-Length','0'))
@@ -113,7 +113,7 @@ class Handler(shared.Handler):
             except (ValueError,KeyError,TypeError,UnicodeError,OSError) as e:return self.job_error(JobError('LIGHTING_INVALID',str(e),422))
         recovery=re.fullmatch(r'/api/tasks/([a-f0-9]{32})/recover-transferred',urlsplit(self.path).path)
         if recovery:
-            if (not self.valid_host() or self.headers.get('X-LightTry-Token')!=self.csrf_token or self.headers.get('Origin') not in (None,'http://'+self.headers.get('Host',''))):
+            if (not self.valid_host() or self.headers.get('X-LightTry-Token')!=self.csrf_token or not self.valid_origin()):
                 return self.job_error(JobError('INVALID_ORIGIN','仅接受当前本机应用提交。',403))
             try:
                 size=int(self.headers.get('Content-Length','0'))
@@ -125,7 +125,7 @@ class Handler(shared.Handler):
             except (ValueError,KeyError,TypeError,OSError):return self.job_error(JobError('RECOVERY_INVALID','恢复数据缺失或无效。',422))
         if urlsplit(self.path).path == '/api/lighting/recommend':
             if (not self.valid_host() or self.headers.get('X-LightTry-Token') != self.csrf_token or
-                    self.headers.get('Origin') not in (None, 'http://' + self.headers.get('Host', ''))):
+                    not self.valid_origin()):
                 return self.job_error(JobError('INVALID_ORIGIN', '请从当前本机应用提交。', 403))
             try:
                 if self.recipe_language is None: raise shared.LanguageError('LANGUAGE_NOT_CONFIGURED','Nemotron 未启用。',503)
@@ -140,7 +140,7 @@ class Handler(shared.Handler):
             except (ValueError,KeyError,TypeError,UnicodeError,RecursionError):return self.job_error(JobError('INVALID_LANGUAGE_REQUEST','文字方案请求无效。',400))
         if urlsplit(self.path).path == '/api/lighting/normalize':
             if (not self.valid_host() or self.headers.get('X-LightTry-Token') != self.csrf_token or
-                    self.headers.get('Origin') not in (None, 'http://' + self.headers.get('Host', ''))):
+                    not self.valid_origin()):
                 return self.job_error(JobError('INVALID_ORIGIN', '请从当前本机应用提交。', 403))
             try:
                 size = int(self.headers.get('Content-Length', '0'))
@@ -158,6 +158,40 @@ class Handler(shared.Handler):
         return super().do_POST()
 
 
+def configure(a, handler=Handler):
+    handler.assets_dir = shared.resolve_assets_dir(a.assets_dir)
+    if getattr(a, 'no_demo', False):
+        handler.catalog = json.loads((PROJECT/'data/catalog.json').read_text(encoding='utf-8'))
+        handler.catalog.update(samples=[], assets={})
+        handler.catalog.pop('preferredSample', None)
+    else:
+        handler.catalog = shared.load_catalog(handler.assets_dir)
+    handler.lighting_capabilities, handler.studies, handler.study_files = load_evidence(a.evidence_config)
+    accepted, accepted_files, handler.imported_schemes = load_accepted_many(a.accepted_package, handler.catalog)
+    handler.studies.extend(accepted); handler.study_files.update(accepted_files)
+    handler.lighting_capabilities={**handler.lighting_capabilities,'parameterized':True,'legacyRevision':handler.lighting_capabilities['revision'],'revision':'parameterized-engineering-v2','experimental':True}
+    handler.environment_library=EnvironmentLibrary(a.tasks_dir.parent/'environments-v2',handler.catalog['presets'])
+    if a.language_key_file:
+        if not a.language_ledger: raise ValueError('NEW_LANGUAGE_LEDGER_REQUIRED')
+        key=a.language_key_file.read_text(encoding='utf-8-sig').strip()
+        if not key.isascii() or not 20<=len(key)<=4096 or any(c.isspace() for c in key):raise ValueError('KEY_FILE_FORMAT_INVALID_NO_REQUEST')
+        from recipe_language import RecipeLanguage
+        handler.recipe_language=RecipeLanguage(handler.catalog['presets'],handler.lighting_capabilities,key,a.language_ledger,
+            max_calls=a.language_max_calls,budget=a.language_budget, measured_cases=measured_context(accepted))
+    executor = None
+    if a.inference_config:
+        # A separate reviewed parameter adapter is required, never the old driver
+        # that would accept a field and silently ignore it.
+        from runtime.executor import SchemeExecutor
+        executor = SchemeExecutor(a.inference_config)
+    handler.task_store = SchemeStore(a.tasks_dir, handler.catalog['presets'], executor,
+                                    lighting_capabilities=handler.lighting_capabilities,
+                                    approved_language_operation=handler.recipe_language.approved_operation if handler.recipe_language else None)
+    handler.task_store.environment_library=handler.environment_library
+    handler.task_store.environments.update(handler.environment_library.environments)
+    return handler
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--port', type=int, default=8785)
@@ -171,31 +205,7 @@ def main():
     p.add_argument('--language-max-calls', type=int, default=12)
     p.add_argument('--language-budget', type=float, default=.20)
     a = p.parse_args()
-    Handler.assets_dir = shared.resolve_assets_dir(a.assets_dir)
-    Handler.catalog = shared.load_catalog(Handler.assets_dir)
-    Handler.lighting_capabilities, Handler.studies, Handler.study_files = load_evidence(a.evidence_config)
-    accepted, accepted_files, Handler.imported_schemes = load_accepted_many(a.accepted_package, Handler.catalog)
-    Handler.studies.extend(accepted); Handler.study_files.update(accepted_files)
-    Handler.lighting_capabilities={**Handler.lighting_capabilities,'parameterized':True,'legacyRevision':Handler.lighting_capabilities['revision'],'revision':'parameterized-engineering-v2','experimental':True}
-    Handler.environment_library=EnvironmentLibrary(a.tasks_dir.parent/'environments-v2',Handler.catalog['presets'])
-    if a.language_key_file:
-        if not a.language_ledger: raise ValueError('NEW_LANGUAGE_LEDGER_REQUIRED')
-        key=a.language_key_file.read_text(encoding='utf-8-sig').strip()
-        if not key.isascii() or not 20<=len(key)<=4096 or any(c.isspace() for c in key):raise ValueError('KEY_FILE_FORMAT_INVALID_NO_REQUEST')
-        from recipe_language import RecipeLanguage
-        Handler.recipe_language=RecipeLanguage(Handler.catalog['presets'],Handler.lighting_capabilities,key,a.language_ledger,
-            max_calls=a.language_max_calls,budget=a.language_budget, measured_cases=measured_context(accepted))
-    executor = None
-    if a.inference_config:
-        # A separate reviewed parameter adapter is required, never the old driver
-        # that would accept a field and silently ignore it.
-        from runtime.executor import SchemeExecutor
-        executor = SchemeExecutor(a.inference_config)
-    Handler.task_store = SchemeStore(a.tasks_dir, Handler.catalog['presets'], executor,
-                                    lighting_capabilities=Handler.lighting_capabilities,
-                                    approved_language_operation=Handler.recipe_language.approved_operation if Handler.recipe_language else None)
-    Handler.task_store.environment_library=Handler.environment_library
-    Handler.task_store.environments.update(Handler.environment_library.environments)
+    configure(a)
     with ThreadingHTTPServer(('127.0.0.1', a.port), Handler) as http:
         print('LightTry 方案工作台：http://127.0.0.1:' + str(a.port), flush=True)
         try: http.serve_forever()

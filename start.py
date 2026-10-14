@@ -36,6 +36,11 @@ def local_options(argv):
     return options, effective, remaining
 
 def main():
+    # Service mode is explicit and never reads machine-local Windows configuration.
+    if '--service' in sys.argv[1:]:
+        sys.path.insert(0, str(ROOT/'project'))
+        from service import main as serve_service
+        return serve_service([a for a in sys.argv[1:] if a != '--service'])
     options, cfg, remaining = local_options(sys.argv[1:])
     if options.paths:
         print(json.dumps({'paths':cfg, 'paid_defaults':False}, ensure_ascii=False, indent=2))
