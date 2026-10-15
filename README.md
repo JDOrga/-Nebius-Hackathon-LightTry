@@ -12,6 +12,12 @@ python -X utf8 -B start.py
 
 本机路径仅在被忽略的 `.local/studio.json`；模板见 `config/studio.example.json`。`python -B start.py --paths` 只展示路径。`python` 指已有产品 CPU 环境，`offline_python` 指已有基础离线环境；venv 不搬迁。`assets_dir`、`tasks_dir`、`inverse_cache_dir` 指唯一实际数据目录，现有本机复用原数据，不再复制一份；新环境默认任务/缓存在 `.local/state/`。
 
+本地样例支持完整的 20261010 五组包及 20261009 四组包；两者的图片和来源记录均按固定清单校验。旧包只显示已有四组样例，页面注明白蓝杯未安装。新版包部分缺失、图片或来源记录被修改仍拒绝启动，不以占位图替代历史结果。部署参数另存本机部署配置，不写入只接受路径的 `.local/studio.json`。
+
+`python -X utf8 -B start.py --simulate` 在 http://127.0.0.1:8786 开启完整离线操作模拟。AI 助手仅按关键词提供脚本建议；生成任务返回带 `SIMULATION ONLY` 水印的 CPU 演示图，不代表 Cosmos 重布光。模拟任务及文字记录位于配置任务目录的同级 `simulation/`，使用独立端口，不混入正常任务。模拟回执只核验本地身份和图片哈希，不伪造模型张量或 GPU 成功证据；不读 Key、不连接云端、不收费。真实推理/文字配置不能与 `--simulate` 同时使用。文字模拟每份记录最多20次；重启不会重置计数。
+
+方案库提供“删除变体”和“撤销上次删除”。删除隐藏本机库中该变体的全部版本，刷新后仍生效；撤销恢复原身份和版本。原照片、任务、结果、服务端存档保持保留，其他浏览器不受影响。有运行中或状态不确定任务的变体暂不能删除。
+
 ## 目录与职责
 
 - `project/studio.py` / `shared_http.py`：工作室及共享 HTTP 接口；`project/web/` 是唯一前端。

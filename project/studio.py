@@ -195,6 +195,7 @@ def configure(a, handler=Handler):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--port', type=int, default=8785)
+    p.add_argument('--simulate', action='store_true', help='显式离线模拟：脚本建议与带水印演示图，无模型或云调用。')
     p.add_argument('--assets-dir', required=True)
     p.add_argument('--evidence-config', type=Path)
     p.add_argument('--accepted-package', type=Path, action='append')
@@ -205,7 +206,16 @@ def main():
     p.add_argument('--language-max-calls', type=int, default=12)
     p.add_argument('--language-budget', type=float, default=.20)
     a = p.parse_args()
+    if a.simulate:
+        if a.inference_config or a.language_key_file or a.language_ledger:
+            p.error('模拟模式不能同时配置真实推理或文字服务。')
+        a.tasks_dir = a.tasks_dir.parent / 'simulation' / 'tasks'
+        if '--port' not in sys.argv and not any(x.startswith('--port=') for x in sys.argv):
+            a.port = 8786
     configure(a)
+    if a.simulate:
+        from simulation import install
+        install(Handler, a.tasks_dir)
     with ThreadingHTTPServer(('127.0.0.1', a.port), Handler) as http:
         print('LightTry 方案工作台：http://127.0.0.1:' + str(a.port), flush=True)
         try: http.serve_forever()

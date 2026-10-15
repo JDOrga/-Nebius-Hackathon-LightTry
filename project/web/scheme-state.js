@@ -24,6 +24,15 @@ export function revise(scheme,parameters,name=scheme.name,existing=[]) {
 export function variant(scheme,name) {
   return {...structuredClone(scheme),planId:uid(),version:1,parentVersion:null,name:(name.trim()||scheme.name+' 副本').slice(0,60)};
 }
+export function removeFamily(library,planId,current,inputId,environmentId) {
+  const remaining=library.filter(s=>s.planId!==planId);
+  if(remaining.length===library.length)return {library,current};
+  if(current.planId!==planId)return {library:remaining,current};
+  const next=remaining.filter(s=>s.inputId===inputId).sort((a,b)=>b.version-a.version)[0];
+  if(next)return {library:remaining,current:next};
+  const replacement=createScheme(environmentId,'新方案',inputId);
+  return {library:remaining.concat(replacement),current:replacement};
+}
 export function sameParameters(a,b) {return canonical(a)===canonical(b);}
 export function matchingTask(task,inputId,parameters,now=Date.now()) {
   if(task.input?.id!==inputId || task.status!=='succeeded' || task.executionUncertain ||

@@ -37,6 +37,25 @@ def asset_path(assets_dir, item):
 def load_catalog(assets_dir=None):
     assets_dir = resolve_assets_dir(assets_dir)
     data = json.loads((ROOT / 'data/catalog.json').read_text(encoding='utf-8'))
+    package = json.loads((ROOT / 'data/demo-package.json').read_text(encoding='utf-8'))
+    # A complete, recognized older package remains usable. Never turn an
+    # incomplete or corrupted new package into a successful legacy load.
+    for legacy in package.get('compatiblePackages', []):
+        sample_ids = set(legacy['sampleIds'])
+        asset_ids = set(legacy['assetIds'])
+        excluded = [item for key, item in data['assets'].items() if key not in asset_ids]
+        if (all(asset_path(assets_dir, data['assets'][key]).is_file() for key in asset_ids)
+                and all(not asset_path(assets_dir, item).exists() for item in excluded)
+                and all(not asset_path(assets_dir, {'path': name}).exists()
+                        for name in set(package['records']) - set(legacy['records']))):
+            unavailable = [s['name'] for s in data['samples'] if s['id'] not in sample_ids]
+            data['samples'] = [s for s in data['samples'] if s['id'] in sample_ids]
+            data['assets'] = {key: item for key, item in data['assets'].items() if key in asset_ids}
+            if data.get('preferredSample') not in sample_ids:
+                data.pop('preferredSample', None)
+            data['demoPackage'] = {'name': legacy['name'], 'unavailableSamples': unavailable}
+            package = legacy
+            break
     for item in data['assets'].values():
         path = asset_path(assets_dir, item)
         if not path.is_file():
@@ -44,7 +63,6 @@ def load_catalog(assets_dir=None):
         with path.open('rb') as f:
             if hashlib.file_digest(f, 'sha256').hexdigest() != item['sha256']:
                 raise ValueError('样例素材校验失败：' + item['path'] + '\n' + INSTALL_HINT)
-    package = json.loads((ROOT / 'data/demo-package.json').read_text(encoding='utf-8'))
     for name, record in package['records'].items():
         path = asset_path(assets_dir, {'path': name})
         if not path.is_file():

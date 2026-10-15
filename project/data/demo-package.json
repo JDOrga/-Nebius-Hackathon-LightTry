@@ -19,5 +19,54 @@
       "bytes": 4950,
       "sha256": "53c0dc7f99bc036f021803cd8b693e337068519b30596d15a6e65711b6053413"
     }
-  }
+  },
+  "compatiblePackages": [
+    {
+      "schema": 1,
+      "name": "lighttry-demo-assets-20261009.zip",
+      "distribution": "local-only; public output rights unverified",
+      "records": {
+        "source-records.json": {
+          "bytes": 19576,
+          "sha256": "7439422c643733051d74dda134d80cd7be5e9a497096cc6adbb7edc1f4132f37"
+        },
+        "ATTRIBUTION.txt": {
+          "bytes": 1699,
+          "sha256": "1b115b01d0886f6f976467a7b4be7d517a5b2952a527bfa074018594153a3294"
+        },
+        "LOCAL_ONLY.md": {
+          "bytes": 488,
+          "sha256": "0025fe86cb13110831283733d84446414633f97d14cd4fcfe893eacc95f8d142"
+        }
+      },
+      "sampleIds": [
+        "01_matte_terracotta",
+        "02_text_tea_tin",
+        "03_glossy_metal_teapot",
+        "04_transparent_glass"
+      ],
+      "assetIds": [
+        "01_matte_terracotta-original",
+        "01_matte_terracotta-input",
+        "01_matte_terracotta-sunny",
+        "01_matte_terracotta-sunrise",
+        "01_matte_terracotta-street",
+        "02_text_tea_tin-original",
+        "02_text_tea_tin-input",
+        "02_text_tea_tin-sunny",
+        "02_text_tea_tin-sunrise",
+        "02_text_tea_tin-street",
+        "03_glossy_metal_teapot-original",
+        "03_glossy_metal_teapot-input",
+        "03_glossy_metal_teapot-sunny",
+        "03_glossy_metal_teapot-sunrise",
+        "03_glossy_metal_teapot-street",
+        "04_transparent_glass-original",
+        "04_transparent_glass-input",
+        "04_transparent_glass-sunny",
+        "04_transparent_glass-sunrise",
+        "04_transparent_glass-street"
+      ]
+    }
+  ]
 }
