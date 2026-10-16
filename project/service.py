@@ -118,16 +118,24 @@ class Application:
             self.handler.task_store.close(); raise ValueError('EXPLICIT_LEGACY_OWNER_ACCOUNT_REQUIRED')
         self.workspace.bind_legacy(migration_owner,self.handler.task_store.root,self.handler.environment_library)
         self.limiter=RateLimiter(self.workspace)
+        self.model_executor=None
+        if getattr(options,'model_grant_file',None):
+            if not self.gpu_control:
+                self.handler.task_store.close();raise ValueError('GPU_CONTROL_REQUIRED_FOR_MODEL_GRANT')
+            from https_executor import HTTPSCosmosExecutor
+            self.model_executor=HTTPSCosmosExecutor(self.gpu_control,options.model_grant_file,self.handler.task_store.root)
+            self.handler.task_store.executor=self.model_executor
         self.queue=GPUQueue(self.workspace,self.handler.task_store)
         logs = RotatingFileHandler(data / 'logs/service.log', maxBytes=2 * 1024 * 1024, backupCount=3, encoding='utf-8')
         logs.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
         self.log_handler = logs
         LOG.addHandler(logs); LOG.setLevel(logging.INFO)
-        LOG.info('service initialized; GPU control binding=%s; model dispatch disabled',bool(self.gpu_control))
+        LOG.info('service initialized; GPU control binding=%s; model adapter=%s',bool(self.gpu_control),bool(self.model_executor))
 
     def close(self):
         if self.gpu_control:self.gpu_control.close()
         self.queue.close()
+        if self.model_executor:self.model_executor.close()
         self.handler.task_store.close()
         LOG.info('service stopped')
         LOG.removeHandler(self.log_handler); self.log_handler.close()
@@ -500,7 +508,7 @@ class Application:
         elif h.command == 'GET' and path == '/api/health':
             with self.workspace.connect() as db:
                 db.execute('SELECT 1').fetchone()
-            h.json_response({'status': 'ready', 'paidServices': False})
+            h.json_response({'status': 'ready', 'paidServices': self.model_executor is not None})
         elif h.command == 'GET' and path in ('/api/workspace', '/api/workspace/export'):
             value = self.workspace.library(h.user)
             value['taskIds'] = [p.name for p in h.task_store.root.iterdir()
@@ -536,6 +544,7 @@ class Application:
 def parser():
     p = argparse.ArgumentParser(description='Linux/CPU standalone service; paid services remain OFF.')
     p.add_argument('--accounts-file',default=os.environ.get('LIGHTTRY_ACCOUNTS_FILE'))
+    p.add_argument('--model-grant-file',type=Path,default=os.environ.get('LIGHTTRY_MODEL_GRANT_FILE'))
     p.add_argument('--gpu-control-config',type=Path,default=os.environ.get('LIGHTTRY_GPU_CONTROL_CONFIG'),
                    help='Private audited control factory binding; no implicit cloud start.')
     p.add_argument('--init-account',action='store_true',help='Create runtime-only 7-day user account; no service/cloud start.')
@@ -564,6 +573,7 @@ def main(argv=None):
         signal.signal(signal.SIGTERM, stop)
         app.queue.start()
         if app.gpu_control:app.gpu_control.start_heartbeat()
+        if app.model_executor:app.model_executor.start()
         print('LightTry CPU service: 0.0.0.0:8080; data=' + str(app.workspace.root), flush=True)
         serve(app, listen='0.0.0.0:8080', threads=4, connection_limit=64,
               max_request_header_size=16384, max_request_body_size=32 * 1024 * 1024,

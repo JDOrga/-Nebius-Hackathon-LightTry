@@ -1,0 +1,24 @@
+[Unit]
+Description=LightTry authenticated GPU worker (no automatic model warmup)
+After=network.target
+ConditionPathExists=/etc/lighttry/worker.json
+
+[Service]
+Type=simple
+User=GPU_USER
+Group=GPU_GROUP
+WorkingDirectory=/opt/lighttry
+EnvironmentFile=/etc/lighttry/worker.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/lighttry/.venv/bin/python -X utf8 -B /opt/lighttry/start.py --worker --data-root /home/jovyan/lighttry-worker --session-id ${LIGHTTRY_WORKER_SESSION} --resource-id ${LIGHTTRY_WORKER_RESOURCE} --worker-token-file /run/secrets/lighttry-worker-token --worker-config /etc/lighttry/worker.json
+Restart=on-failure
+RestartSec=3
+KillMode=control-group
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

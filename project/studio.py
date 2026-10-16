@@ -29,11 +29,13 @@ class Handler(shared.Handler):
     study_files = {}
     recipe_language = None
     imported_schemes = []
+    local_cpu_api = None
 
     def do_GET(self):
         if not self.valid_host():
             return self.job_error(JobError('INVALID_HOST', '只接受本机地址。', 403))
         route = urlsplit(self.path).path
+        if self.local_cpu_api and self.local_cpu_api.get(self,route):return
         static = {'/': 'index.html', '/index.html': 'index.html',
                   '/workbench.js': 'workbench.js', '/workspace-portability.js': 'workspace-portability.js', '/scheme-state.js': 'scheme-state.js', '/chat.js': 'chat.js', '/console.js':'console.js', '/workbench.css': 'workbench.css'}
         if route in static:
@@ -86,6 +88,7 @@ class Handler(shared.Handler):
         return super().do_GET()
 
     def do_POST(self):
+        if self.local_cpu_api and self.local_cpu_api.post(self,urlsplit(self.path).path):return
         route=urlsplit(self.path).path
         if route in ('/api/environments/import','/api/lighting/condition'):
             if not self.valid_host() or self.headers.get('X-LightTry-Token')!=self.csrf_token or not self.valid_origin():
@@ -159,6 +162,7 @@ class Handler(shared.Handler):
 
 
 def configure(a, handler=Handler):
+    handler.local_cpu_api=None  # DeploymentHandler must not inherit local-only routing.
     handler.assets_dir = shared.resolve_assets_dir(a.assets_dir)
     if getattr(a, 'no_demo', False):
         handler.catalog = json.loads((PROJECT/'data/catalog.json').read_text(encoding='utf-8'))
@@ -189,6 +193,9 @@ def configure(a, handler=Handler):
                                     approved_language_operation=handler.recipe_language.approved_operation if handler.recipe_language else None)
     handler.task_store.environment_library=handler.environment_library
     handler.task_store.environments.update(handler.environment_library.environments)
+    if getattr(a,'local_cpu_api',False):
+        from local_cpu_api import LocalCPUAPI
+        handler.local_cpu_api=LocalCPUAPI(getattr(a,'simulate',False))
     return handler
 
 
@@ -206,6 +213,7 @@ def main():
     p.add_argument('--language-max-calls', type=int, default=12)
     p.add_argument('--language-budget', type=float, default=.20)
     a = p.parse_args()
+    a.local_cpu_api=True
     if a.simulate:
         if a.inference_config or a.language_key_file or a.language_ledger:
             p.error('模拟模式不能同时配置真实推理或文字服务。')

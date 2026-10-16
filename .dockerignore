@@ -6,6 +6,14 @@
 !scripts/
 scripts/**
 !scripts/weights.py
+!cloud/
+cloud/**
+!cloud/cli_bridge.py
+!manifests/
+manifests/**
+!manifests/patch_manifest.json
+!manifests/weights_manifest.json
+!manifests/upstream.json
 !project/
 project/**
 !project/*.py

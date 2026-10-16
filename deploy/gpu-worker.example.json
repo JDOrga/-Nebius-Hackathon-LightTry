@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "enabled": false,
+  "python": "/home/jovyan/MODEL_VENV/bin/python",
+  "repo": "/home/jovyan/COSMOS_REPO",
+  "checkpointDir": "/home/jovyan/CHECKPOINT_DIR",
+  "cudaHome": "/home/jovyan/CUDA_HOME",
+  "grantFile": "/etc/lighttry/model-grant.json"
+}

@@ -24,7 +24,7 @@ class LinkUncertain(Exception):
 
 
 class HTTPSWorker:
-    def __init__(self, url, token, *, ca_file=None, timeout=5, connection_factory=None):
+    def __init__(self, url, token, *, ca_file=None, timeout=5, connection_factory=None, certificate_sha256=None):
         endpoint=urlsplit(url)
         if (endpoint.scheme!='https' or not endpoint.hostname or endpoint.username or
                 endpoint.password or endpoint.query or endpoint.fragment or endpoint.path not in ('','/')):
@@ -32,6 +32,9 @@ class HTTPSWorker:
         if not isinstance(token,str) or not 32<=len(token)<=4096 or any(ord(c)<33 or ord(c)>126 for c in token):
             raise ValueError('RUNTIME_WORKER_TOKEN_REQUIRED')
         if not 0<timeout<=10:raise ValueError('BOUNDED_WORKER_TIMEOUT_REQUIRED')
+        if certificate_sha256 is not None and (not isinstance(certificate_sha256,str) or not re.fullmatch('[a-f0-9]{64}',certificate_sha256)):
+            raise ValueError('WORKER_CERTIFICATE_PIN_INVALID')
+        self.certificate_sha256=certificate_sha256
         self.endpoint,self.token,self.timeout=endpoint,token,timeout
         self.simulation=connection_factory is not None
         self.context=ssl.create_default_context(cafile=ca_file)
@@ -45,9 +48,18 @@ class HTTPSWorker:
         connection=self.factory(self.endpoint.hostname,self.endpoint.port or 443,
                                 timeout=self.timeout,context=self.context)
         try:
+            if self.certificate_sha256:
+                connection.connect()
+                if not hmac.compare_digest(hashlib.sha256(connection.sock.getpeercert(binary_form=True)).hexdigest(),self.certificate_sha256):
+                    raise LinkUncertain()
             connection.request(method,path,body=payload,headers={'Authorization':'Bearer '+self.token,
                 'Content-Type':'application/json' if isinstance(body,dict) else 'application/octet-stream'})
-            response=connection.getresponse();raw=response.read(1024*1024+1)
+            response=connection.getresponse()
+            if method=='GET' and path.startswith('/v1/blobs/'):
+                raw=response.read(MAX_BODY+1)
+                if response.status!=200 or len(raw)>MAX_BODY or hashlib.sha256(raw).hexdigest()!=path.rsplit('/',1)[1]:raise LinkUncertain()
+                return raw
+            raw=response.read(1024*1024+1)
             if len(raw)>1024*1024 or response.status not in (200,201,202,404):raise LinkUncertain()
             value=json.loads(raw)
             if not isinstance(value,dict):raise LinkUncertain()
@@ -66,6 +78,8 @@ class HTTPSWorker:
         sha=hashlib.sha256(payload).hexdigest()
         return self.request('PUT','/v1/blobs/'+sha,payload)
 
+    def download(self,sha):return self.request('GET','/v1/blobs/'+sha)
+
 
 class WorkerLedger:
     simulation=True
@@ -74,9 +88,11 @@ class WorkerLedger:
         source=Path(root)
         if not source.is_absolute() or any(x.is_symlink() for x in (source,*source.parents)):raise ValueError('PRIVATE_WORKER_ROOT_REQUIRED')
         self.root=source.resolve();self.root.mkdir(parents=True,exist_ok=True,mode=0o700)
-        if not ID.fullmatch(session_id) or len(token)<32:raise ValueError('WORKER_RUNTIME_IDENTITY_REQUIRED')
+        if (not isinstance(session_id,str) or not ID.fullmatch(session_id) or not isinstance(resource_id,str) or not resource_id or
+                not isinstance(token,str) or not 32<=len(token)<=4096 or any(ord(c)<33 or ord(c)>126 for c in token)):
+            raise ValueError('WORKER_RUNTIME_IDENTITY_REQUIRED')
         self.token,self.session_id,self.resource_id=token,session_id,resource_id
-        self.lock=threading.RLock();self.model_state='loading';self.executor=None
+        self.lock=threading.RLock();self.model_state='loading';self.executor=None;self.max_jobs=None
         if (self.root/'blobs').is_symlink() or (self.root/'worker.sqlite3').is_symlink():raise ValueError('WORKER_PATH_SYMLINK_FORBIDDEN')
         (self.root/'blobs').mkdir(exist_ok=True,mode=0o700)
         self.lockfile=(self.root/'.worker.lock').open('a+b');self.lockfile.write(b'0');self.lockfile.flush();self.lockfile.seek(0)
@@ -89,10 +105,21 @@ class WorkerLedger:
                 fcntl.flock(self.lockfile,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except OSError:
             self.lockfile.close();raise ValueError('WORKER_STORE_IN_USE')
-        with self.db() as db:
-            db.execute('CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,body TEXT NOT NULL,state TEXT NOT NULL)')
-            # Crash during invocation is not evidence that it never ran.
-            db.execute("UPDATE jobs SET state='uncertain' WHERE state='dispatching'")
+        try:
+            with self.db() as db:
+                db.execute('CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,body TEXT NOT NULL,state TEXT NOT NULL)')
+                db.execute('CREATE TABLE IF NOT EXISTS results(id TEXT PRIMARY KEY,sha TEXT NOT NULL)')
+                db.execute('CREATE TABLE IF NOT EXISTS worker_identity(singleton INTEGER PRIMARY KEY,session TEXT,resource TEXT)')
+                identity=db.execute('SELECT session,resource FROM worker_identity WHERE singleton=1').fetchone()
+                if identity and identity!=(session_id,resource_id):raise ValueError('WORKER_STORE_SESSION_MISMATCH')
+                for row in db.execute('SELECT body FROM jobs'):
+                    old=json.loads(row[0])
+                    if (old.get('sessionId'),old.get('resourceId'))!=(session_id,resource_id):raise ValueError('WORKER_STORE_SESSION_MISMATCH')
+                db.execute('INSERT OR IGNORE INTO worker_identity VALUES (1,?,?)',(session_id,resource_id))
+                # Crash during invocation is not evidence that it never ran.
+                db.execute("UPDATE jobs SET state='uncertain' WHERE state='dispatching'")
+        except BaseException:
+            self.lockfile.close();raise
 
     @contextmanager
     def db(self):
@@ -105,7 +132,17 @@ class WorkerLedger:
 
     def close(self):self.lockfile.close()
 
-    def health(self):return {'sessionId':self.session_id,'resourceId':self.resource_id,'modelState':self.model_state}
+    def health(self):return {'sessionId':self.session_id,'resourceId':self.resource_id,'modelState':self.model_state,
+                             'simulation':self.simulation,'modelLoaded':None if self.executor else False,'executionMode':'per-job',
+                             'hostIdentity':getattr(self,'host_identity',None)}
+
+    def blob(self,sha):
+        if not re.fullmatch('[a-f0-9]{64}',sha):raise JobError('ARTIFACT_INVALID','Invalid artifact.',422)
+        path=self.root/'blobs'/sha
+        if path.is_symlink() or not path.is_file() or path.stat().st_size>MAX_BODY:raise JobError('ARTIFACT_MISSING','Missing artifact.',404)
+        raw=path.read_bytes()
+        if hashlib.sha256(raw).hexdigest()!=sha:raise JobError('ARTIFACT_CHANGED','Artifact changed.',409)
+        return raw
 
     def upload(self, sha, data):
         if not re.fullmatch('[a-f0-9]{64}',sha) or not 0<len(data)<=MAX_BODY or hashlib.sha256(data).hexdigest()!=sha:
@@ -132,14 +169,20 @@ class WorkerLedger:
             old=db.execute('SELECT fingerprint FROM jobs WHERE id=?',(value['jobId'],)).fetchone()
             if old:
                 if old[0]!=fingerprint:raise JobError('JOB_CONFLICT','Job id already binds other input.',409)
-            else:db.execute('INSERT INTO jobs VALUES (?,?,?,?)',(value['jobId'],fingerprint,canonical(value),'queued'))
+            else:
+                if self.executor and callable(getattr(self.executor,'authorize',None)):
+                    self.executor.authorize(value)
+                if self.max_jobs is not None and db.execute('SELECT count(*) FROM jobs').fetchone()[0]>=self.max_jobs:
+                    raise JobError('WORKER_SCOPE_EXHAUSTED','Authorized job limit reached.',403)
+                db.execute('INSERT INTO jobs VALUES (?,?,?,?)',(value['jobId'],fingerprint,canonical(value),'queued'))
         return self.query(value['jobId'])
 
     def query(self, job_id):
         if not ID.fullmatch(job_id):raise JobError('JOB_NOT_FOUND','Job not found.',404)
         with self.db() as db:row=db.execute('SELECT body,state FROM jobs WHERE id=?',(job_id,)).fetchone()
         if not row:return {'status':'not_found'}
-        return {**json.loads(row[0]),'status':row[1]}
+        with self.db() as db:result=db.execute('SELECT sha FROM results WHERE id=?',(job_id,)).fetchone()
+        return {**json.loads(row[0]),'status':row[1],**({'resultSha256':result[0]} if result else {})}
 
     def run_one(self):
         with self.lock,self.db() as db:
@@ -150,6 +193,11 @@ class WorkerLedger:
             db.execute("UPDATE jobs SET state='dispatching' WHERE id=?",(row[0],));db.commit()
             try:
                 outcome=self.executor(json.loads(row[1]))
+                if isinstance(outcome,dict):
+                    if set(outcome)!={'status','resultSha256'} or outcome['status']!='succeeded':raise ValueError()
+                    self.blob(outcome['resultSha256'])
+                    db.execute('INSERT INTO results VALUES (?,?)',(row[0],outcome['resultSha256']))
+                    outcome=outcome['status']
                 if outcome not in ('succeeded','failed'):raise ValueError()
                 db.execute('UPDATE jobs SET state=? WHERE id=?',(outcome,row[0]))
             except Exception:db.execute("UPDATE jobs SET state='uncertain' WHERE id=?",(row[0],))
@@ -165,6 +213,10 @@ class WorkerApplication:
             if not hmac.compare_digest(auth,'Bearer '+self.ledger.token):raise JobError('AUTH_REQUIRED','Authentication required.',401)
             method,path=environ['REQUEST_METHOD'],environ.get('PATH_INFO','/')
             if method=='GET' and path=='/v1/health':value=self.ledger.health()
+            elif method=='GET' and re.fullmatch('/v1/blobs/[a-f0-9]{64}',path):
+                raw=self.ledger.blob(path.rsplit('/',1)[1])
+                start_response('200 OK',[('Content-Type','application/octet-stream'),('Content-Length',str(len(raw))),('Cache-Control','no-store')])
+                return [raw]
             elif method=='GET' and re.fullmatch('/v1/jobs/[a-f0-9]{32}',path):
                 value=self.ledger.query(path.rsplit('/',1)[1]);status=404 if value['status']=='not_found' else 200
             elif (method=='POST' and path=='/v1/jobs') or (method=='PUT' and re.fullmatch('/v1/blobs/[a-f0-9]{64}',path)):

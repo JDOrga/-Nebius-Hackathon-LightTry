@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "sessionId": "CURRENT_SESSION_ID_32_HEX",
+  "resourceId": "RESOURCE_ID",
+  "hostIdentity": {},
+  "hostConfirmed": false,
+  "modelLicenseAck": false,
+  "expiresAt": 0,
+  "budgetUsdIncludingTax": 0,
+  "approvalReference": "NEW_APPROVAL_REFERENCE",
+  "maxJobs": 1,
+  "allowedOriginalSha256": ["APPROVED_ORIGINAL_SHA256_64_HEX"],
+  "allowedRecipeKeys": ["APPROVED_RECIPE_KEY_64_HEX"],
+  "allowedMetadata": [{"owner": "OWNER", "fingerprint": "APPROVED_QUEUE_FINGERPRINT_64_HEX"}]
+}

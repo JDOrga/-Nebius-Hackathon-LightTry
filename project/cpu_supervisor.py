@@ -17,7 +17,8 @@ def build_sessions(root,binding):
     """Audited provider plug-in + existing HTTPS worker; construction is offline."""
     from gpu_session import Sessions
     from worker_link import HTTPSWorker
-    if (not isinstance(binding,dict) or set(binding)!={'providerFactory','providerBinding','workerOrigin','workerTokenFile','workerCaFile'} or
+    if (not isinstance(binding,dict) or set(binding)-{'providerFactory','providerBinding','workerOrigin','workerTokenFile','workerCaFile','workerCertificateSha256'} or
+            not {'providerFactory','providerBinding','workerOrigin','workerTokenFile','workerCaFile'}<=set(binding) or
             not isinstance(binding['providerFactory'],str) or
             not re.fullmatch(r'[a-zA-Z_][a-zA-Z0-9_.]*:[a-zA-Z_][a-zA-Z0-9_]*',binding['providerFactory']) or
             not isinstance(binding['providerBinding'],dict)):
@@ -25,11 +26,16 @@ def build_sessions(root,binding):
     token=runtime_file(binding['workerTokenFile'],ROOT,4096).decode('utf-8').strip()
     ca=binding['workerCaFile']
     if ca is not None:runtime_file(ca,ROOT,65536)
-    worker=HTTPSWorker(binding['workerOrigin'],token,ca_file=ca,timeout=5)
+    pin=binding.get('workerCertificateSha256')
+    if binding['providerFactory']=='nebius_provider:build' and pin is None:
+        raise ValueError('NEBIUS_WORKER_CERTIFICATE_PIN_REQUIRED')
+    worker=HTTPSWorker(binding['workerOrigin'],token,ca_file=ca,timeout=5,certificate_sha256=pin)
     module,symbol=binding['providerFactory'].split(':')
     provider=getattr(importlib.import_module(module),symbol)(binding['providerBinding'])
     if any(not callable(getattr(provider,n,None)) for n in ('preflight','observe','start','stop')):
         raise ValueError('BOUNDED_PROVIDER_INTERFACE_REQUIRED')
+    if hasattr(provider,'root') and provider.root.resolve()!=Path(root).resolve():
+        raise ValueError('NEBIUS_PROVIDER_GUARD_ROOT_MISMATCH')
     # load_control installs the local readiness gate only after explicit CPU policy.
     return Sessions(root,provider,worker,None,protection_mode='cpu-only')
 

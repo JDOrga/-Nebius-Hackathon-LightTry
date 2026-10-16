@@ -129,6 +129,17 @@ class CPUOnlyTests(unittest.TestCase):
 
 
 class SeparateProcessTests(unittest.TestCase):
+    @staticmethod
+    def stop_child(process):
+        if process is None or process.poll() is not None:return
+        if os.name=='nt':
+            # Windows venv python.exe is a launcher; terminate its OWN process
+            # tree, not just the launcher (never kill processes by image name).
+            result=subprocess.run(['taskkill','/PID',str(process.pid),'/T','/F'],capture_output=True,timeout=5)
+            if result.returncode and process.poll() is None:raise RuntimeError('SYNTHETIC_CHILD_TREE_NOT_STOPPED')
+        else:process.terminate()
+        process.wait(timeout=5)
+
     def test_real_local_guard_process_never_autostarts_and_survives_web_lease_loss(self):
         from guard_process_fixture import create
         with tempfile.TemporaryDirectory() as directory:
@@ -164,15 +175,15 @@ class SeparateProcessTests(unittest.TestCase):
                     script="from gpu_bootstrap import load_control;from pathlib import Path;import time; c=load_control(Path(__import__('sys').argv[1]),Path(__import__('sys').argv[2]));c.start_heartbeat();time.sleep(60)"
                     web=subprocess.Popen([sys.executable,'-X','utf8','-B','-c',script,str(config),str(ROOT)],env=env,stdout=log,stderr=subprocess.STDOUT)
                     # Child represents only CPU/Web heartbeat, not HTTP acceptance.
-                    time.sleep(.5);self.assertIsNone(web.poll());web.terminate();web.wait(timeout=5)
+                    time.sleep(.5);self.assertIsNone(web.poll());self.stop_child(web)
                     temp=guard_root/'clock-new';temp.write_text('100031');temp.replace(guard_root/'fixture-clock')
                     wait_for(lambda:control.sessions.get(sid)['stopSent'])
                     self.assertIsNone(guard.poll());self.assertEqual(json.loads(state_file.read_text())['starts'],1)
                     self.assertEqual(control.sessions.get(sid)['absoluteDeadline'],deadlines['absoluteDeadline'])
                     self.assertFalse(control.sessions.get(sid)['verifiedStopped'])
                 finally:
-                    if web and web.poll() is None:web.terminate();web.wait(timeout=5)
-                    if guard and guard.poll() is None:guard.terminate();guard.wait(timeout=5)
+                    self.stop_child(web)
+                    self.stop_child(guard)
                     control.close()
 
 

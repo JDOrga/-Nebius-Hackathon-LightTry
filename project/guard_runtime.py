@@ -14,7 +14,7 @@ import threading
 from security import runtime_file
 from gpu_session import Sessions,Deadman
 from worker_link import WorkerLedger,WorkerApplication
-from inference.jobs import JobError
+from inference.jobs import JobError,ID
 
 ROOT=Path(__file__).resolve().parent.parent
 
@@ -45,6 +45,7 @@ def main(argv=None):
     p.add_argument('--data-root',type=Path,required=True)
     p.add_argument('--session-id');p.add_argument('--resource-id')
     p.add_argument('--worker-token-file',default=os.environ.get('LIGHTTRY_WORKER_TOKEN_FILE'))
+    p.add_argument('--worker-config',type=Path,help='Explicit private Cosmos runtime configuration; absent means no model executor.')
     p.add_argument('--guard-config',type=Path)
     p.add_argument('--gpu-control-config',type=Path,default=os.environ.get('LIGHTTRY_GPU_CONTROL_CONFIG'))
     args=p.parse_args(argv)
@@ -53,14 +54,24 @@ def main(argv=None):
         raise ValueError('PRIVATE_RUNTIME_ROOT_OUTSIDE_CODE_REQUIRED')
     os.umask(0o077)
     if args.worker:
-        if not args.worker_token_file or not args.session_id or not args.resource_id:
+        if not args.worker_token_file or not args.session_id or not ID.fullmatch(args.session_id) or not args.resource_id:
             raise ValueError('EXPLICIT_WORKER_IDENTITY_AND_RUNTIME_TOKEN_REQUIRED')
         token=runtime_file(args.worker_token_file,ROOT,4096).decode().strip()
-        ledger=WorkerLedger(args.data_root,token,args.session_id,args.resource_id)
-        # Model adapter remains unset; GET cannot load/execute a model.
-        from waitress import serve
-        serve(WorkerApplication(ledger),listen='127.0.0.1:9080',threads=2,max_request_body_size=32*1024*1024,
-              max_request_header_size=8192,channel_timeout=10,channel_request_lookahead=0,expose_tracebacks=False)
+        ledger=WorkerLedger(args.data_root/args.session_id,token,args.session_id,args.resource_id)
+        executor=None
+        try:
+            if args.worker_config:
+                from gpu_model import CosmosWorkerExecutor
+                executor=CosmosWorkerExecutor(ledger,args.worker_config)
+                ledger.simulation=False;ledger.executor=executor;executor.start()
+            from waitress import serve
+            def shutdown(*_):raise KeyboardInterrupt()
+            signal.signal(signal.SIGTERM,shutdown)
+            serve(WorkerApplication(ledger),listen='127.0.0.1:9080',threads=2,max_request_body_size=32*1024*1024,
+                  max_request_header_size=8192,channel_timeout=10,channel_request_lookahead=0,expose_tracebacks=False)
+        finally:
+            if executor:executor.close()
+            ledger.close()
         return
     if args.guard and args.gpu_control_config:
         from gpu_bootstrap import load_control

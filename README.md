@@ -148,7 +148,7 @@ SQLite ownership 表绑定照片、方案、导入 HDR 和任务。任务/结果
 
 ### 单 GPU 串行队列与收费边界
 
-`POST /api/tasks` 需认证、同源、CSRF、对象归属及服务端逐项授权；浏览器不能传owner、命令、预算、云控制或守护替代字段。持久化FIFO队列最多20项，跨账号只有一条GPU执行通道；同账号requestId幂等，任务身份由服务生成并在派发前持久化。队列读取是只读，真正派发只由独立服务器工作线程执行；每次派发重新检查 adapter.authorize_job 的当前范围/预算/守护授权。现有真实适配器未接入该授权协议，默认仍为OFF；提供凭据不等于提供授权。
+`POST /api/tasks` 需认证、同源、CSRF、对象归属及服务端逐项授权；浏览器不能传owner、命令、预算、云控制或守护替代字段。持久化FIFO队列最多20项，跨账号只有一条GPU执行通道；同账号requestId幂等，任务身份由服务生成并在派发前持久化。队列读取是只读，真正派发只由独立服务器工作线程执行；每次派发重新检查 adapter.authorize_job 的当前范围/预算/守护授权。原SSH适配器未接入该授权协议；新HTTPSCosmosExecutor已实现逐项私有grant校验，但默认仍为OFF，提供凭据不等于提供授权。
 
 原任务库单进程OS锁和串行检查继续生效。派发前提交dispatching闩锁；异常、进程退出或执行状态未知会阻塞通道，不自动重发launch；已有旧执行/未知执行也会占住通道。只有执行端真实结束且结果通过原校验，才推进下一项。等待项授权撤销/过期则不派发，不继承旧实验的预算或时限。队列验证用离线替身，不能当成GPU实机验收。
 
@@ -295,15 +295,41 @@ scopeFile 为单独的新授权，精确包含 scopeId、resourceId、expiresAt�
 
 服务运行后独立于页面每5秒为当前 scope/resource/session 续 CPU 短租约；已核实停止、范围不符或授权到期不续。心跳异常即停止该续租线程，不自动重连；当前CPU-only由同机独立guard按原期限停机，不具备CPU整机失联兜底。页面 GET 不续租，Web 退出不声称已停机；独立 guard 仍负责唯一云观察流。适配器网络调用必须有界，不能阻塞心跳无限等待。生产模型队列仍未接入；本节不启用收费生成。
 
-**尚未完成真实对接：** 审计并部署Nebius provider插件、GPU HTTPS/TLS worker与模型执行器、现有CPU服务器更新，以及真实单次闭环验收。空会话的初次停止快照现在由同机guard读取独立供应商预检后发布，未观察到STOPPED+空实例则不允许启动；配置绑定成功不等于服务器就绪。当前不要求异机停机兜底，但存在CPU整机失效风险。旧已关闭范围不复用，本次没有远端部署或云调用。
+**尚未完成真实部署验收：** Nebius provider、GPU HTTPS/TLS worker与模型执行器的代码已经提供；实际CLI配置、当前证书/会话/精确授权、CPU/GPU服务部署及真实单次闭环仍未验收。空会话的初次停止快照现在由同机guard读取独立供应商预检后发布，未观察到STOPPED+空实例则不允许启动；配置绑定成功不等于服务器就绪。当前不要求异机停机兜底，但存在CPU整机失效风险。旧已关闭范围不复用，本次没有远端部署或云调用。
 
 
 ### CPU-only 部署准备与验收边界
 
 配置结构见 `deploy/gpu-control.example.json`、`deploy/gpu-scope.example.json`。两个模板分别默认enabled=false、budgetApproved=false且已过期，包含明确占位符，不能直接启用。实际文件在代码树外，归运行服务账号、权限0600。Web通过LIGHTTRY_GPU_CONTROL_CONFIG读取 `/etc/lighttry/gpu-control.json`，guard的ExecStart读取同一文件；guardRoot必须都是 `/var/lib/lighttry/guard`，不混用旧私有目录。
 
-内置 `cpu_supervisor:build_sessions` 负责组合审核过的provider插件与HTTPSWorker，固定HTTPS/CA校验和5秒worker超时，凭据仅从私有文件读；不会在构造期间查询或启动GPU。provider插件接口为 preflight(resource)、observe(resource)、start(resource,session,deadline)、stop(resource,session)，所有网络调用必须有界。providerFactory是运维执行代码信任边界，不是浏览器输入；当前尚未实现或部署真实Nebius插件，不能把占位符当作可用适配器。
+内置 `cpu_supervisor:build_sessions` 负责组合审核过的provider插件与HTTPSWorker，固定HTTPS/CA校验和5秒worker超时，凭据仅从私有文件读；不会在构造期间查询或启动GPU。provider插件接口为 preflight(resource)、observe(resource)、start(resource,session,deadline)、stop(resource,session)，所有网络调用必须有界。providerFactory是运维执行代码信任边界，不是浏览器输入；真实Nebius Devlab插件代码现为nebius_provider:build，但尚未部署或实机验收，不能把占位符当作已配置的连接。
 
 `lighttry.service`仅Wants/After同机guard，不使用Requires/PartOf/BindsTo；Web崩溃不带走guard。guard进程独占OS锁，每5秒发布15秒有效的PID/资源/私有目录绑定凭据；丢失、过期、PID已退出、资源不符均禁止启动。guard独占供应商观察，网页查询不产生云轮询。已核实停机后guard常驻空闲；正常停止guard只提交停机请求，后续必须另核实STOPPED和instances=[]，不能用请求成功宣称释放。强杀、主机断电或供应商不可达不保证停机。
 
 本轮新增本地独立进程替身验收：guard启动不启动GPU；合成scope触发一次模拟start；代表Web心跳的CPU子进程退出后guard仍运行并请求停机；所有deadline保持原值。该测试不等于HTTP部署验收或真实GPU验收。
+
+
+### 真实 Nebius / HTTPS / Cosmos 对接代码（2026-10-16，未启动GPU）
+
+- `project/nebius_provider.py` 实现现有资源类型 **Nebius AI Devlab** 的 preflight/observe/restart/stop，不创建或删除资源。复用已审阅的租户→项目→Devlab→当前VM/IP/授权公钥校验；STOPPED必须有显式空instances。RUNNING才查询当前VM并复核资源指针，产生待人工确认的API主机身份。它不是SSH服务端指纹证明；HTTPS还必须通过当前证书SHA256 pin、CA和主机名校验。
+- CLI只接受服务端固定的绝对路径、私有config文件、profile和资源绑定，固定命令，无shell、无浏览器登录、无自动重试。每条子进程最多6秒，操作链最多20秒且启动受原startup/absolute截止约束；`--retries=1`按当前官方文档禁用CLI内部重试。provider_attempts SQLite闩锁在命令前提交，ACK丢失或重启都不再发第二次相同副作用。真实调用前还需验证所安装CLI版本/参数与服务账号权限，本轮未运行真实CLI。
+- `project/https_executor.py` 为CPU SchemeStore/GPUQueue的显式适配器。使用私有model grant约束owner+队列fingerprint、原图SHA、recipeKey、当前确认主机和不晚于工作期限的授权。`--model-grant-file`/LIGHTTRY_MODEL_GRANT_FILE缺省不注册模型适配器；状态GET只读本地记录。后台协调器只查询原jobId并按hash下载结果，不恢复POST、不自动重launch。
+- `project/gpu_model.py` 为GPU进程的真实Cosmos桥。只有显式 `start.py --worker ... --worker-config /etc/lighttry/worker.json` 才注册；没有该参数仍是未配置协议壳。构造/health/GET不加载CUDA、权重或模型；配置执行器时`modelLoaded=null`表示未测量模型驻留状态，executionMode=per-job表示按job启动现有Linux Python3.10参数化worker，不冒充已经加载模型。入队后由专用后台执行线程调度，先持久化dispatching，进程崩溃留下uncertain并阻塞重跑。
+- 输入制品只允许request.json、inputs/photo.png、可选inputs/lighting.hdr三项，拒绝代码、路径穿越、链接和超限解压；GPU只复制本机已审阅BUNDLE_FILES并调用原 `project/runtime/worker.py`，保留full权重内容、固定模型commit/补丁、原图/配方/HDR、实际模型条件和截止验证。当前只接入单方案；没有上传requiredInverseReuse制品的请求会保持原严格拒绝，不回退重算。模型运行不安装依赖、不下载权重。
+- 成功结果经内容寻址blob返回，CPU复用原extract_result/extract_stage_evidence与SchemeStore/TaskStore全部校验，最后才发布execution事件；协议succeeded不等于视觉验收通过。制品压缩包最多32MiB，单成员最多32MiB、输入/结果解压总量最多64MiB，过大拒绝而不是绕过限制。
+
+部署模板：`deploy/gpu-control.example.json`、`gpu-worker.example.json`、`model-grant.example.json`、`gpu-worker.nginx.conf.example`、`lighttry-worker.service.example`。模板禁用/未确认/零预算/过期，不可直接启用；不在模板放密钥。GPU只监听127.0.0.1:9080，Nginx 443只放行CPU来源CIDR和/v1白名单，转发Bearer头、不记录访问日志、不重定向。私有CA/当前证书pin和独立worker token必须运维配置，不能使用网页登录密钥。每个新会话必须重新配置worker session/resource、确认当前主机、签发精确grant；此代码不自动SSH上传凭据或绕过当前身份确认。
+
+本轮仅本地：合成CLI响应、替身模型子调用、实际loopback TLS握手（CA/hostname/pin/认证/二进制往返）与离线回归。**没有Nebius登录、真实云API、GPU开机、模型加载/推理、远端部署或费用验收。** CPU整机失效风险仍按cpu-only声明，不存在异机自动兜底。
+
+协议核对来源：
+[Nebius Devlab restart](https://docs.nebius.com/cli/reference/ai/devlab/restart)、[get](https://docs.nebius.com/cli/reference/ai/devlab/get)、[stop](https://docs.nebius.com/cli/reference/ai/devlab/stop)、[Nginx proxy_pass](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_pass)。
+
+GPU worker入口将私有data-root按sessionId分目录，worker.sqlite3也持久绑定session/resource；旧会话数据库不能改绑新会话，maxJobs计数不因进程重启清零。新会话应使用新worker token、当前证书pin和新grant。worker进程超时会先给原模型worker发送中断，让其清理自己的模型进程组；有界清理等待不延长原模型截止。强制退出或无法证明执行停止时保持uncertain，CPU guard仍按原截止请求停机；systemd KillMode=control-group在服务停止时清理同单元进程，不把父进程退出当作GPU已释放。
+
+
+### 当前本地8785接线
+
+普通根start.py入口现在在原studio后端挂载local_cpu_api：/api/health、/api/gpu/entry-status、/api/gpu/status及/api/inference/capabilities。它加载同一NebiusProvider/HTTPSWorker/HTTPSCosmosExecutor类，并复用生产GPU状态计算，但不构造云提供者、不读真实云凭据、不运行guard或模型；未配置时返回configured=false、state=UNKNOWN、canStart=false，不再404，也不把未知状态称为停止。
+
+本地开发入口无登录，因此云控制POST即使同源CSRF正确仍503，缺少CSRF/同源则403，GET控制405。真实启停/模型只能通过已配置且密钥认证的start.py --service入口，新接口挂载不等于远程GPU连通。生产DeploymentHandler显式禁用local-only路由继承。此次重启沿用.local/studio.json原目录、素材与accepted包，不迁移或复制工作台数据。

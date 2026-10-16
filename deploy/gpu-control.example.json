@@ -9,10 +9,20 @@
     "cpuHostRiskAccepted": true
   },
   "binding": {
-    "providerFactory": "AUDITED_PROVIDER_MODULE:build",
-    "providerBinding": {},
+    "providerFactory": "nebius_provider:build",
+    "providerBinding": {
+      "cliPath": "/opt/nebius/bin/nebius",
+      "configFile": "/run/secrets/nebius-config.yaml",
+      "profile": "SERVICE_PROFILE",
+      "tenantId": "TENANT_ID",
+      "projectId": "PROJECT_ID",
+      "resourceId": "RESOURCE_ID",
+      "publicKeyFile": "/etc/lighttry/gpu-authorized-key.pub",
+      "guardRoot": "/var/lib/lighttry/guard"
+    },
     "workerOrigin": "https://GPU_WORKER_HOST",
     "workerTokenFile": "/run/secrets/lighttry-worker-token",
-    "workerCaFile": null
+    "workerCaFile": "/etc/lighttry/gpu-worker-ca.pem",
+    "workerCertificateSha256": "CURRENT_GPU_CERTIFICATE_SHA256_64_HEX"
   }
 }

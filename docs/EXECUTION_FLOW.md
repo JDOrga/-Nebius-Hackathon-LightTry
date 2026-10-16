@@ -116,3 +116,10 @@ CPU服务新接口选用受认证HTTPS worker；会话/任务副作用在SQLite�
 本轮只做代码、配置模板与离线验证，不连接真实CPU/GPU、不启动GPU、不生成可用的新收费授权。Web服务和常驻guard都从根start.py启动，共用私有gpu-control.json及sessions.sqlite3。guard持有OS进程锁并每5秒发布有界存活凭据；初始空会话只由guard读供应商预检，页面只读本地快照。CPU Web后台每5秒续当前会话心跳，心跳停止30秒后由同机guard请求停机。已核实停止后guard留在空闲状态，不自动开启新会话；守护/服务重启不重置截止、不重复start/launch。过期或撤销的scope仍可供stop-only观察器恢复已有会话，但Web不能据此获准启动。
 
 guard正常退出时只提交一次当前会话stop请求，不把提交当作STOPPED；单次网络调用必须有界。生产运维应在停guard/升级前确认GPU已停，不能用systemd服务退出代替资源释放核验。当前CPU常驻guard不必在每次GPU停止后退出，因此报告“GPU已停、实例已释放、guard仍在空闲监控”，不得伪报guard已退出。历史实验的四项停机证据和旧授权保持只读；需要结束整个实验守护时仍按原四项流程记录。CPU整机失效时没有独立控制平面接管；人工从云控制台停机是应急手段，不属于已实现的自动保证。
+
+
+## 真实对接代码的启用边界（2026-10-16）
+
+新增nebius_provider、HTTPSCosmosExecutor、CosmosWorkerExecutor与TLS/worker模板，但当前只完成本地代码和离线/loopback TLS验证，不代表云端部署。默认不注册模型，不执行CLI；模板enabled=false、零模型预算、hostConfirmed=false且expiresAt=0。CPU侧显式配置模型grant后仍需当前scope/READY/人工确认主机/精确owner与fingerprint/原图及recipeKey批准。GPU入队检查独立私有grant，保存dispatching后只执行一次现有参数化worker，不接受远端脚本或命令。
+
+执行前必须补齐本轮真实资源与安装CLI版本、CPU来源CIDR、GPU当前CA/证书pin、独立worker token、会话/resource绑定和精确模型grant。新会话不继承旧worker.env或证书信任，现有启动/主机确认/固定窗口/停机核验流程不变。本轮不得据此启动GPU或加载模型；后续真实执行仍需新的明确授权。源码实现、替身通过、本地TLS通过、远端部署、真实模型结果和视觉验收必须分别记录。
