@@ -73,6 +73,7 @@ def preload(config,phase,root,deadline):
     os.environ.update(CUDA_HOME=config['cudaHome'],HF_HUB_OFFLINE='1',TRANSFORMERS_OFFLINE='1')
     repo=Path(config['repo']);os.chdir(repo);sys.path.insert(0,str(repo))
     module=importlib.import_module('cosmos_predict1.diffusion.inference.inference_'+phase+'_renderer')
+    sys.path.insert(0,str(ROOT/'scripts'))
     from run_experiment import commands
     args=argparse.Namespace(checkpoint_dir=Path(config['checkpointDir']),input_dir=root/'unused-input',
         run_dir=root/'unused-run',width=1280,height=704,offload=False)
