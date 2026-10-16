@@ -1,6 +1,7 @@
 """GPU-only phase daemon. Explicit start; no inference until a validated job arrives."""
 import argparse
 import contextlib
+import functools
 import hashlib
 import importlib
 import json
@@ -17,6 +18,134 @@ from model_contract import grant_file
 from resident_ipc import safe,phase_command
 
 ROOT=Path(__file__).resolve().parent.parent
+
+
+def process_io():
+    """Small Linux process counters only; never open checkpoints or launch probes."""
+    try:
+        with open('/proc/self/io',encoding='ascii') as stream:
+            values=dict(line.strip().split(': ',1) for line in stream)
+        return {name:int(values[name]) for name in ('read_bytes','rchar')}
+    except (OSError,ValueError,KeyError):
+        return None
+
+
+class LoadTiming:
+    """Bounded, private, best-effort spans. Durations are inclusive, not additive.
+
+    Host wall/CPU time and process I/O deltas are measurements, NOT GPU kernel
+    timings. Only the existing final CUDA synchronize waits for device completion.
+    A missing finish record means interrupted/unknown, never successful READY.
+    """
+    def __init__(self,root,phase,*,clock=time.perf_counter,wall=time.time,cpu=time.process_time,io=process_io):
+        self.clock,self.wall,self.cpu,self.io=clock,wall,cpu,io
+        self.phase=phase if phase in ('inverse','forward') else 'unknown'
+        self.stack=[];self.serial=0;self.events=0;self.bytes=0;self.stream=None
+        try:
+            # Exclusive creation also refuses a stale file or symlink; no overwrite.
+            path=root/'loading-timing.jsonl'
+            fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+            self.stream=os.fdopen(fd,'w',encoding='utf-8',newline='\n')
+        except OSError:
+            pass
+
+    def emit(self,value):
+        if self.stream is None or self.events>=128:return
+        try:
+            raw=json.dumps(dict(schemaVersion=1,phase=self.phase,pid=os.getpid(),**value),
+                           separators=(',',':'),allow_nan=False)+'\n'
+            size=len(raw.encode('utf-8'))
+            if self.bytes+size>65536:return
+            self.stream.write(raw);self.stream.flush()
+            self.events+=1;self.bytes+=size
+        except Exception:
+            self.close()
+
+    @contextlib.contextmanager
+    def span(self,stage):
+        self.serial+=1;identity=self.serial;parent=self.stack[-1] if self.stack else None
+        started=self.clock();cpu=self.cpu();before=self.io()
+        self.emit(dict(stage=stage,event='started',spanId=identity,parentSpanId=parent,
+                       at=self.wall(),monotonic=started))
+        self.stack.append(identity);outcome='failed'
+        try:
+            yield
+            outcome='finished'
+        finally:
+            elapsed=self.clock()-started;cpu_elapsed=self.cpu()-cpu;after=self.io()
+            self.stack.pop()
+            delta=lambda key:max(0,after[key]-before[key]) if before is not None and after is not None else None
+            self.emit(dict(stage=stage,event=outcome,spanId=identity,parentSpanId=parent,
+                           at=self.wall(),elapsedMs=round(max(0,elapsed)*1000,3),
+                           cpuMs=round(max(0,cpu_elapsed)*1000,3),
+                           ioReadBytes=delta('read_bytes'),ioRchar=delta('rchar')))
+
+    def wrap(self,function,stage):
+        @functools.wraps(function)
+        def measured(*args,**kwargs):
+            with self.span(stage):return function(*args,**kwargs)
+        return measured
+
+    def close(self):
+        stream,self.stream=self.stream,None
+        if stream is not None:
+            try:stream.close()
+            except Exception:pass
+
+
+class _TimingProxy:
+    """Local module alias proxy, never monkey-patch torch globally."""
+    def __init__(self,original,**overrides):self.original,self.overrides=original,overrides
+    def __getattr__(self,name):return self.overrides[name] if name in self.overrides else getattr(self.original,name)
+
+
+@contextlib.contextmanager
+def load_hooks(module,timing):
+    """Only already-imported pinned loader sites; restore aliases/methods on all exits.
+
+    No change to arguments, device, dtype, weights_only fallback, return values,
+    exceptions, concurrency or synchronization. No additional model imports.
+    """
+    with contextlib.ExitStack() as cleanup:
+        def replace(owner,name,value):
+            owned=name in vars(owner);original=getattr(owner,name)
+            setattr(owner,name,value)
+            def restore():
+                if owned:setattr(owner,name,original)
+                else:delattr(owner,name)
+            cleanup.callback(restore)
+        def hook(owner,name,stage):
+            function=getattr(owner,name,None)
+            if callable(function):replace(owner,name,timing.wrap(function,stage))
+        cls=module.DiffusionRendererPipeline
+        for name,stage in (('_load_model','model_config'),('_load_network','network_load'),
+                           ('_load_tokenizer','tokenizer_load')):
+            hook(cls,name,stage)
+        model_module=sys.modules.get('cosmos_predict1.diffusion.model.model_diffusion_renderer')
+        model=getattr(model_module,'DiffusionRendererModel',None)
+        if model is not None:
+            for name,stage in (('set_up_model','network_setup'),('set_up_tokenizer','tokenizer_setup'),
+                               ('cuda','device_move')):
+                hook(model,name,stage)
+        utils=sys.modules.get('cosmos_predict1.diffusion.inference.inference_utils')
+        if utils is not None:
+            hook(utils,'non_strict_load_model','parameter_apply')
+            torch=getattr(utils,'torch',None)
+            if callable(getattr(torch,'load',None)):
+                replace(utils,'torch',_TimingProxy(torch,load=timing.wrap(torch.load,'checkpoint_read')))
+        # The pinned renderer uses pretrained_vae.torch.load for JIT archives.
+        # Also cover the already-imported optional tokenizer utility's jit.load.
+        for name in ('cosmos_predict1.diffusion.module.pretrained_vae',
+                     'cosmos_predict1.tokenizer.inference.utils'):
+            tokenizer=sys.modules.get(name);torch=getattr(tokenizer,'torch',None)
+            if torch is None:continue
+            overrides={};jit=getattr(torch,'jit',None)
+            if callable(getattr(torch,'load',None)):
+                overrides['load']=timing.wrap(torch.load,'tokenizer_checkpoint_read')
+            if callable(getattr(jit,'load',None)):
+                overrides['jit']=_TimingProxy(jit,load=timing.wrap(jit.load,'tokenizer_checkpoint_read'))
+            if overrides:replace(tokenizer,'torch',_TimingProxy(torch,**overrides))
+        yield
 
 
 class PipelineCache:
@@ -70,27 +199,39 @@ def verify_runtime(config,deadline):
 def preload(config,phase,root,deadline):
     # Production hot path: load directly; no weight/source scans or preflight subprocess.
     if time.time()>=deadline:raise TimeoutError('RESIDENT_LOAD_DEADLINE')
-    os.environ.update(CUDA_HOME=config['cudaHome'],HF_HUB_OFFLINE='1',TRANSFORMERS_OFFLINE='1')
-    repo=Path(config['repo']);os.chdir(repo);sys.path.insert(0,str(repo))
-    module=importlib.import_module('cosmos_predict1.diffusion.inference.inference_'+phase+'_renderer')
-    sys.path.insert(0,str(ROOT/'scripts'))
-    from run_experiment import commands
-    args=argparse.Namespace(checkpoint_dir=Path(config['checkpointDir']),input_dir=root/'unused-input',
-        run_dir=root/'unused-run',width=1280,height=704,offload=False)
-    command=commands(args)[0 if phase=='inverse' else 1]+['--guidance','0.0']
-    original=sys.argv
-    try:sys.argv=[command[2],*command[3:]];parsed=module.parse_arguments()
-    finally:sys.argv=original
-    # The pinned upstream demo constructs this same class before opening any input.
-    mapping={'checkpoint_dir':'checkpoint_dir','checkpoint_name':'diffusion_transformer_dir',
-        'offload_network':'offload_diffusion_transformer','offload_tokenizer':'offload_tokenizer',
-        'offload_text_encoder_model':'offload_text_encoder_model','offload_guardrail_models':'offload_guardrail_models',
-        'guidance':'guidance','num_steps':'num_steps','height':'height','width':'width',
-        'fps':'fps','num_video_frames':'num_video_frames','seed':'seed'}
-    cache=PipelineCache(module.DiffusionRendererPipeline,{key:getattr(parsed,name) for key,name in mapping.items()})
-    module.torch.cuda.synchronize()
-    if time.time()>=deadline:raise TimeoutError('RESIDENT_LOAD_DEADLINE')
-    return cache,module
+    timing=LoadTiming(root,phase);cache=None
+    try:
+        with timing.span('preload_total'):
+            with timing.span('environment_setup'):
+                os.environ.update(CUDA_HOME=config['cudaHome'],HF_HUB_OFFLINE='1',TRANSFORMERS_OFFLINE='1')
+                repo=Path(config['repo']);os.chdir(repo);sys.path.insert(0,str(repo))
+            with timing.span('module_import'):
+                module=importlib.import_module('cosmos_predict1.diffusion.inference.inference_'+phase+'_renderer')
+            with timing.span('argument_setup'):
+                sys.path.insert(0,str(ROOT/'scripts'))
+                from run_experiment import commands
+                args=argparse.Namespace(checkpoint_dir=Path(config['checkpointDir']),input_dir=root/'unused-input',
+                    run_dir=root/'unused-run',width=1280,height=704,offload=False)
+                command=commands(args)[0 if phase=='inverse' else 1]+['--guidance','0.0']
+                original=sys.argv
+                try:sys.argv=[command[2],*command[3:]];parsed=module.parse_arguments()
+                finally:sys.argv=original
+                # The pinned upstream demo constructs this same class before opening any input.
+                mapping={'checkpoint_dir':'checkpoint_dir','checkpoint_name':'diffusion_transformer_dir',
+                    'offload_network':'offload_diffusion_transformer','offload_tokenizer':'offload_tokenizer',
+                    'offload_text_encoder_model':'offload_text_encoder_model','offload_guardrail_models':'offload_guardrail_models',
+                    'guidance':'guidance','num_steps':'num_steps','height':'height','width':'width',
+                    'fps':'fps','num_video_frames':'num_video_frames','seed':'seed'}
+            with load_hooks(module,timing),timing.span('pipeline_init'):
+                cache=PipelineCache(module.DiffusionRendererPipeline,{key:getattr(parsed,name) for key,name in mapping.items()})
+            with timing.span('cuda_synchronize'):
+                module.torch.cuda.synchronize()
+            if time.time()>=deadline:raise TimeoutError('RESIDENT_LOAD_DEADLINE')
+            return cache,module
+    except BaseException:
+        if cache:cache.close()
+        raise
+    finally:timing.close()
 
 
 def execute(body,config,phase,session_root,cache,module):

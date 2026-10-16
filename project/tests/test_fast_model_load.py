@@ -8,7 +8,7 @@ parsed=types.SimpleNamespace(**{k:0 for k in fields});seen=[]
 fake=types.SimpleNamespace(parse_arguments=lambda:parsed,DiffusionRendererPipeline=object,torch=types.SimpleNamespace(cuda=types.SimpleNamespace(synchronize=lambda:None)))
 command=types.ModuleType('run_experiment');command.commands=lambda a:[['python','-B','entry'],['python','-B','entry']]
 NativePath=type(Path());fixture=Path('.')
-with patch.object(m,'Path',NativePath),patch.dict(sys.modules,{'run_experiment':command}),patch.dict(os.environ,{},clear=False),patch.object(m.sys,'version_info',(3,10)),patch.object(m.os,'name','posix'),patch.object(m.os,'chdir'),patch.object(m,'verify_runtime') as verify,patch.object(m.subprocess,'run') as process,patch.object(m.importlib,'import_module',side_effect=lambda name:(seen.append(os.environ.get('CUDA_HOME')),fake)[1]),patch.object(m,'PipelineCache',return_value='LOADED'):
+with patch.object(m,'LoadTiming'),patch.object(m,'Path',NativePath),patch.dict(sys.modules,{'run_experiment':command}),patch.dict(os.environ,{},clear=False),patch.object(m.sys,'version_info',(3,10)),patch.object(m.os,'name','posix'),patch.object(m.os,'chdir'),patch.object(m,'verify_runtime') as verify,patch.object(m.subprocess,'run') as process,patch.object(m.importlib,'import_module',side_effect=lambda name:(seen.append(os.environ.get('CUDA_HOME')),fake)[1]),patch.object(m,'PipelineCache',return_value='LOADED'):
  for phase in ['inverse','forward']:assert m.preload({'python':'FIXTURE','repo':'FIXTURE','checkpointDir':'FIXTURE','cudaHome':'CUDA_FIXTURE'},phase,fixture,10**12)[0]=='LOADED'
  assert str(m.ROOT/'scripts') in m.sys.path
  assert verify.call_count==0

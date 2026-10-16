@@ -368,3 +368,35 @@ CosmosWorkerExecutor 保留为旧的逐任务冷加载适配器，不报告 read
 第九轮真实连接验收：公网 mTLS 与主动关闭 SSH 后的直连健康/合成 blob 下载已通过；未换 IP、未提交推理、模型 READY 未确认。实测使用 `project/mtls_relay.py`，不是 Nginx。当前已安全停机、撤销本轮直连配置；每次新会话的自动代理部署/证书绑定和完整模型推理验收仍待完成。
 
 自动mTLS接线已在本地接入主机确认后的部署链（可选私有directTLS），不再依赖逐轮手工脚本；健康绑定通过才发布，停止自动撤销。自动版本尚未重新实机验收，当前GPU仍关闭。
+
+### 模型冷加载分段计时（2026-10-16，本地实现，待实机采样）
+
+`resident_model.preload` 在原有私有相位目录 `resident/inverse` 和 `resident/forward` 各写一份
+`loading-timing.jsonl`，不另建模型/产品树。记录环境设置、模块导入、参数准备、Pipeline 构造、
+模型配置、网络构造/设备初始化、主权重读取及反序列化、参数应用、tokenizer 构造及权重读取、
+显式设备迁移、原有最终 CUDA synchronize 和 preload 总耗时。相位进程各自记录 PID、
+spanId/parentSpanId、开始/完成/失败、UTC epoch、单调时钟耗时、进程 CPU 时间和 Linux
+`/proc/self/io` 数字差值；不记录权重路径、参数、凭据、输入或原始异常文本。
+
+所有 span 都是**包含子阶段的主机耗时，不能直接相加**。`network_setup` 包含原上游的
+构造与 `.to(cuda, dtype)`，`parameter_apply` 包含原匹配/复制；异步 CUDA 开销可能落到最终
+`cuda_synchronize`，这些不是纯 GPU kernel 计时。I/O 不可用写 null，不冒充零；进程被杀
+留下 started 而无结束表示未知。preload_total 完成仅表示预加载返回，不能替代 grant 再核验、
+实际相位存活与 READY 判定。
+
+日志独占创建（Linux 0600），至多 128 条、64 KiB，逐条 flush；已存在的文件不覆盖，写入失败
+不屏蔽模型原异常或触发重载。包装仅作用于已导入上游的固定调用点和局部 torch 别名，退出时恢复；
+不全局替换 torch、不增加 GPU synchronize、不扫描权重/源码、不运行预检子进程、不重试加载。
+原预算、身份确认、单次启动/launch、模型配置、真实 READY 和停机截止保持不变。
+
+已对照清单固定 commit `0f3e2dc435032ecbad654c2fc2153df85384b138` 的四份官方源码关键 AST：
+上游已有 `skip_init_linear`；主网络仍 `torch.load(..., map_location='cpu')`，没有 mmap；
+`non_strict_load_model` 保留形状/FP8兼容处理，再复制到已构造模型。主网络 mmap 可列为后续实验，
+但 meta/assign 不是可直接切换的等价替代，必须处理 device/dtype、完整参数及兼容逻辑。
+tokenizer 的 encoder/decoder 是通过 torch.load 读取的 JIT 制品，不能统一套用 mmap。
+本次只加观测，不启用这些加载优化、不改变画质，不声称已有真实提速。
+
+核对依据：[固定版本加载器](https://github.com/nv-tlabs/cosmos-transfer1-diffusion-renderer/blob/0f3e2dc435032ecbad654c2fc2153df85384b138/cosmos_predict1/diffusion/inference/inference_utils.py)、
+[PyTorch 加载技巧](https://docs.pytorch.org/tutorials/recipes/recipes/module_load_state_dict_tips.html)。
+既有第十一轮已实测自动 mTLS 部署及模型 READY，但生成失败、真实推理/下载未验收；
+本次计时仅经本地替身测试，未开机、未加载真实模型、未远端部署，旧授权仍关闭。
