@@ -240,3 +240,5 @@ $('reset-client').onclick=()=>{const blocked=resetBlocked();$('confirm-reset-cli
 $('confirm-reset-client').onclick=()=>{if(resetBlocked()){$('reset-client-warning').textContent='任务状态已变化，暂不能重置。';$('confirm-reset-client').disabled=true;return;}try{resetClientStorage(localStorage,sessionStorage,accountNamespace);location.reload();}catch(e){$('reset-client-warning').textContent='本机存储清理失败，未完成重置：'+e.message;}};
 
 $('logout').onclick=async()=>{try{await api('/auth/logout',{method:'POST',headers:{'X-LightTry-Token':inference.csrfToken}});location.replace('/login');}catch(e){error('退出失败，请稍后重试。');}};
+
+try{const message=sessionStorage.getItem('lighttry.gpuEntryNotice');if(message){$('gpu-entry-notice').textContent=message;$('gpu-entry-notice').hidden=false;sessionStorage.removeItem('lighttry.gpuEntryNotice');}}catch{}

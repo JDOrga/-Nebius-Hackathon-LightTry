@@ -1,6 +1,8 @@
 """Deployment WSGI entry, served by Waitress; shares the existing business handlers."""
 import argparse
 import base64
+import copy
+import time
 from email.message import Message
 from http import HTTPStatus
 import io
@@ -48,6 +50,9 @@ class Application:
         self.provider_secrets = ProviderSecrets(ROOT)
         self.upload_slots = threading.BoundedSemaphore(2)
         self.gpu_sessions=None
+        self.entry_lock=threading.Lock()
+        self.entry_start=None
+        self.entry_thread=None
         self.gpu_scope=None  # Only trusted server bootstrap may install a new scope; never browser fields.
         data = Path(options.data_root).expanduser()
         if not data.is_absolute() or data.resolve().is_relative_to(ROOT.resolve()):
@@ -176,10 +181,98 @@ class Application:
                 return True
             self.login_sessions.revoke(self.session_token(environ))
             token, seconds = self.login_sessions.issue(owner)
-            h.send_response(303); h.send_header('Location', '/')
+            h.send_response(303); h.send_header('Location', self.gpu_login_destination())
             h.send_header('Set-Cookie', self.session_cookie(token, seconds)); h.end_headers()
             return True
         return False
+
+    def gpu_entry_info(self, owner=None):
+        # Consume the guard's local snapshot only: never add a cloud poll on login.
+        snapshot = {}
+        if self.gpu_sessions:
+            try:
+                snapshot = self.gpu_sessions.latest()
+            except Exception:
+                snapshot = {}
+        if not isinstance(snapshot,dict):
+            snapshot={}
+        observed = snapshot.get('lastObservedAt')
+        fresh = (isinstance(observed,(int,float)) and not isinstance(observed,bool) and
+                 -5 <= time.time()-observed <= 60)
+        state = snapshot.get('state') if fresh else 'UNKNOWN'
+        active = state in ('STARTING','LOADING','READY','EXECUTING')
+        scope = self.gpu_scope
+        allowed = bool(owner and self.accounts.users[owner]['role']=='operator' and
+                       self.gpu_sessions and scope and scope.get('budgetApproved') is True and
+                       scope.get('expiresAt',0)>time.time() and state=='STOPPED' and
+                       snapshot.get('verifiedStopped') is True)
+        reason = ''
+        if not self.gpu_sessions or not scope:
+            reason = 'GPU 启动服务暂不可用，可以先进入工作台。'
+        elif owner and self.accounts.users[owner]['role']!='operator':
+            reason = '当前密钥没有启动权限，可以先进入工作台。'
+        elif state=='UNKNOWN':
+            reason = '暂时无法确认 GPU 状态，可以先进入工作台。'
+        elif state=='STOPPING':
+            reason = 'GPU 正在关闭，请稍后再启动。'
+        elif not allowed and not active:
+            reason = 'GPU 暂不具备安全启动条件，可以先进入工作台。'
+        with self.entry_lock:
+            pending = dict(self.entry_start) if self.entry_start else None
+        return {'active':active,'state':state,'canStart':allowed,'message':reason,'simulation':snapshot.get('simulation') is True,
+                'startStatus':pending.get('status') if pending else None}
+
+    def gpu_login_destination(self):
+        return '/' if self.gpu_entry_info()['active'] else '/gpu-entry'
+
+    def gpu_entry_page(self, h):
+        info=self.gpu_entry_info(h.user)
+        if info['active']:
+            h.send_response(303);h.send_header('Location','/');h.end_headers();return
+        title='GPU 尚未启动' if info['state']=='STOPPED' else '进入工作台前'
+        intro='现在启动 GPU，为接下来的图片生成做准备？' if info['state']=='STOPPED' else '暂时无法确认 GPU 可用状态，你仍可以进入工作台编辑方案。'
+        disabled='' if info['canStart'] else ' disabled'
+        html='''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>准备工作台 · LightTry</title><style>
+:root{font:14px/1.7 "Segoe UI","Microsoft YaHei",sans-serif;color:#294738;background:#f2f6f3}*{box-sizing:border-box}body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;background:radial-gradient(ellipse at top right,#dcebe1,transparent 65%)}main{width:min(470px,100%);background:white;border:1px solid #dce7df;border-radius:22px;padding:38px;box-shadow:0 15px 60px #294d3210}.brand{font-size:26px;font-weight:750;letter-spacing:-1px}h1{font-size:23px;margin:26px 0 10px}p{font-size:13px;color:#75897b;margin:0 0 22px}.actions{display:grid;gap:10px}button,a{font:inherit;border-radius:10px;padding:12px 14px;text-align:center;font-weight:650}button{border:1px solid #286d4e;background:#286d4e;color:white;cursor:pointer}button:hover:not(:disabled){background:#20573f}button:disabled{background:#e7eee9;border-color:#d9e3dc;color:#91a194;cursor:not-allowed}a{border:1px solid #cdded2;text-decoration:none;color:#426c51;background:#f8fbf9}a:hover{background:#edf4ef}:focus-visible{outline:3px solid #67a48080;outline-offset:3px}.note{font-size:11px;margin:20px 0 0;color:#879a8c}</style><main id="gpu-entry" data-token="TOKEN"><div class="brand">LightTry</div><h1>TITLE</h1><p>INTRO</p><div class="actions"><button id="start-gpu"DISABLED>启动 GPU 并进入工作台</button><a href="/">暂不启动，直接进入</a></div><p class="note">启动 GPU 可能产生费用。提交后立即进入工作台，无需等待启动完成。</p><p class="note" role="status">REASON</p></main><script src="/gpu-entry.js" defer></script></html>'''
+        if info['simulation']:
+            html=html.replace('<div class="brand">LightTry</div>','<div class="brand">LightTry</div><p class="note">离线演示 · 不会启动真实 GPU</p>')
+        html=html.replace('TOKEN',h.csrf_token).replace('TITLE',title).replace('INTRO',intro).replace('DISABLED',disabled).replace('REASON',info['message'])
+        h.send_bytes(html.encode('utf-8'),'text/html; charset=utf-8')
+
+    def start_gpu_from_entry(self, h):
+        if self.accounts.users[h.user]['role']!='operator':
+            raise JobError('OPERATOR_REQUIRED','当前密钥没有启动权限。',403)
+        if h.headers.get('Content-Type')!='application/json':
+            raise JobError('INVALID_BODY','请求格式不正确。',400)
+        body=studio.shared.strict_json(self.body(h,1024).decode('utf-8'))
+        if not isinstance(body,dict) or set(body)!={'requestId'} or not ID.fullmatch(str(body['requestId'])):
+            raise JobError('INVALID_BODY','启动请求无效。',422)
+        info=self.gpu_entry_info(h.user)
+        if info['active']:
+            h.json_response({'status':'already_active'},202);return
+        if not self.gpu_sessions or not self.gpu_scope:
+            raise JobError('CONTROL_NOT_CONFIGURED','启动服务暂不可用，未启动 GPU。',503)
+        scope=copy.deepcopy(self.gpu_scope)
+        with self.entry_lock:
+            if self.entry_start and self.entry_start['scopeId']==scope.get('scopeId'):
+                h.json_response({'status':self.entry_start['status']},202);return
+            if not info['canStart'] or (self.entry_thread and self.entry_thread.is_alive()):
+                raise JobError('START_BLOCKED','暂不能安全启动 GPU，请先进入工作台。',409)
+            self.entry_start={'scopeId':scope.get('scopeId'),'status':'requested'}
+            def run():
+                status='unknown'
+                try:
+                    value=self.gpu_sessions.start(scope)
+                    status='requested' if value.get('state') in ('STARTING','LOADING','READY','EXECUTING') else 'failed'
+                except Exception:
+                    status='failed'
+                    LOG.warning('entry GPU request failed; no automatic retry')
+                finally:
+                    with self.entry_lock:
+                        self.entry_start['status']=status
+            self.entry_thread=threading.Thread(target=run,name='gpu-entry-start',daemon=True)
+            self.entry_thread.start()
+        h.json_response({'status':'requested'},202)
 
     def __call__(self, environ, start_response):
         h = self.handler.__new__(self.handler)
@@ -294,7 +387,15 @@ class Application:
 
     def private_route(self, h):
         path = urlsplit(h.path).path
-        if path=='/api/gpu/status' and h.command=='GET':
+        if path=='/gpu-entry' and h.command=='GET':
+            self.gpu_entry_page(h)
+        elif path=='/gpu-entry.js' and h.command=='GET':
+            h.send_bytes((ROOT/'project/web/gpu-entry.js').read_bytes(),'application/javascript; charset=utf-8')
+        elif path=='/api/gpu/entry-status' and h.command=='GET':
+            h.json_response(self.gpu_entry_info(h.user))
+        elif path=='/api/gpu/entry-start' and h.command=='POST':
+            self.start_gpu_from_entry(h)
+        elif path=='/api/gpu/status' and h.command=='GET':
             h.json_response(self.gpu_sessions.latest() if self.gpu_sessions else {'state':'STOPPED','label':'停止','configured':False,'providerState':None,'verifiedStopped':False,'simulation':False})
         elif path in ('/api/gpu/start','/api/gpu/stop','/api/gpu/confirm-host','/api/generate','/api/tasks/start','/api/tasks/stop'):
             if h.command=='GET':raise JobError('METHOD_NOT_ALLOWED','生成、启动或停止不得由 GET 触发。',405)

@@ -179,3 +179,5 @@ input[type=file]::file-selector-button{border:0;border-radius:6px;padding:6px 10
 
 /* Reset remains secondary, but visibly actionable rather than disabled. */
 .console-primary-actions #reset-light{display:inline-flex;align-items:center;justify-content:center;gap:7px;background:#fff;border:1px solid #a9c1b1;color:#355f47;font-weight:650;box-shadow:0 1px 2px #244a3010;transform:none}.console-primary-actions #reset-light svg{flex-shrink:0}.console-primary-actions #reset-light:hover:not(:disabled){background:#e7f1ea;border-color:#729e81;color:#245b3d;box-shadow:none;transform:none}.console-primary-actions #reset-light:active:not(:disabled){background:#dceade;border-color:#729e81;color:#245b3d;transform:none}.console-primary-actions #reset-light:disabled{background:#f0f3f1;border-color:#e0e7e2;color:#9aa89e;box-shadow:none}
+
+#gpu-entry-notice{padding:10px 14px;border:1px solid #cadfd1;border-radius:10px;background:#eaf3ed;color:#3c6d4d;font-size:12px;margin:0 0 10px}

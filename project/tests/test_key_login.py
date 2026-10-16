@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import tempfile
 import time
+import threading
 import unittest
 from urllib.parse import urlencode
 from unittest.mock import patch
@@ -67,4 +68,40 @@ class KeyLoginTests(unittest.TestCase):
   for i in range(11):last=self.req('/auth/login','POST',b'accessKey=invalid')
   self.assertEqual(last[0],429);self.assertEqual(last[1]['Retry-After'],'60')
   text=(self.root/'state/logs/service.log').read_text();self.assertNotIn(KEY,text);self.assertNotIn('accessKey=',text)
+ def gpu_fixture(self,state='STOPPED',age=0):
+  class FakeGPU:
+   def __init__(self):self.calls=0;self.entered=threading.Event();self.release=threading.Event()
+   def latest(inner):return {'state':state,'lastObservedAt':time.time()-age,'verifiedStopped':state=='STOPPED','simulation':True}
+   def start(inner,scope):
+    inner.calls+=1;inner.entered.set();inner.release.wait(2);return {'state':'STARTING'}
+  gpu=FakeGPU();self.app.gpu_sessions=gpu;self.app.gpu_scope={'scopeId':'a'*32,'resourceId':'fixture','expiresAt':time.time()+60,'budgetApproved':True,'idleSeconds':60,'simulation':True};return gpu
+ def operator_cookie(self):
+  self.app.accounts.users['lighttry']['role']='operator';return self.login()[0]
+ def test_gpu_active_skips_interstitial_without_start(self):
+  gpu=self.gpu_fixture('READY');cookie,h=self.login();self.assertEqual(h['Location'],'/');self.assertEqual(gpu.calls,0)
+  self.assertEqual(self.req('/gpu-entry',cookie=cookie)[0],303)
+ def test_gpu_stopped_shows_choice_and_skip_is_readonly(self):
+  gpu=self.gpu_fixture();cookie,h=self.login();self.assertEqual(h['Location'],'/gpu-entry');status,_,body=self.req('/gpu-entry',cookie=cookie);self.assertEqual(status,200);self.assertIn('暂不启动，直接进入'.encode(),body);self.assertIn(b'disabled',body)
+  self.assertEqual(self.req('/',cookie=cookie)[0],200);self.assertEqual(gpu.calls,0)
+ def test_gpu_unknown_and_stale_are_not_called_stopped(self):
+  cookie,h=self.login();self.assertEqual(h['Location'],'/gpu-entry');self.assertIn('暂时无法确认'.encode(),self.req('/gpu-entry',cookie=cookie)[2])
+  gpu=self.gpu_fixture('READY',age=120);self.assertEqual(self.app.gpu_login_destination(),'/gpu-entry');self.assertFalse(self.app.gpu_entry_info('lighttry')['canStart']);self.assertEqual(gpu.calls,0)
+ def test_gpu_start_is_background_and_once_per_scope(self):
+  gpu=self.gpu_fixture();cookie=self.operator_cookie();headers={'CONTENT_TYPE':'application/json','HTTP_X_LIGHTTRY_TOKEN':self.app.handler.csrf_token};body=json.dumps({'requestId':'b'*32}).encode()
+  try:
+   status,_,out=self.req('/api/gpu/entry-start','POST',body,cookie=cookie,extra=headers);self.assertEqual(status,202);self.assertTrue(gpu.entered.wait(1));self.assertFalse(gpu.release.is_set());self.assertEqual(self.req('/',cookie=cookie)[0],200)
+   self.assertEqual(self.req('/api/gpu/entry-start','POST',body,cookie=cookie,extra=headers)[0],202);self.assertEqual(gpu.calls,1)
+  finally:gpu.release.set();self.app.entry_thread.join(2)
+ def test_gpu_start_requires_auth_csrf_role_and_valid_scope(self):
+  gpu=self.gpu_fixture();body=json.dumps({'requestId':'c'*32}).encode();headers={'CONTENT_TYPE':'application/json','HTTP_X_LIGHTTRY_TOKEN':self.app.handler.csrf_token};cookie,_=self.login()
+  self.assertEqual(self.req('/api/gpu/entry-start','POST',body,extra=headers)[0],401)
+  self.assertEqual(self.req('/api/gpu/entry-start','POST',body,cookie=cookie,extra=headers)[0],403)
+  cookie=self.operator_cookie();self.assertEqual(self.req('/api/gpu/entry-start','POST',body,cookie=cookie,extra={'CONTENT_TYPE':'application/json'})[0],403)
+  self.app.gpu_scope['expiresAt']=time.time()-1;self.assertEqual(self.req('/api/gpu/entry-start','POST',body,cookie=cookie,extra=headers)[0],409);self.assertEqual(gpu.calls,0)
+ def test_gpu_entry_get_does_not_start_and_failure_is_not_retried(self):
+  gpu=self.gpu_fixture();cookie=self.operator_cookie();self.assertIn(self.req('/api/gpu/entry-start',cookie=cookie)[0],(404,405));self.assertEqual(gpu.calls,0)
+  def fail(scope):gpu.calls+=1;raise RuntimeError('synthetic failure')
+  gpu.start=fail;body=json.dumps({'requestId':'d'*32}).encode();headers={'CONTENT_TYPE':'application/json','HTTP_X_LIGHTTRY_TOKEN':self.app.handler.csrf_token}
+  self.assertEqual(self.req('/api/gpu/entry-start','POST',body,cookie=cookie,extra=headers)[0],202);self.app.entry_thread.join(2)
+  self.assertEqual(self.req('/api/gpu/entry-start','POST',body,cookie=cookie,extra=headers)[0],202);self.assertEqual(gpu.calls,1);self.assertEqual(self.app.gpu_entry_info('lighttry')['startStatus'],'failed')
 if __name__=='__main__':unittest.main(verbosity=2)
