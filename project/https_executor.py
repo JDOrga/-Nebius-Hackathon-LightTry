@@ -115,6 +115,13 @@ class HTTPSCosmosExecutor:
         elif remote.get('status')=='failed':
             atomic(existing,{'taskId':request['taskId'],'nonce':request['nonce'],'status':'failed','stage':'validating',
                              'executionStopped':True,'observedAt':time.time()})
+        elif remote.get('status')=='dispatching':
+            from gpu_monitoring import TASK_STAGES
+            progress=remote.get('progress')
+            if (time.time()<=binding['deadline'] and isinstance(progress,dict) and
+                progress.get('status')=='running' and progress.get('stage') in TASK_STAGES):
+                atomic(existing,{'taskId':request['taskId'],'nonce':request['nonce'],'status':'running',
+                                 'stage':progress['stage'],'observedAt':time.time()})
 
     def confirmed_stopped(self,folder):
         try:

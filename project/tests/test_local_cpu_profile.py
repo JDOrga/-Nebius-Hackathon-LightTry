@@ -127,7 +127,7 @@ class WSLTests(unittest.TestCase):
         provider=WSLNebiusProvider.__new__(WSLNebiusProvider)
         provider.cli=Path('/FIXTURE/wsl.exe');provider.settings={'configFile':'UNC_FIXTURE','profile':'PROFILE_FIXTURE'}
         provider.wsl={'wslDistro':'UBUNTU_FIXTURE','linuxCliPath':'/home/FIXTURE/nebius','linuxConfigFile':'/home/FIXTURE/config.yaml'}
-        provider.clock=lambda:100;provider.runner=Mock(return_value=SimpleNamespace(returncode=0,stdout='{}'))
+        provider.clock=lambda:100;provider.runner=Mock(return_value=SimpleNamespace(returncode=0,stdout='{}',stderr=''))
         provider._call(['ai','devlab','get','--id','RESOURCE_FIXTURE'],deadline=103)
         args,kw=provider.runner.call_args
         self.assertEqual(args[0][:5],[str(provider.cli),'-d','UBUNTU_FIXTURE','--','/home/FIXTURE/nebius'])

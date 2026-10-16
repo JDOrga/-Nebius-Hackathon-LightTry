@@ -282,6 +282,11 @@ class Sessions:
                         health=self.worker.health()
                         if (health.get('sessionId')!=identity or health.get('resourceId')!=value['resourceId']):
                             raise ValueError('WORKER_SESSION_MISMATCH')
+                        from gpu_monitoring import worker_telemetry
+                        if value['simulation'] or health.get('hostIdentity')==value['hostIdentity']:
+                            try:value['workerTelemetry']=worker_telemetry(health,now)
+                            except Exception:value.pop('workerTelemetry',None)
+                        else:value.pop('workerTelemetry',None)
                         ready=model_ready(health,{'sessionId':identity,'resourceId':value['resourceId'],
                             'hostIdentity':value['hostIdentity']},simulation=value['simulation'])
                         if ready and value['state']!='EXECUTING':value['state']='READY'

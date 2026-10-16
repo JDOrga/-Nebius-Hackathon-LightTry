@@ -2,6 +2,7 @@ import {resetClientStorage} from './workspace-portability.js';
 import {archive,readArchive,mergeLibraries} from './workspace-portability.js';
 import {createConsole} from './console.js';
 import {createChat} from './chat.js';
+import {paintGenerationButton,paintGpuConsole} from './gpu-monitor.js';
 import {allowed,removeFamily,createScheme,revise as reviseBase,variant,sameParameters,matchingTask,validateLibrary,referenceKey,uid,restoreInputStub,photoTitle,schemePresentation,environmentEdit,comparisonCursor,schemeCaption,mergeAcceptedLibrary,schemeWire} from './scheme-state.js';
 const $=id=>document.getElementById(id), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let catalog,lighting,inference,schemes=[],current,input,file=null,tasks=[],mode='result',compareKey=null,pending=false,requestId=null,region=false,zoom=1,pan={x:0,y:0};
@@ -124,6 +125,7 @@ async function render(){
   $('download').disabled=!r;$('download').title=r?'下载当前来源的实际字节':'请先生成此方案，再下载结果';$('generate').title=!inference.enabled?'生成服务暂不可用':r?'已有有效结果':!file?'需载入原始照片':'提交当前方案';
   $('download').textContent=r?.simulation?'下载模拟演示图':region?'下载区域 PNG':'下载结果 JPEG';$('region').disabled=!!r?.simulation||(!selectedSample()?.canvas&&!input.canvas);
   $('generate').dataset.readyText=failed?'确认重试此方案':'确认生成';applyGpuGenerationGate();
+  paintGenerationButton($('generate'),t,{simulation:inference.developmentTestMode===true});
   $('region').textContent=region?'原照片区域 · 返回完整画布':'完整画布 · 查看原照片区域';
   $('compare-plan').innerHTML=schemes.filter(s=>s.inputId===input.id&&key(s)!==key(current)&&resultFor(s)&&($('show-history').checked||!schemes.some(n=>n.planId===s.planId&&n.version>s.version))).map(s=>`<option value="${key(s)}">${esc(schemeCaption(s,schemes))} · v${s.version} · ${esc(effectLabel(s.parameters))}</option>`).join('');
   compareKey=comparisonCursor([...$('compare-plan').options].map(o=>o.value),compareKey);
@@ -169,7 +171,7 @@ let drag=null;$('preview-panels').onpointerdown=e=>{if(zoom>1){drag={x:e.clientX
 document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;zoom=1;pan={x:0,y:0};render();});
 $('compare-plan').onchange=()=>{compareKey=$('compare-plan').value;zoom=1;pan={x:0,y:0};render();};
 $('file').onchange=async()=>{const f=$('file').files[0];if(!f)return;if(!['image/jpeg','image/png','image/webp'].includes(f.type)||f.size>20*1024*1024){error('请选择不超过20MB的 JPG、PNG、WebP。');return}try{const url=URL.createObjectURL(f),image=new Image();image.src=url;await image.decode();if(Math.min(image.naturalWidth,image.naturalHeight)<32||Math.max(image.naturalWidth,image.naturalHeight)>16384||image.naturalWidth*image.naturalHeight>40000000)throw Error('照片尺寸不在允许范围。');const unfinished=storageGet(submissionKey);if(unfinished){const bytes=await f.arrayBuffer(),sha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');if(sha!==unfinished.originalSha)throw Error('上次提交状态待恢复；请重新载入同一文件，避免重复费用。');file=f;input={id:unfinished.meta.inputId,name:f.name,width:image.naturalWidth,height:image.naturalHeight,url,originalUrl:url};current=unfinished.meta.lightingScheme;requestId=unfinished.meta.requestId;persist();render();error('原请求身份已恢复；再次提交将沿用同一身份，不自动执行。');return;}const sourceBytes=await f.arrayBuffer(),originalSha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',sourceBytes))).map(x=>x.toString(16).padStart(2,'0')).join('');if(pendingPhotoAssociation){if(pendingPhotoAssociation.originalSha&&originalSha!==pendingPhotoAssociation.originalSha)throw Error('所选文件不是此方案的原照片，请重新选择。');file=f;input={id:pendingPhotoAssociation.inputId,name:f.name,width:image.naturalWidth,height:image.naturalHeight,originalSha,url,originalUrl:url,needsFile:false};pendingPhotoAssociation=null;persist();render();error(null);return;}if(input.needsFile&&originalSha===input.originalSha){file=f;input={...input,needsFile:false,url:input.canvas?input.url:url,originalUrl:url};persist();render();error(null);return;}file=f;mode='result';zoom=1;pan={x:0,y:0};input={id:uid(),originalSha,name:f.name,width:image.naturalWidth,height:image.naturalHeight,url,originalUrl:url};put({...variant(current,f.name+' · '+current.name),inputId:input.id});error(null)}catch(e){error(e.message)}};
-async function poll(taskId){for(;;){const t=await api('/api/tasks/'+taskId);tasks=tasks.filter(x=>x.taskId!==taskId).concat(t);if(t.input.id===input?.id&&['queued','running','succeeded'].includes(t.status))input={...input,...t.input};persist();render();if(!['queued','running'].includes(t.status))return;await new Promise(r=>setTimeout(r,2500));}}
+async function poll(taskId){try{for(;;){const t=await api('/api/tasks/'+taskId);tasks=tasks.filter(x=>x.taskId!==taskId).concat(t);if(t.input.id===input?.id&&['queued','running','succeeded'].includes(t.status))input={...input,...t.input};persist();render();if(!['queued','running'].includes(t.status))return;await new Promise(r=>setTimeout(r,2500));}}catch(e){const task=tasks.find(t=>t.taskId===taskId);if(task)task.progressStale=true;render();throw e;}}
 async function submitGeneration(){if(pending||activeTask()||!file||resultFor(current))return;if(gpuGenerationBlocked()){error('模型尚未就绪，请等待服务器准备完成。');return;}pending=true;requestId=requestId||uid();render();try{const submittedFile=file,snapshot=schemeWire(structuredClone(current)),meta={inputId:input.id,requestId,name:input.name,lightingScheme:snapshot,...(schemeOrigins[key(snapshot)]?{languageProposalId:schemeOrigins[key(snapshot)]}: {})};const bytes=await submittedFile.arrayBuffer(),originalSha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');rememberSubmission({meta,originalSha});const encoded=btoa(unescape(encodeURIComponent(JSON.stringify(meta))));const task=await api('/api/tasks',{method:'POST',headers:{'Content-Type':submittedFile.type,'X-LightTry-Token':inference.csrfToken,'X-LightTry-Request':encoded},body:submittedFile});tasks.push(task);rememberSubmission(null);requestId=null;pending=false;persist();await poll(task.taskId)}catch(e){pending=false;error(e.message+'；请求身份保留，不自动重试。');render();}};
 $('generate').onclick=()=>{if(inference.developmentTestMode){$('generate-dialog').querySelector('h2').textContent='确认离线模拟';$('generate-dialog').querySelectorAll('p')[1].textContent='仅生成带水印的演示图，不调用真实模型，不收费。';$('confirm-generate').textContent='提交模拟生成';}$('confirm-summary').textContent=$('generation-summary').textContent;$('generate-dialog').dataset.ref=referenceKey(current,input.id);$('generate-dialog').showModal();};
 $('cancel-generate').onclick=()=>$('generate-dialog').close();
@@ -278,16 +280,23 @@ function paintGpuMonitor(info){
  $('gpu-monitor-stop').hidden=!info.canStop;
  $('gpu-monitor-stop').disabled=gpuStopBusy;
  $('gpu-monitor-start').title=info.canStart?'启动 GPU 可能产生费用':info.message||'当前不可启动';
+ paintGpuConsole(document,info);
  applyGpuGenerationGate();
 }
 async function refreshGpuMonitor(){
  if(gpuMonitorBusy)return;
  gpuMonitorBusy=true;$('gpu-monitor-refresh').disabled=true;
  try{paintGpuMonitor(await api('/api/gpu/entry-status'));}
- catch(e){paintGpuMonitor({state:'UNKNOWN',configured:e.status===404?false:undefined,canStart:false,message:e.status===404?'本地预览未连接 GPU 服务。':'暂时无法读取 GPU 状态，请稍后刷新。'});}
- finally{gpuMonitorBusy=false;$('gpu-monitor-refresh').disabled=false;clearTimeout(gpuMonitorTimer);if(!document.hidden)gpuMonitorTimer=setTimeout(refreshGpuMonitor,15000);}
+ catch(e){paintGpuMonitor({...gpuMonitorInfo,state:'UNKNOWN',stale:true,canGenerate:false,hostConfirmation:{canConfirm:false},configured:e.status===404?false:undefined,canStart:false,message:e.status===404?'本地预览未连接 GPU 服务。':'暂时无法读取 GPU 状态；下列旧快照不代表当前状态。'});}
+ finally{gpuMonitorBusy=false;$('gpu-monitor-refresh').disabled=false;clearTimeout(gpuMonitorTimer);if(!document.hidden)gpuMonitorTimer=setTimeout(refreshGpuMonitor,$('gpu-console-dialog').open?5000:15000);}
 }
 $('gpu-monitor-refresh').onclick=refreshGpuMonitor;
+function openGpuConsole(){paintGpuConsole(document,gpuMonitorInfo||{});if(!$('gpu-console-dialog').open)$('gpu-console-dialog').showModal();refreshGpuMonitor();}
+$('gpu-monitor-open').onclick=openGpuConsole;
+$('gpu-monitor').addEventListener('click',event=>{if(!event.target.closest('button,a,input'))openGpuConsole();});
+$('gpu-console-close').onclick=()=>$('gpu-console-dialog').close();
+$('gpu-console-refresh').onclick=refreshGpuMonitor;
+$('gpu-console-dialog').addEventListener('close',()=>{clearTimeout(gpuMonitorTimer);if(!document.hidden)gpuMonitorTimer=setTimeout(refreshGpuMonitor,15000);});
 let pendingGpuHost=null,pendingGpuStop=null;
 $('gpu-monitor-enroll').onclick=()=>{
  const proposal=gpuMonitorInfo?.hostConfirmation;if(gpuHostBusy||!proposal?.canConfirm)return;

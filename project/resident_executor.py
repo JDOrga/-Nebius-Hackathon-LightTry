@@ -8,6 +8,7 @@ import time
 
 from gpu_model import CosmosWorkerExecutor,ROOT
 from inference.jobs import atomic,read
+from gpu_monitoring import phase_loading,clean_loading
 from model_contract import unpack_input
 
 
@@ -19,6 +20,16 @@ class ResidentCosmosExecutor(CosmosWorkerExecutor):
         if self.config.get('executionMode')!='resident':raise ValueError('EXPLICIT_RESIDENT_ENABLE_REQUIRED')
         self.config_file=Path(config_file).resolve()
         self.phases={};self.phase_logs=[];self.boot_sent=False
+
+    @property
+    def loading_progress(self):
+        try:
+            if not self.boot_sent or self.grant()!=self.boot_grant:return None
+            return clean_loading({'version':1,'phases':[
+                phase_loading(self.ledger.root,phase,child.pid,self.ledger.session_id,
+                              self.ledger.resource_id,child.poll() is None)
+                for phase,child in tuple(self.phases.items())]})
+        except Exception:return None  # telemetry cannot break health/readiness or reload anything
 
     @property
     def model_loaded(self):

@@ -22,6 +22,10 @@ class CosmosWorkerExecutor:
     simulation=False
     execution_mode='per-job'
     model_loaded=False
+    def task_progress(self,envelope):
+        from gpu_monitoring import execution_progress
+        return execution_progress(self.ledger.root,envelope)
+
     def __init__(self,ledger,config_file):
         value=json.loads(runtime_file(config_file,ROOT).decode('utf-8'))
         required={'schemaVersion','enabled','python','repo','checkpointDir','cudaHome','grantFile'}

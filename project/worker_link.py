@@ -138,10 +138,17 @@ class WorkerLedger:
 
     def close(self):self.lockfile.close()
 
-    def health(self):return {'sessionId':self.session_id,'resourceId':self.resource_id,'modelState':self.model_state,
+    def health(self):
+        value={'sessionId':self.session_id,'resourceId':self.resource_id,'modelState':self.model_state,
                              'simulation':self.simulation,'modelLoaded':getattr(self.executor,'model_loaded',False) is True,
                              'executionMode':getattr(self.executor,'execution_mode','per-job'),
                              'hostIdentity':getattr(self,'host_identity',None)}
+        try:
+            from gpu_monitoring import clean_loading
+            progress=clean_loading(getattr(self.executor,'loading_progress',None))
+            if progress is not None:value['loadingProgress']=progress
+        except Exception:pass
+        return value
 
     def blob(self,sha):
         if not re.fullmatch('[a-f0-9]{64}',sha):raise JobError('ARTIFACT_INVALID','Invalid artifact.',422)
@@ -189,7 +196,15 @@ class WorkerLedger:
         with self.db() as db:row=db.execute('SELECT body,state FROM jobs WHERE id=?',(job_id,)).fetchone()
         if not row:return {'status':'not_found'}
         with self.db() as db:result=db.execute('SELECT sha FROM results WHERE id=?',(job_id,)).fetchone()
-        return {**json.loads(row[0]),'status':row[1],**({'resultSha256':result[0]} if result else {})}
+        envelope=json.loads(row[0]);value={**envelope,'status':row[1],**({'resultSha256':result[0]} if result else {})}
+        if row[1]=='dispatching':
+            try:
+                from gpu_monitoring import TASK_STAGES
+                progress=self.executor.task_progress(envelope)
+                if isinstance(progress,dict) and progress.get('status')=='running' and progress.get('stage') in TASK_STAGES:
+                    value['progress']={'status':'running','stage':progress['stage']}
+            except Exception:pass
+        return value
 
     def run_one(self):
         with self.lock,self.db() as db:

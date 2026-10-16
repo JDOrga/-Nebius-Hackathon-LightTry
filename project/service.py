@@ -273,7 +273,9 @@ class Application:
                     'uncertain':'服务器连接未确认，请先停止并核查。'}.get(enrollment['stage'],'正在准备服务器连接。')
         can_stop=bool(operator and scope and snapshot.get('sessionId') and snapshot.get('scopeId')==scope.get('scopeId') and
                       snapshot.get('resourceId')==scope.get('resourceId') and not snapshot.get('verifiedStopped') and not snapshot.get('stopSent'))
+        from gpu_monitoring import public_monitor
         return {'active':active,'state':state,'canStart':allowed,'canStop':can_stop,'hostConfirmation':enrollment,
+                'monitor':public_monitor(snapshot,fresh,time.time()),
                 'sessionId':snapshot.get('sessionId'),'message':reason,'simulation':snapshot.get('simulation') is True,
                 'configured':self.gpu_sessions is not None,'canGenerate':bool(fresh and state=='READY'),
                 'observedAt':observed if isinstance(observed,(int,float)) and not isinstance(observed,bool) else None,'stale':bool(observed is not None and not fresh),
