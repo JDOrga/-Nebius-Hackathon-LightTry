@@ -12,6 +12,7 @@ import time
 import uuid
 
 from inference.jobs import JobError, ID
+from model_readiness import ready as model_ready
 from lighting import canonical
 
 STATES={'STOPPED','STARTING','LOADING','READY','EXECUTING','STOPPING','UNKNOWN'}
@@ -163,7 +164,7 @@ class Sessions:
             if now<value['lastObservedAt']:
                 value['state']='UNKNOWN';value['error']='CLOCK_REGRESSED';self.save(value,'CLOCK_REGRESSED');return value
             value['lastObservedAt']=now
-            stopping=value['stopSent']
+            stopping=value['stopSent'];ready=False
             due=(now>=value['absoluteDeadline'] or now-value['cpuHeartbeatAt']>=value['cpuLeaseSeconds'] or
                  (value['runningAt'] is None and now>=value['startupDeadline']) or
                  (value['workDeadline'] is not None and now>=value['workDeadline']) or
@@ -200,8 +201,10 @@ class Sessions:
                         health=self.worker.health()
                         if (health.get('sessionId')!=identity or health.get('resourceId')!=value['resourceId']):
                             raise ValueError('WORKER_SESSION_MISMATCH')
-                        if health.get('modelState')=='ready' and value['state']!='EXECUTING':value['state']='READY'
-                        elif health.get('modelState')!='ready':value['state']='LOADING'
+                        ready=model_ready(health,{'sessionId':identity,'resourceId':value['resourceId'],
+                            'hostIdentity':value['hostIdentity']},simulation=value['simulation'])
+                        if ready and value['state']!='EXECUTING':value['state']='READY'
+                        elif not ready:value['state']='LOADING'
                 else:value['state']='STARTING'
                 if not value['stopSent']:
                     with self.db() as db:pending=db.execute("SELECT body FROM dispatches WHERE session=? AND state IN ('active','uncertain','attempted') ORDER BY rowid LIMIT 1",(identity,)).fetchone()
@@ -210,7 +213,7 @@ class Sessions:
                         if any(remote.get(k)!=v for k,v in envelope.items()) or remote.get('status')=='not_found':raise ValueError('TASK_UNKNOWN')
                         if remote['status'] in ('succeeded','failed'):
                             with self.db() as db:db.execute("UPDATE dispatches SET state='done' WHERE job=?",(envelope['jobId'],))
-                            value['state']='READY';value['idleDeadline']=min(now+value['idleSeconds'],value['workDeadline'])
+                            value['state']='READY' if ready else 'LOADING';value['idleDeadline']=min(now+value['idleSeconds'],value['workDeadline'])
                         elif remote['status'] in ('queued','dispatching'):value['state']='EXECUTING'
                         else:raise ValueError('TASK_UNKNOWN')
             except Exception:

@@ -9,6 +9,7 @@ import time
 from model_contract import grant_file,check_request,pack_input,request_sha,validate_result_archive
 from inference.jobs import atomic,read,ID
 from inference.images import digest
+from model_readiness import ready as model_ready
 from runtime.driver import extract_result,extract_stage_evidence
 
 
@@ -58,6 +59,8 @@ class HTTPSCosmosExecutor:
         health=worker.health()
         if (health.get('sessionId'),health.get('resourceId'),health.get('hostIdentity'))!=(state['sessionId'],state['resourceId'],state['hostIdentity']):
             raise ValueError('HTTPS_WORKER_CURRENT_HOST_MISMATCH')
+        if not model_ready(health,state,simulation=grant.get('simulation',False)):
+            raise ValueError('RESIDENT_MODEL_NOT_READY')
         raw=pack_input(folder,request);sha=hashlib.sha256(raw).hexdigest()
         envelope={'jobId':request['taskId'],'sessionId':state['sessionId'],'resourceId':state['resourceId'],
                   'artifactSha256':sha,'requestSha256':request_sha(request)}

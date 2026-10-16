@@ -133,7 +133,8 @@ class WorkerLedger:
     def close(self):self.lockfile.close()
 
     def health(self):return {'sessionId':self.session_id,'resourceId':self.resource_id,'modelState':self.model_state,
-                             'simulation':self.simulation,'modelLoaded':None if self.executor else False,'executionMode':'per-job',
+                             'simulation':self.simulation,'modelLoaded':getattr(self.executor,'model_loaded',False) is True,
+                             'executionMode':getattr(self.executor,'execution_mode','per-job'),
                              'hostIdentity':getattr(self,'host_identity',None)}
 
     def blob(self,sha):

@@ -333,3 +333,13 @@ GPU worker入口将私有data-root按sessionId分目录，worker.sqlite3也持�
 普通根start.py入口现在在原studio后端挂载local_cpu_api：/api/health、/api/gpu/entry-status、/api/gpu/status及/api/inference/capabilities。它加载同一NebiusProvider/HTTPSWorker/HTTPSCosmosExecutor类，并复用生产GPU状态计算，但不构造云提供者、不读真实云凭据、不运行guard或模型；未配置时返回configured=false、state=UNKNOWN、canStart=false，不再404，也不把未知状态称为停止。
 
 本地开发入口无登录，因此云控制POST即使同源CSRF正确仍503，缺少CSRF/同源则403，GET控制405。真实启停/模型只能通过已配置且密钥认证的start.py --service入口，新接口挂载不等于远程GPU连通。生产DeploymentHandler显式禁用local-only路由继承。此次重启沿用.local/studio.json原目录、素材与accepted包，不迁移或复制工作台数据。
+# 当前一键 GPU 工作流的未完成项（2026-10-16）
+
+目标是：密钥认证后点击启动，CPU 守护提交一次 Nebius 启动；确认本轮主机身份后建立受认证 HTTPS；常驻模型实际加载完成才进入 READY；用户点击生成后派发当前任务。打开页面、读取状态、进程存活及授权文件有效都不能替代模型加载成功。
+
+当前本地开发入口只连接真实 Nebius 状态查询，没有注册收费启动控制器。`/api/gpu/connection-readiness` 明确返回未完成的认证控制绑定、当前启动范围、GPU HTTPS 部署、常驻模型实现和当前主机登记。该接口不执行云操作、不探测模型、不暴露密钥。
+
+现有 CosmosWorkerExecutor 是按任务启动原有受核验子进程的旧适配器，**不是常驻预加载实现**。不再把有效 grant 直接报告为模型 ready。真实会话必须同时收到当前 session/resource/host 匹配、simulation=false、executionMode=resident、modelLoaded=true、modelState=ready，才允许 READY；任务上传前再次核验。进程和模型常驻方式仍需实现及远端部署，不能用给旧适配器设置一个 ready 布尔值代替。
+
+当前 GPU 已关机，未安装本轮 HTTPS worker、未登记当前证书与主机、未运行模型。首次真实部署和整链验收需要另行允许开机；本轮“不要启动 GPU”的限制保持。以前已关闭的预算、主机信任和模型任务白名单不能继承。正式按钮不能接到未认证开发页，也不能绕过这些缺口强行显示可用。
+

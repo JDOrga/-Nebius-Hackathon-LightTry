@@ -248,10 +248,10 @@ let gpuMonitorInfo=null,gpuMonitorBusy=false,gpuStartBusy=false,gpuMonitorTimer=
 function paintGpuMonitor(info){
  gpuMonitorInfo=info;
  const labels={STOPPED:'已停止',STARTING:'启动中',LOADING:'准备中',READY:'运行中',EXECUTING:'生成中',STOPPING:'关闭中',UNKNOWN:'状态未知'};
- let label=info.configured===false?'未连接':info.stale?'状态已过期':labels[info.state]||'状态未知';
+ let label=info.providerConnected?labels[info.state]||'状态未知':info.configured===false?'未连接':info.stale?'状态已过期':labels[info.state]||'状态未知';
  if(info.startStatus==='requested'&&!info.active)label='启动请求已提交';
  if(info.startStatus==='failed'&&!info.active)label='启动未成功';
- $('gpu-monitor').dataset.state=info.configured===false?'DISCONNECTED':info.state||'UNKNOWN';
+ $('gpu-monitor').dataset.state=info.configured===false&&!info.providerConnected?'DISCONNECTED':info.state||'UNKNOWN';
  $('gpu-monitor').title=info.message||'GPU 服务器状态';
  $('gpu-monitor-state').textContent=label;
  $('gpu-monitor-demo').hidden=!info.simulation;

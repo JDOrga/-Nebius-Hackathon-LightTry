@@ -20,6 +20,8 @@ ROOT=Path(__file__).resolve().parent.parent
 
 class CosmosWorkerExecutor:
     simulation=False
+    execution_mode='per-job'
+    model_loaded=False
     def __init__(self,ledger,config_file):
         value=json.loads(runtime_file(config_file,ROOT).decode('utf-8'))
         required={'schemaVersion','enabled','python','repo','checkpointDir','cudaHome','grantFile'}
@@ -127,7 +129,10 @@ class CosmosWorkerExecutor:
             while not self.stopped.is_set():
                 try:
                     g=self.grant();self.ledger.max_jobs=g['maxJobs'];self.ledger.host_identity=g['hostIdentity']
-                    self.ledger.model_state='ready';self.ledger.run_one()
+                    # A valid grant is not evidence of a loaded model. This
+                    # legacy subprocess executor is deliberately NOT advertised
+                    # as resident/ready for the one-click startup workflow.
+                    self.ledger.model_state='cold'
                 except Exception:self.ledger.model_state='loading'
                 self.stopped.wait(.5)
         self.thread=threading.Thread(target=run,name='cosmos-worker-dispatch',daemon=True);self.thread.start()

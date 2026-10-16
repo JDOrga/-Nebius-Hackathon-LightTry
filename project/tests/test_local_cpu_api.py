@@ -42,5 +42,22 @@ class LocalCPUTests(unittest.TestCase):
     def test_unrelated_routes_not_intercepted(self):
         api=LocalCPUAPI();self.assertFalse(api.get(self.h,'/api/catalog'));self.assertFalse(api.post(self.h,'/api/tasks'))
 
+    def test_real_status_view_keeps_paid_controls_disabled(self):
+        from nebius_status import NebiusStatus
+        observer=NebiusStatus.__new__(NebiusStatus)
+        import threading
+        observer.lock=threading.Lock();observer.clock=lambda:100
+        observer.value={'providerState':'STOPPED','verifiedStopped':True,'observedAt':99}
+        observer.error=None
+        api=LocalCPUAPI();api.observer=observer
+        api.get(self.h,'/api/gpu/entry-status');v=self.output[-1][1]
+        self.assertTrue(v['providerConnected']);self.assertTrue(v['verifiedStopped'])
+        self.assertEqual(v['state'],'STOPPED');self.assertFalse(v['canStart'])
+        observer.error='UNAVAILABLE';v=observer.snapshot()
+        self.assertFalse(v['providerConnected']);self.assertFalse(v['verifiedStopped'])
+        self.assertEqual(v['state'],'UNKNOWN')
+        observer.error=None;observer.clock=lambda:200
+        self.assertTrue(observer.snapshot()['stale'])
+
 
 if __name__=='__main__':unittest.main()

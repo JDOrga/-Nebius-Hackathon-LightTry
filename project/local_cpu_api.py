@@ -19,10 +19,21 @@ class LocalCPUAPI:
         self.info_method=Application.gpu_entry_info
         self.view=SimpleNamespace(gpu_sessions=None,gpu_scope=None,entry_lock=threading.Lock(),entry_start=None)
         self.simulation=simulation
+        from nebius_status import from_environment
+        self.observer=from_environment() if not simulation else None
 
     def info(self):
-        return {**self.info_method(self.view),'mode':'local-development','adaptersLoaded':True,
+        return {**self.info_method(self.view),**(self.observer.snapshot() if self.observer else {}),'mode':'local-development','adaptersLoaded':True,
                 'protectionMode':'cpu-only','hostLossProtected':False}
+
+    def connection_readiness(self):
+        info=self.info()
+        return {'providerConnected':info.get('providerConnected',False),'controlConfigured':False,
+                'httpsWorkerDeployed':False,'residentModelConfigured':False,'canStart':False,'canGenerate':False,
+                'blockers':['AUTHENTICATED_CONTROL_BINDING_REQUIRED','CURRENT_START_SCOPE_REQUIRED',
+                            'GPU_HTTPS_DEPLOYMENT_REQUIRED','RESIDENT_MODEL_IMPLEMENTATION_REQUIRED',
+                            'CURRENT_HOST_ENROLLMENT_REQUIRED'],
+                'realEndToEndVerified':False}
 
     def get(self,h,route):
         if route=='/api/health':
@@ -30,9 +41,11 @@ class LocalCPUAPI:
                 'paidServices':bool(h.task_store.executor or h.recipe_language) and not self.simulation,
                 'gpuControlConfigured':False,'modelAdapterConfigured':False,'adaptersLoaded':True})
         elif route=='/api/gpu/entry-status':h.json_response(self.info())
+        elif route=='/api/gpu/connection-readiness':h.json_response(self.connection_readiness())
         elif route=='/api/gpu/status':
             h.json_response({'state':'UNKNOWN','configured':False,'providerState':None,
-                'verifiedStopped':False,'simulation':False,'protectionMode':'cpu-only','hostLossProtected':False})
+                'verifiedStopped':False,'simulation':False,'protectionMode':'cpu-only','hostLossProtected':False,
+                **(self.observer.snapshot() if self.observer else {})})
         elif route=='/api/inference/capabilities':
             h.json_response({**h.task_store.capabilities(),'csrfToken':h.csrf_token})
         elif route in self.controls:

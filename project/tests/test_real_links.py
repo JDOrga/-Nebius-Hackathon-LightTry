@@ -142,13 +142,20 @@ class ModelTests(unittest.TestCase):
             'python':sys.executable,'repo':str(self.root),'checkpointDir':str(self.root),'cudaHome':str(self.root),'grantFile':str(self.grant_path)}));self.config.chmod(0o600)
         self.state={'sessionId':'a'*32,'resourceId':'RESOURCE_FIXTURE','scopeId':'f'*32,'state':'READY','hostConfirmed':True,
             'hostIdentity':self.grant['hostIdentity'],'lastObservedAt':time.time(),'workDeadline':self.grant['expiresAt'],'absoluteDeadline':self.grant['expiresAt']}
-        self.worker=Mock();self.worker.health.return_value={'sessionId':'a'*32,'resourceId':'RESOURCE_FIXTURE','hostIdentity':self.grant['hostIdentity']}
+        self.worker=Mock();self.worker.health.return_value={'sessionId':'a'*32,'resourceId':'RESOURCE_FIXTURE','hostIdentity':self.grant['hostIdentity'],
+            'modelState':'ready','modelLoaded':True,'simulation':False,'executionMode':'resident'}  # Synthetic report, not a real loaded model.
         self.worker.upload.side_effect=lambda raw:{'sha256':hashlib.sha256(raw).hexdigest(),'bytes':len(raw)}
         self.control=SimpleNamespace(scope={'scopeId':'f'*32,'resourceId':'RESOURCE_FIXTURE','expiresAt':self.grant['expiresAt']},sessions=Mock())
         self.control.sessions.latest.side_effect=lambda:copy.deepcopy(self.state);self.control.sessions.worker=self.worker
         self.cpu=HTTPSCosmosExecutor(self.control,self.grant_path,self.folder.parent)
 
     def write_grant(self):self.grant_path.write_text(json.dumps(self.grant));self.grant_path.chmod(0o600)
+    def test_cold_model_report_blocks_before_upload_or_dispatch(self):
+        self.worker.health.return_value['modelLoaded']=False
+        with self.assertRaisesRegex(ValueError,'RESIDENT_MODEL_NOT_READY'):self.cpu.submit(self.folder,self.request)
+        self.worker.upload.assert_not_called();self.control.sessions.submit.assert_not_called()
+        self.assertFalse((self.folder/'https-binding.json').exists())
+
     def tearDown(self):self.ledger.close();self.tmp.cleanup()
     def envelope(self,request=None):
         request=request or self.request;raw=pack_input(self.folder,request);sha=hashlib.sha256(raw).hexdigest();self.ledger.upload(sha,raw)
