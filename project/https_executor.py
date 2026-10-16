@@ -6,7 +6,8 @@ from pathlib import Path
 import threading
 import time
 
-from model_contract import grant_file,check_request,pack_input,request_sha,validate_result_archive,job_authorization
+from model_contract import grant_file,check_request,pack_input,request_sha,validate_result_archive,job_authorization,model_request
+from lighting import canonical
 from inference.jobs import atomic,read,ID
 from inference.images import digest
 from model_readiness import ready as model_ready
@@ -105,7 +106,10 @@ class HTTPSCosmosExecutor:
             try:
                 validate_result_archive(raw)
                 event=extract_result(archive,folder,require_gbuffers=True)
-                extract_stage_evidence(archive,folder,request)
+                # The GPU decoded this exact canonical wire representation (0.0
+                # becomes 0). Use it for provenance too, without rewriting the
+                # original request or changing its authenticated request hash.
+                extract_stage_evidence(archive,folder,json.loads(canonical(model_request(request))))
                 if (event.get('taskId'),event.get('nonce'),event.get('status'),event.get('executionStopped'))!=(request['taskId'],request['nonce'],'succeeded',True):
                     raise ValueError('HTTPS_RESULT_IDENTITY_MISMATCH')
             except Exception:
