@@ -287,6 +287,13 @@ class Sessions:
                             try:value['workerTelemetry']=worker_telemetry(health,now)
                             except Exception:value.pop('workerTelemetry',None)
                         else:value.pop('workerTelemetry',None)
+                        # Reuse this poll's payload and the save below; no extra DB write,
+                        # log download, subprocess, wait, scan, or readiness condition.
+                        try:
+                            from gpu_monitoring import remember_load_timing
+                            timing=remember_load_timing(value.get('loadTiming'),value.get('workerTelemetry',{}).get('loadingProgress'))
+                            if timing is not None:value['loadTiming']=timing
+                        except Exception:pass
                         ready=model_ready(health,{'sessionId':identity,'resourceId':value['resourceId'],
                             'hostIdentity':value['hostIdentity']},simulation=value['simulation'])
                         if ready and value['state']!='EXECUTING':value['state']='READY'

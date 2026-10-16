@@ -113,7 +113,11 @@ class HTTPSCosmosExecutor:
                 raise  # Retain the rejected immutable artifact; never re-download/re-run it automatically.
             atomic(folder/'execution.json',event)  # Existing TaskStore/SchemeStore still validates receipt + proof.
         elif remote.get('status')=='failed':
-            atomic(existing,{'taskId':request['taskId'],'nonce':request['nonce'],'status':'failed','stage':'validating',
+            from gpu_monitoring import clean_failure
+            failure=remote.get('diagnostic')
+            diagnostic=clean_failure(failure,failure.get('stage') if isinstance(failure,dict) else None)
+            atomic(existing,{'taskId':request['taskId'],'nonce':request['nonce'],'status':'failed',
+                             'stage':diagnostic['stage'],'diagnostic':diagnostic,
                              'executionStopped':True,'observedAt':time.time()})
         elif remote.get('status')=='dispatching':
             from gpu_monitoring import TASK_STAGES

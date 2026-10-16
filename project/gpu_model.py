@@ -26,6 +26,22 @@ class CosmosWorkerExecutor:
         from gpu_monitoring import execution_progress
         return execution_progress(self.ledger.root,envelope)
 
+    def task_failure(self,envelope):
+        from inference.jobs import ID
+        from gpu_monitoring import small_json,clean_failure
+        job=envelope.get('jobId')
+        if not isinstance(job,str) or not ID.fullmatch(job):return None
+        try:
+            prep=self.ledger.root/'executions'/job
+            request=small_json(prep/'request.json')
+            event=small_json(prep/'run/execution.json')
+            if (request_sha(request)!=envelope.get('requestSha256') or
+                request.get('taskId')!=job or
+                (event.get('taskId'),event.get('nonce'),event.get('status'),event.get('executionStopped'))!=
+                (job,request.get('nonce'),'failed',True)):return None
+            return clean_failure(event.get('diagnostic'),event.get('stage'))
+        except (OSError,ValueError,TypeError,KeyError):return None
+
     def __init__(self,ledger,config_file):
         value=json.loads(runtime_file(config_file,ROOT).decode('utf-8'))
         required={'schemaVersion','enabled','python','repo','checkpointDir','cudaHome','grantFile'}

@@ -102,7 +102,7 @@ class TaskStore:
     def public(self, task):
         fields = ('taskId', 'input', 'preset', 'status', 'stage', 'result', 'error',
                   'createdAt', 'updatedAt', 'expiresAt', 'executionUncertain', 'runConfig',
-                  'presets', 'presetResults', 'registeredAt', 'registration')
+                    'presets', 'presetResults', 'registeredAt', 'registration','executionDiagnostic')
         return copy.deepcopy({key: task[key] for key in fields if key in task})
 
     def submit(self, data, metadata, mime, *, reserved_task_id=None):
@@ -280,6 +280,8 @@ class TaskStore:
                                     task['presetResults'][task['preset']['id']].update(status='succeeded',result=task['result'],error=None)
                             task.update(status='succeeded', expiresAt=now + self.retention, executionUncertain=False)
                         elif status == 'failed':
+                            from gpu_monitoring import clean_failure
+                            task['executionDiagnostic']=clean_failure(event.get('diagnostic'),event.get('stage'))
                             task.update(status='failed', result=None, error={'code': 'EXECUTION_FAILED', 'message': 'Cosmos 执行失败，请查看本地执行日志。'},
                                         executionUncertain=not event.get('executionStopped', False))
                             if (folder/'remote-evidence/presets').exists() and event.get('executionStopped'):

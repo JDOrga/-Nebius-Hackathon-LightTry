@@ -94,13 +94,16 @@ def main():
                HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1')
     try:
         emit('preflight')
+        # Both paths need the small identity manifests for inverse provenance.
+        # Resident mode skips scanning model/checkpoint contents, not metadata.
+        patch = json.loads((PREP / 'manifests/patch_manifest.json').read_text())
+        manifest = json.loads((PREP / 'manifests/weights_manifest.json').read_text())
         resident = runtime.get('executionMode') == 'resident'
         if not resident:
             head = subprocess.run(['git', '-C', str(repo), 'rev-parse', 'HEAD'], capture_output=True,
                                   text=True, check=True, timeout=10).stdout.strip()
             if head != job['runConfig']['upstreamCommit']:
                 raise ValueError('UPSTREAM_COMMIT_MISMATCH')
-            patch = json.loads((PREP / 'manifests/patch_manifest.json').read_text())
             for entry in patch['files']:
                 if sha(repo / entry['path']) != entry['after_sha256']:
                     raise ValueError('EXISTING_HDR_PATCH_MISMATCH')
@@ -133,7 +136,6 @@ def main():
                 '--checkpoint-dir', str(checkpoints), '--cuda-home', runtime['cuda_home'],
                 '--out', str(run / 'preflight.json')], repo, run / 'preflight.log', env, deadline)
             emit('weights')
-            manifest = json.loads((PREP / 'manifests/weights_manifest.json').read_text())
             mode = runtime.get('weights_mode', 'full')
             if mode != job['runConfig']['weightVerification']:
                 raise ValueError('WEIGHT_POLICY_MISMATCH')
@@ -191,6 +193,11 @@ def main():
         emit('validating', 'succeeded', True)
     except BaseException as error:
         (run / 'failure.txt').write_text(type(error).__name__ + ': ' + str(error), encoding='utf-8')
+        # Closed identifiers only. The private log above is never sent over HTTP.
+        kind=type(error).__name__
+        event['diagnostic']={'code':'WORKER_EXECUTION_FAILED',
+            'exception':kind if kind in ('UnboundLocalError','ValueError','TimeoutError','OSError',
+                'FileNotFoundError','RuntimeError','ModuleNotFoundError','AssertionError','KeyboardInterrupt') else 'UnknownError'}
         # run_bounded waits for/cleans only its own child group before raising.
         # A timeout kill fallback in the reused helper has no subsequent wait
         # proof. Preserve uncertainty until the guard/API confirms STOPPED.

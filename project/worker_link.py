@@ -204,6 +204,12 @@ class WorkerLedger:
                 if isinstance(progress,dict) and progress.get('status')=='running' and progress.get('stage') in TASK_STAGES:
                     value['progress']={'status':'running','stage':progress['stage']}
             except Exception:pass
+        elif row[1]=='failed':
+            try:
+                from gpu_monitoring import clean_failure
+                failure=self.executor.task_failure(envelope)
+                if isinstance(failure,dict):value['diagnostic']=clean_failure(failure,failure.get('stage'))
+            except Exception:pass  # read-only diagnostics cannot change an outcome or retry it
         return value
 
     def run_one(self):

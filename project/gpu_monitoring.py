@@ -12,6 +12,17 @@ ALL_LOAD_STAGES=set(LOAD_STAGES)|{'preload_total','pipeline_init','network_load'
 TASK_STAGES={'preflight','weights','inverse','forward','validating','transferring'}
 
 
+def clean_failure(value,stage=None):
+    """No messages, paths, commands, tracebacks, dynamic codes or extra fields."""
+    value=value if isinstance(value,dict) else {}
+    kind=value.get('exception')
+    return {'code':'WORKER_EXECUTION_FAILED',
+            'stage':stage if isinstance(stage,str) and stage in TASK_STAGES else 'unknown',
+            'exception':kind if isinstance(kind,str) and kind in ('UnboundLocalError','ValueError',
+                'TimeoutError','OSError','FileNotFoundError','RuntimeError','ModuleNotFoundError',
+                'AssertionError','KeyboardInterrupt') else 'UnknownError'}
+
+
 def number(value,maximum=10**15):
     return value if type(value) in (int,float) and math.isfinite(value) and 0<=value<=maximum else None
 
@@ -22,6 +33,21 @@ def small_json(path,limit=65536):
     with path.open('rb') as stream:raw=stream.read(limit+1)
     if len(raw)>limit:raise ValueError('TELEMETRY_TOO_LARGE')
     return json.loads(raw)
+
+
+def clean_segments(value):
+    """Small completed spans from the EXISTING log, not another measurement pass."""
+    result=[];seen=set()
+    for item in value[:64] if isinstance(value,list) else []:
+        if not isinstance(item,dict):continue
+        identity=item.get('spanId');stage=item.get('stage');outcome=item.get('outcome')
+        if (type(identity) is not int or not 1<=identity<=128 or identity in seen or
+            not isinstance(stage,str) or stage not in ALL_LOAD_STAGES or outcome not in ('finished','failed')):continue
+        seen.add(identity);parent=item.get('parentSpanId')
+        result.append({'spanId':identity,'parentSpanId':parent if type(parent) is int and 1<=parent<=128 else None,
+            'stage':stage,'outcome':outcome,**{name:number(item.get(name)) for name in
+                ('startedAt','finishedAt','elapsedMs','cpuMs','ioReadBytes','ioRchar')}})
+    return result
 
 
 def clean_loading(value):
@@ -36,8 +62,29 @@ def clean_loading(value):
             'activeStage':item.get('activeStage') if isinstance(item.get('activeStage'),str) and item['activeStage'] in ALL_LOAD_STAGES else None,
             'completedStages':completed,'completed':len(completed),'total':len(LOAD_STAGES),
             'updatedAt':number(item.get('updatedAt')),'elapsedMs':number(item.get('elapsedMs')),
-            'cpuMs':number(item.get('cpuMs')),'ioReadBytes':number(item.get('ioReadBytes'))})
+            'cpuMs':number(item.get('cpuMs')),'ioReadBytes':number(item.get('ioReadBytes')),
+            'segments':clean_segments(item.get('segments'))})
     return {'version':1,'phases':phases}
+
+
+def remember_load_timing(previous,current):
+    """Keep already-sanitized spans IN the existing session body/save transaction.
+
+    Historical diagnostics only: never consulted by readiness or cloud control.
+    Missing telemetry must not erase measurements already saved before shutdown.
+    """
+    if not current:return previous
+    phases={p['phase']:p for p in previous['phases']} if previous else {}
+    for phase in current['phases']:
+        old=phases.get(phase['phase'],{})
+        spans={s['spanId']:s for s in old.get('segments',[])}
+        for span in phase.get('segments',[]):spans.setdefault(span['spanId'],span)
+        if not spans:continue
+        completed=[s for s in LOAD_STAGES if s in old.get('completedStages',[]) or s in phase.get('completedStages',[])]
+        phases[phase['phase']]={**old,**{k:v for k,v in phase.items() if v is not None},
+                                'completedStages':completed,'completed':len(completed),
+                                'segments':list(spans.values())[:64]}
+    return {'version':1,'phases':list(phases.values())[:2]} if phases else previous
 
 
 def phase_loading(root,phase,pid,session,resource,alive,now=None):
@@ -61,14 +108,19 @@ def phase_loading(root,phase,pid,session,resource,alive,now=None):
                 event.get('stage') not in ALL_LOAD_STAGES or event.get('event') not in ('started','finished','failed') or
                 number(event.get('at')) is None or event['at']>now+5):continue
             events.append(event)
-        opened={};completed=set()
+        opened={};completed=set();segments=[]
         for event in events:
             identity=event.get('spanId')
             if type(identity) is not int or not 1<=identity<=128:continue
             if event['event']=='started':opened[identity]=event
             else:
                 start=opened.pop(identity,None)
-                if start and start['stage']==event['stage'] and event['event']=='finished':completed.add(event['stage'])
+                if start and start['stage']==event['stage']:
+                    if event['event']=='finished':completed.add(event['stage'])
+                    segments.append({'spanId':identity,'parentSpanId':start.get('parentSpanId'),
+                        'stage':event['stage'],'outcome':event['event'],'startedAt':start['at'],'finishedAt':event['at'],
+                        **{k:event.get(k) for k in ('elapsedMs','cpuMs','ioReadBytes','ioRchar')}})
+        result['segments']=segments  # existing 128-record read; no extra file/probe/network call
         result['completedStages']=[stage for stage in LOAD_STAGES if stage in completed]
         # Prefer the deepest currently open span; total/pipeline parents are inclusive.
         active=list(opened.values())[-1] if opened else None
@@ -120,4 +172,5 @@ def public_monitor(snapshot,fresh,now):
             'host':safe_host,'hostConfirmed':snapshot.get('hostConfirmed') is True,'deadlines':deadlines,
             'stopRequested':snapshot.get('stopSent') is True,'verifiedStopped':snapshot.get('verifiedStopped') is True,
             'instancesEmpty':snapshot.get('instancesEmpty') is True,'worker':telemetry,
+            'historicalLoadTiming':clean_loading(snapshot.get('loadTiming')),
             'workerStale':not(fresh and telemetry and telemetry['observedAt'] is not None and 0<=now-telemetry['observedAt']<=60)}

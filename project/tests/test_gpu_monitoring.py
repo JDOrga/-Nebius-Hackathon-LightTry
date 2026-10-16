@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock,patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from gpu_monitoring import clean_loading,phase_loading,execution_progress,public_monitor,LOAD_STAGES
+from gpu_monitoring import clean_loading,phase_loading,execution_progress,public_monitor,LOAD_STAGES,remember_load_timing
 from inference.jobs import atomic,read
 from model_contract import request_sha
 from worker_link import WorkerLedger
@@ -31,6 +31,52 @@ class TelemetryTests(unittest.TestCase):
             self.event('module_import','finished',2),self.event('checkpoint_read','started',3)],b'{"partial"')
         value=self.snapshot();self.assertEqual(value['state'],'loading');self.assertEqual(value['activeStage'],'checkpoint_read')
         self.assertEqual(value['completedStages'],['module_import']);self.assertNotIn('SECRET',json.dumps(value))
+    def test_segments_survive_entire_existing_health_chain(self):
+        from gpu_monitoring import worker_telemetry
+        self.write_events([self.event('preload_total','started',1,parentSpanId=None),
+            self.event('checkpoint_read','started',2,parentSpanId=1),
+            self.event('checkpoint_read','finished',2,at=104,elapsedMs=4000,cpuMs=50,ioReadBytes=8192,ioRchar=12288),
+            self.event('preload_total','finished',1,at=105,elapsedMs=5000,cpuMs=70,ioReadBytes=9000)])
+        phase=self.snapshot()
+        wire=clean_loading({'version':1,'phases':[phase]})
+        cpu=worker_telemetry({'modelState':'loading','loadingProgress':wire},110)
+        archive=remember_load_timing(None,cpu['loadingProgress'])
+        spans=archive['phases'][0]['segments']
+        self.assertEqual([s['elapsedMs'] for s in spans],[4000,5000])
+        self.assertEqual(spans[0]['parentSpanId'],1);self.assertEqual(spans[0]['ioReadBytes'],8192)
+        # Inclusive parent/child times are retained separately, never added up.
+        self.assertEqual(archive['phases'][0]['elapsedMs'],5000)
+        self.assertEqual(archive['phases'][0]['state'],'loading')
+    def test_segments_add_no_file_read_and_keep_partial_log_semantics(self):
+        self.write_events([self.event('module_import','started',2),
+            self.event('module_import','finished',2,elapsedMs=12)],b'{"partial"')
+        original=Path.open;opened=[]
+        def tracked(path,*args,**kw):opened.append(path.name);return original(path,*args,**kw)
+        with patch.object(Path,'open',tracked):value=self.snapshot()
+        self.assertEqual(opened,['state.json','loading-timing.jsonl'])
+        self.assertEqual(len(value['segments']),1)
+    def test_failure_spans_are_not_success_and_unmatched_end_not_recorded(self):
+        self.write_events([self.event('checkpoint_read','finished',4),self.event('module_import','started',2),
+            self.event('module_import','failed',2,elapsedMs=10)])
+        phase=self.snapshot();self.assertEqual(phase['completedStages'],[])
+        self.assertEqual(len(phase['segments']),1);self.assertEqual(phase['segments'][0]['outcome'],'failed')
+    def test_span_payload_is_small_closed_and_bounded(self):
+        spans=[dict(spanId=i,parentSpanId=1,stage='checkpoint_read',outcome='finished',elapsedMs=1,
+                    cpuMs=float('nan'),ioReadBytes=-1,raw='SECRET') for i in range(1,1000)]
+        value=clean_loading({'version':1,'phases':[{'phase':'inverse','segments':spans}]})
+        result=value['phases'][0]['segments'];self.assertEqual(len(result),64)
+        self.assertNotIn('SECRET',json.dumps(value));self.assertIsNone(result[0]['cpuMs'])
+        self.assertIsNone(result[0]['ioReadBytes']);self.assertLess(len(json.dumps(value).encode()),20000)
+    def test_archive_retains_finished_metrics_during_partial_or_missing_snapshots(self):
+        phase={'phase':'inverse','elapsedMs':100,'segments':[{'spanId':1,'stage':'module_import','outcome':'finished','elapsedMs':100}]}
+        old=clean_loading({'version':1,'phases':[phase]})
+        saved=remember_load_timing(None,old)
+        missing=clean_loading({'version':1,'phases':[{'phase':'inverse','state':'loading'}]})
+        newer=remember_load_timing(saved,missing)
+        self.assertEqual(newer['phases'][0]['segments'],saved['phases'][0]['segments'])
+        self.assertEqual(newer['phases'][0]['elapsedMs'],100)
+        self.assertEqual(remember_load_timing(newer,None),newer)
+        self.assertIsNone(remember_load_timing(None,missing))  # fresh session has no inherited history
     def test_finished_preload_cannot_promote_ready_and_pid_change_discards_log(self):
         self.write_events([self.event('preload_total','started'),self.event('preload_total','finished',elapsedMs=500)])
         self.assertEqual(self.snapshot()['state'],'loading');self.assertEqual(self.snapshot(pid=999)['state'],'unknown')
@@ -76,6 +122,35 @@ class TelemetryTests(unittest.TestCase):
 
 
 class BridgeTests(unittest.TestCase):
+    def test_timing_uses_same_health_and_save_then_survives_stop_and_reload(self):
+        f=guard_fixture.GuardTests();f.setUp();self.addCleanup(f.tearDown);start=f.running()
+        health=f.peer.health
+        timing={'version':1,'phases':[{'phase':'inverse','state':'ready','completedStages':['module_import'],
+            'segments':[{'spanId':1,'stage':'module_import','outcome':'finished','elapsedMs':123,'cpuMs':40,'ioReadBytes':4096}]}]}
+        f.peer.health=Mock(side_effect=lambda:{**health(),'loadingProgress':timing})
+        deadlines={k:start[k] for k in ['startupDeadline','workDeadline','stopDeadline','verifyDeadline','absoluteDeadline']}
+        with patch.object(f.sessions,'save',wraps=f.sessions.save) as save,patch.object(f.provider,'observe',wraps=f.provider.observe) as observe:
+            result=f.sessions.poll(start['sessionId'])
+            self.assertEqual(save.call_count,1);self.assertEqual(observe.call_count,1)
+        self.assertEqual(f.peer.health.call_count,1)
+        self.assertEqual({k:result[k] for k in deadlines},deadlines)
+        self.assertEqual(result['loadTiming']['phases'][0]['segments'][0]['elapsedMs'],123)
+        # Missing telemetry cannot erase the local archive, nor prevent READY.
+        f.peer.health=Mock(side_effect=health);result=f.sessions.poll(start['sessionId'])
+        self.assertEqual(result['state'],'READY');self.assertIn('loadTiming',result)
+        f.sessions.request_stop(start['sessionId'],'FIXTURE_DONE');f.provider.state='STOPPED'
+        result=f.sessions.poll(start['sessionId']);self.assertTrue(result['verifiedStopped'])
+        from gpu_session import Sessions
+        restored=Sessions(f.sessions.root,f.provider,f.peer,f.fallback,f.clock).get(start['sessionId'])
+        self.assertEqual(restored['loadTiming'],result['loadTiming'])
+        view=public_monitor(restored,False,f.clock())
+        self.assertTrue(view['workerStale']);self.assertEqual(view['historicalLoadTiming']['phases'][0]['segments'][0]['elapsedMs'],123)
+        self.assertEqual(f.provider.starts,1);self.assertEqual(f.peer.posts,0)
+    def test_timing_retention_failure_cannot_gate_ready(self):
+        f=guard_fixture.GuardTests();f.setUp();self.addCleanup(f.tearDown);v=f.running()
+        with patch('gpu_monitoring.remember_load_timing',side_effect=OSError('SYNTHETIC_DISK_FAILURE')):
+            result=f.sessions.poll(v['sessionId'])
+        self.assertEqual(result['state'],'READY');self.assertEqual(f.provider.starts,1)
     def test_remote_phase_reaches_existing_task_public_api_without_claiming_success(self):
         from test_https_result_path import ResultPathTests
         f=ResultPathTests();f.setUp();self.addCleanup(f.tearDown);remote=f.f
