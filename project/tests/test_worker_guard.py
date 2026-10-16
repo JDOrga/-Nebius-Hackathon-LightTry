@@ -149,7 +149,7 @@ class GuardTests(unittest.TestCase):
         fallback_reboot.tick();self.assertEqual(self.provider.stops,1)
         fallback_reboot.tick();self.assertEqual(self.provider.stops,1)
         self.provider.state='STOPPED';fallback_reboot.tick()
-        with __import__('sqlite3').connect(fallback_reboot.path) as db:self.assertEqual(db.execute('SELECT stopped FROM leases').fetchone()[0],1)
+        with fallback_reboot.db() as db:self.assertEqual(db.execute('SELECT stopped FROM leases').fetchone()[0],1)
         with self.assertRaises(ValueError):fallback_reboot.arm(value['sessionId'],value['resourceId'],value['absoluteDeadline']+1,30)
 
     def test_guard_not_ready_bad_resource_clock_rollback_or_real_scope_fail_closed(self):

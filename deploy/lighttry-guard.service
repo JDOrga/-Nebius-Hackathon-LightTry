@@ -1,6 +1,7 @@
 [Unit]
-Description=LightTry independent stop-only GPU deadline supervisor
+Description=LightTry same-CPU GPU deadline supervisor (not host-loss protection)
 After=network.target
+ConditionPathExists=/etc/lighttry/gpu-control.json
 # Intentionally no PartOf/BindsTo dependency on lighttry.service.
 
 [Service]
@@ -9,7 +10,7 @@ User=lighttry
 Group=lighttry
 WorkingDirectory=/opt/lighttry
 EnvironmentFile=/etc/lighttry/service.env
-ExecStart=/opt/lighttry/.venv/bin/python -X utf8 -B /opt/lighttry/start.py --guard --data-root /var/lib/lighttry/guard --guard-config /etc/lighttry/guard.json
+ExecStart=/opt/lighttry/.venv/bin/python -X utf8 -B /opt/lighttry/start.py --guard --data-root /var/lib/lighttry/guard --gpu-control-config /etc/lighttry/gpu-control.json
 Restart=on-failure
 RestartSec=3
 UMask=0077

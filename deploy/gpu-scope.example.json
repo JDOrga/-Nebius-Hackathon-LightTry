@@ -1,0 +1,8 @@
+{
+  "scopeId": "NEW_SCOPE_ID_32_HEX",
+  "resourceId": "RESOURCE_ID",
+  "expiresAt": 0,
+  "budgetApproved": false,
+  "idleSeconds": 60,
+  "simulation": false
+}

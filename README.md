@@ -187,7 +187,7 @@ SQLite ownership 表绑定照片、方案、导入 HDR 和任务。任务/结果
 
 状态为 STOPPED停止、STARTING启动中、LOADING模型加载中、READY就绪、EXECUTING执行中、STOPPING停机中、UNKNOWN异常待核实。初始STOPPED只是未建立软件会话，providerState=null、verifiedStopped=false，不代表云API已确认资源停止。
 
-同一服务端scopeId无论多少点击/requestId/标签页都复用一个sessionId；启动前先持久化会话和start-attempt，独立守护/整机兜底ready且独立预检STOPPED+空实例后，只发一次start。启动响应丢失或断线记UNKNOWN，后续只观察原资源/操作，不能restart。已关闭scope不会因再次点击创建新会话；新范围必须另获新的服务端授权，未确认停机的资源禁止新scope。
+同一服务端scopeId无论多少点击/requestId/标签页都复用一个sessionId；启动前先持久化会话和start-attempt，按当前保护策略核实守护ready且独立预检STOPPED+空实例后，只发一次start。启动响应丢失或断线记UNKNOWN，后续只观察原资源/操作，不能restart。已关闭scope不会因再次点击创建新会话；新范围必须另获新的服务端授权，未确认停机的资源禁止新scope。
 
 任务先按原jobId查询，再持久化attempted后仅POST一次。若提交响应丢失，重启后查询同一jobId和完整哈希绑定；即使返回404，也不能证明前一个请求没有被接收，保留uncertain，不自动重POST。worker相同jobId相同哈希幂等，改内容409；真正执行前保存dispatching，进程退出后的dispatching变uncertain并占住单通道，不能靠重启再执行。模型调用只由受审计的服务器执行器触发，GET从不调用run_one。
 
@@ -195,19 +195,19 @@ SQLite ownership 表绑定照片、方案、导入 HDR 和任务。任务/结果
 
 当前默认上限沿用 `docs/EXECUTION_FLOW.md`：启动等待600秒；首次可靠独立API RUNNING起算工作18分钟、停机25分钟、核验27分钟；绝对保护取初始40分钟与本轮授权截止的较早值。worker ready不等于资源RUNNING。加载/空闲默认由本次服务端范围指定10..300秒；任务完成后才建立新的空闲期限，绝不延长会话工作/绝对截止。GET、浏览器刷新、应用/守护重启和心跳均不重置上述时间，也不继承主机确认到新会话。
 
-CPU进程以显式server heartbeat接口续30秒短租约；它只表示当前CPU存活，不续绝对时间。该心跳需要未来可信服务端接线/定时器调用，不能由普通页面GET代发。本轮默认控制器未接线，不能假称该生产链路已经运行。守护进程独立于Web进程，`deploy/lighttry-guard.service` 无 PartOf/BindsTo lighttry.service。绑定配置是代码树外0600的受保护文件，factory必须是经过审计的provider/worker/fallback适配器；未配置就拒绝启动，不猜CLI，不自动找历史profile。唯一命令入口：
+CPU进程由服务端每5秒为当前会话续30秒短租约；它只表示当前CPU Web进程存活，不续绝对时间。普通页面GET不代发心跳。本地已接线，真实CPU部署尚未验收。守护进程独立于Web进程，`deploy/lighttry-guard.service` 无 PartOf/BindsTo lighttry.service。绑定配置是代码树外0600的受保护文件，factory必须是经过审计的provider/worker/fallback适配器；未配置就拒绝启动，不猜CLI，不自动找历史profile。唯一命令入口：
 
 ```sh
-.venv/bin/python -X utf8 -B start.py --guard --data-root /var/lib/lighttry/guard --guard-config /etc/lighttry/guard.json
+.venv/bin/python -X utf8 -B start.py --guard --data-root /var/lib/lighttry/guard --gpu-control-config /etc/lighttry/gpu-control.json
 ```
 
 守护独占观察职责；Web只读快照，不再加云轮询。STOPPING普通等待上限120秒，同时不超过原verify/absolute界限。到界限立即持久化UNKNOWN/STOPPING_BOUND_EXCEEDED，不伪称成功、不延长工作/核验；之后独立监督继续仅核实停机，晚到STOPPED+instances=[]仍可确认。安全收尾另外需要外部监督者证明守护PID已退出、防休眠已释放；守护不能在还活着时自称退出。这里不获取防休眠锁，sleepHeld=false仍须与部署方式核实。
 
-### CPU整台失联的兜底方案
+### 当前选择：CPU主机统一管理（不防整机失效）
 
-同机systemd守护只防Web进程退出，**不防CPU整机断电、网络失联或磁盘丢失**。真实启动前必须在CPU/GPU之外的管理主机或供应商独立控制平面预置stop-only租约：绑定resource/session与不晚于40分钟的绝对截止，CPU心跳30秒过期即执行同一幂等stop操作；管理主机使用单独的最小停机权限和独立持久盘。必须先拿到经认证、与本会话/资源/截止完全匹配的ready收据，再允许云start。若无法预置，启动拒绝，不能降级为只靠CPU/GPU自身shutdown。
+用户明确不增加第三台管理主机。Web和guard部署在同一CPU主机，由独立systemd服务管理；当前配置使用显式 `protection: {"mode":"cpu-only","cpuHostRiskAccepted":true}`。`independentHost` 保持 false。同机守护可处理Web退出、心跳超时和固定截止，但CPU整机断电、宕机或无法访问云API时可能无法停机，GPU可能继续计费；不能保证账单硬封顶，须保留云控制台人工停机途径。
 
-离线 `Deadman` 参考实现展示不可延长的绝对截止、短租约失联触发、停机闩锁和独立STOPPED+空实例核实；本地替身标记simulation=true，不能充当真实异机部署证明。`deploy/lighttry-deadman.service` 只能装在独立管理主机，入口 `start.py --deadman`，真实provider/factory、认证收据通道和供应商侧定时停机保底尚需后续部署验收。若管理主机或供应商API也同时失联，软件不能保证账单硬封顶；必须预置供应商侧硬到期/定时停机（若支持并验证）、控制面告警和人工停机流程。未知stop响应不写成功、不发新start；真实兜底未就绪则不开GPU。
+旧 `off-host` 模式及 `Deadman` 仅作可选参考，不是当前CPU方案的部署前提，未被伪装为已部署的第三方保护。off-host仍拒绝同机收据；CPU-only必须有真实同机守护ready，不是删除所有启动保护。
 
 ### 本轮验证
 
@@ -272,3 +272,38 @@ sudo env PYTHON=/path/to/validated/python RUN=/var/tmp/lighttry-fresh-acceptance
 页头展示 GPU 状态、守护快照更新时间、刷新和启动入口。每15秒只读取一次受认证的 `/api/gpu/entry-status` 本地快照，不新增供应商查询；页面隐藏时暂停，手动刷新与自动刷新共用单一在途请求。未连接、未知、过期、关闭中等状态不会显示为可安全启动；启动请求已提交也不冒充运行成功。演示快照明确标注“演示”。
 
 点击启动先确认费用，再复用 `/api/gpu/entry-start` 的同源、CSRF、operator、新 scope 和安全守护检查，后台受理期间保留工作台，不跳转或自动重试。相同 scope 的已有启动请求或失败锁存会禁用再次启动；只有服务端新授权范围才可重新允许。前端只展示状态，不管理云凭据，不扩展授权或停机期限。无云适配器的本地预览显示“未连接”，按钮禁用，不伪造远端状态或指标。
+
+
+### CPU 控制接线入口（2026-10-16，本地准备）
+
+`start.py --service --gpu-control-config /run/secrets/gpu-control.json`（或 `LIGHTTRY_GPU_CONTROL_CONFIG`）显式加载私有配置；不配置仍为 OFF。配置与 scope 必须放在代码树外，Linux 权限0600；不能由浏览器提供。配置允许 schemaVersion、enabled、factory、guardRoot、scopeFile、binding 及显式 protection 策略字段：
+
+```json
+{
+  "schemaVersion": 1,
+  "enabled": true,
+  "factory": "AUDITED_ADAPTER:build_sessions",
+  "guardRoot": "/var/lib/lighttry-guard",
+  "scopeFile": "/run/secrets/gpu-scope.json",
+  "binding": {}
+}
+```
+
+上面是不可直接运行的结构示意，不包含真实 factory 或云授权。factory 是运维审核过的 Python callable，接收 `(guardRoot, binding)`，返回 `gpu_session.Sessions`；与独立守护必须使用同一数据库和适配器绑定。构造期间不得调用云 API、arm、启动或加载模型。配置文件属于执行代码信任边界，不能导入未经审计模块。binding 中只放适配器所需的私有运行时引用，不放浏览器字段或历史授权。
+
+scopeFile 为单独的新授权，精确包含 scopeId、resourceId、expiresAt（Unix秒）、budgetApproved、idleSeconds（10..300整数）、simulation（布尔）。过期、未批准、额外字段、真实范围绑定模拟适配器均拒绝；不打印配置/凭据，不自动生成新预算。启动 Web 仅构造绑定，不启动云、不查询供应商、不确认主机。
+
+服务运行后独立于页面每5秒为当前 scope/resource/session 续 CPU 短租约；已核实停止、范围不符或授权到期不续。心跳异常即停止该续租线程，不自动重连；当前CPU-only由同机独立guard按原期限停机，不具备CPU整机失联兜底。页面 GET 不续租，Web 退出不声称已停机；独立 guard 仍负责唯一云观察流。适配器网络调用必须有界，不能阻塞心跳无限等待。生产模型队列仍未接入；本节不启用收费生成。
+
+**尚未完成真实对接：** 审计并部署Nebius provider插件、GPU HTTPS/TLS worker与模型执行器、现有CPU服务器更新，以及真实单次闭环验收。空会话的初次停止快照现在由同机guard读取独立供应商预检后发布，未观察到STOPPED+空实例则不允许启动；配置绑定成功不等于服务器就绪。当前不要求异机停机兜底，但存在CPU整机失效风险。旧已关闭范围不复用，本次没有远端部署或云调用。
+
+
+### CPU-only 部署准备与验收边界
+
+配置结构见 `deploy/gpu-control.example.json`、`deploy/gpu-scope.example.json`。两个模板分别默认enabled=false、budgetApproved=false且已过期，包含明确占位符，不能直接启用。实际文件在代码树外，归运行服务账号、权限0600。Web通过LIGHTTRY_GPU_CONTROL_CONFIG读取 `/etc/lighttry/gpu-control.json`，guard的ExecStart读取同一文件；guardRoot必须都是 `/var/lib/lighttry/guard`，不混用旧私有目录。
+
+内置 `cpu_supervisor:build_sessions` 负责组合审核过的provider插件与HTTPSWorker，固定HTTPS/CA校验和5秒worker超时，凭据仅从私有文件读；不会在构造期间查询或启动GPU。provider插件接口为 preflight(resource)、observe(resource)、start(resource,session,deadline)、stop(resource,session)，所有网络调用必须有界。providerFactory是运维执行代码信任边界，不是浏览器输入；当前尚未实现或部署真实Nebius插件，不能把占位符当作可用适配器。
+
+`lighttry.service`仅Wants/After同机guard，不使用Requires/PartOf/BindsTo；Web崩溃不带走guard。guard进程独占OS锁，每5秒发布15秒有效的PID/资源/私有目录绑定凭据；丢失、过期、PID已退出、资源不符均禁止启动。guard独占供应商观察，网页查询不产生云轮询。已核实停机后guard常驻空闲；正常停止guard只提交停机请求，后续必须另核实STOPPED和instances=[]，不能用请求成功宣称释放。强杀、主机断电或供应商不可达不保证停机。
+
+本轮新增本地独立进程替身验收：guard启动不启动GPU；合成scope触发一次模拟start；代表Web心跳的CPU子进程退出后guard仍运行并请求停机；所有deadline保持原值。该测试不等于HTTP部署验收或真实GPU验收。

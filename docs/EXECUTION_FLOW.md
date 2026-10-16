@@ -106,6 +106,13 @@ startup 请求时间独立记录，等待上限600秒；首次可靠独立 API R
 
 ## CPU 服务接口离线实现补充（2026-10-14）
 
-CPU服务新接口选用受认证HTTPS worker；会话/任务副作用在SQLite持久化，GET仅查快照，应用重启不续窗口。同一新范围只有一次start，任务ACK丢失先查原jobId，不盲目重POST。独立Linux守护入口为根start.py --guard；STOPPING正常等待有界，到限UNKNOWN后仅停机核实，不续工作。当前七状态、接口、异机deadman参考模型及本机独立进程检查是离线模拟，不代表Nebius/GPU真实验收；真实适配器、CPU心跳接线、异机认证收据和供应商侧兜底尚未部署。
+CPU服务新接口选用受认证HTTPS worker；会话/任务副作用在SQLite持久化，GET仅查快照，应用重启不续窗口。同一新范围只有一次start，任务ACK丢失先查原jobId，不盲目重POST。独立Linux守护入口为根start.py --guard；STOPPING正常等待有界，到限UNKNOWN后仅停机核实，不续工作。当前七状态、接口、异机deadman参考模型及本机独立进程检查是离线模拟，不代表Nebius/GPU真实验收；真实适配器、CPU心跳、守护与GPU HTTPS链路尚未部署；本地接线与同机守护实现不代表真实云验收。
 
-任何真实启动必须先证实CPU/GPU故障域之外的stop-only控制平面已绑定本资源、本会话、短心跳租约与原绝对截止；无ready证明即截断start。同机systemd或GPU本机shutdown不能替代整台CPU失联兜底。原600秒、首次可靠独立RUNNING起算18/25/27分钟、初始40分钟及当前主机确认和四项释放保持不变。细节见现有README的CPU→GPU章节，不新增平行执行规范或继承已关闭范围。
+当前采用用户于2026-10-16明确选择的CPU主机统一管理方案：Web与守护是同一CPU主机上的独立进程，不要求第三台主机。服务端私有配置必须显式标记 protection.mode=cpu-only、cpuHostRiskAccepted=true，守护存活/资源绑定凭据有效且独立API预检确认STOPPED+空实例后才允许单次启动；缺少同机守护ready即截断。该策略不是异机兜底：CPU整机宕机、断电或无法访问云API可能导致GPU继续计费，不能保证费用硬封顶。不允许伪造 independentHost=true，旧off-host模式仍拒绝同机收据。原600秒、首次可靠独立RUNNING起算18/25/27分钟、初始40分钟及当前主机确认和四项释放保持不变。细节见现有README的CPU→GPU章节，不新增平行执行规范或继承已关闭范围。
+
+
+## CPU同机管理准备（2026-10-16）
+
+本轮只做代码、配置模板与离线验证，不连接真实CPU/GPU、不启动GPU、不生成可用的新收费授权。Web服务和常驻guard都从根start.py启动，共用私有gpu-control.json及sessions.sqlite3。guard持有OS进程锁并每5秒发布有界存活凭据；初始空会话只由guard读供应商预检，页面只读本地快照。CPU Web后台每5秒续当前会话心跳，心跳停止30秒后由同机guard请求停机。已核实停止后guard留在空闲状态，不自动开启新会话；守护/服务重启不重置截止、不重复start/launch。过期或撤销的scope仍可供stop-only观察器恢复已有会话，但Web不能据此获准启动。
+
+guard正常退出时只提交一次当前会话stop请求，不把提交当作STOPPED；单次网络调用必须有界。生产运维应在停guard/升级前确认GPU已停，不能用systemd服务退出代替资源释放核验。当前CPU常驻guard不必在每次GPU停止后退出，因此报告“GPU已停、实例已释放、guard仍在空闲监控”，不得伪报guard已退出。历史实验的四项停机证据和旧授权保持只读；需要结束整个实验守护时仍按原四项流程记录。CPU整机失效时没有独立控制平面接管；人工从云控制台停机是应急手段，不属于已实现的自动保证。

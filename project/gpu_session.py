@@ -20,7 +20,9 @@ LABELS=dict(zip(('STOPPED','STARTING','LOADING','READY','EXECUTING','STOPPING','
 
 
 class Sessions:
-    def __init__(self, root, provider, worker, fallback, clock=time.time):
+    def __init__(self, root, provider, worker, fallback, clock=time.time, *, protection_mode='off-host'):
+        if protection_mode not in ('off-host','cpu-only'):raise ValueError('INVALID_PROTECTION_MODE')
+        self.protection_mode=protection_mode
         self.root=Path(root)
         if not self.root.is_absolute() or any(p.is_symlink() for p in (self.root,*self.root.parents)):
             raise ValueError('PRIVATE_ABSOLUTE_GUARD_ROOT_REQUIRED')
@@ -50,7 +52,11 @@ class Sessions:
 
     def latest(self):
         with self.db() as db:row=db.execute('SELECT body FROM sessions ORDER BY rowid DESC LIMIT 1').fetchone()
-        return json.loads(row[0]) if row else {'state':'STOPPED','label':LABELS['STOPPED'],'providerState':None,'verifiedStopped':False,'configured':True}
+        value=json.loads(row[0]) if row else {'state':'STOPPED','label':LABELS['STOPPED'],'providerState':None,'verifiedStopped':False,'configured':True}
+        if self.protection_mode=='cpu-only' and (not row or value.get('verifiedStopped')):
+            snapshot=self.fallback.snapshot()
+            value.update(snapshot)
+        return value
 
     def save(self, value, event):
         if value['state'] not in STATES:raise ValueError('INVALID_GPU_STATE')
@@ -83,6 +89,7 @@ class Sessions:
             sid=uuid.uuid4().hex
             value={'sessionId':sid,'scopeId':scope['scopeId'],'resourceId':scope['resourceId'],
                 'state':'STARTING','providerState':None,'simulation':scope['simulation'],
+                'protectionMode':self.protection_mode,
                 'createdAt':now,'startupDeadline':min(now+600,scope['expiresAt']),
                 'absoluteDeadline':min(now+2400,scope['expiresAt']),
                 'runningAt':None,'workDeadline':None,'stopDeadline':None,'verifyDeadline':None,
@@ -98,11 +105,14 @@ class Sessions:
             if not self.proof(preflight,value) or preflight['state']!='STOPPED' or preflight.get('instances')!=[]:
                 raise ValueError('PREFLIGHT_NOT_STOPPED_EMPTY')
             receipt=self.fallback.arm(sid,scope['resourceId'],value['absoluteDeadline'],30)
+            protection_ok=(receipt.get('independentHost') is True if self.protection_mode=='off-host' else
+                receipt.get('independentHost') is False and receipt.get('protectionMode')=='cpu-only' and
+                receipt.get('cpuHostRiskAccepted') is True)
             if (receipt.get('sessionId')!=sid or receipt.get('resourceId')!=scope['resourceId'] or
-                    receipt.get('independentHost') is not True or receipt.get('ready') is not True or
+                    not protection_ok or receipt.get('ready') is not True or
                     receipt.get('deadline')!=value['absoluteDeadline'] or receipt.get('leaseSeconds')!=30 or
                     (scope['simulation'] is False and receipt.get('simulation') is not False)):
-                raise ValueError('OFF_HOST_DEADMAN_NOT_READY')
+                raise ValueError('SUPERVISOR_NOT_READY')
             value['startSent']=True;self.save(value,'START_ATTEMPT_LATCHED')
             self.provider.start(scope['resourceId'],sid,value['absoluteDeadline'])
         except Exception:
@@ -264,23 +274,30 @@ class Deadman:
         self.root=Path(root);self.root.mkdir(parents=True,exist_ok=True,mode=0o700)
         self.provider,self.clock=provider,clock
         self.path=self.root/'deadman.sqlite3'
-        with sqlite3.connect(self.path) as db:db.execute('CREATE TABLE IF NOT EXISTS leases(session TEXT PRIMARY KEY,resource TEXT,deadline REAL,heartbeat REAL,lease INTEGER,sent INTEGER,stopped INTEGER)')
+        with self.db() as db:db.execute('CREATE TABLE IF NOT EXISTS leases(session TEXT PRIMARY KEY,resource TEXT,deadline REAL,heartbeat REAL,lease INTEGER,sent INTEGER,stopped INTEGER)')
+
+    @contextmanager
+    def db(self):
+        db=sqlite3.connect(self.path)
+        try:
+            with db:yield db
+        finally:db.close()
 
     def arm(self,sid,resource,deadline,lease_seconds):
-        with sqlite3.connect(self.path) as db:
+        with self.db() as db:
             old=db.execute('SELECT resource,deadline,lease FROM leases WHERE session=?',(sid,)).fetchone()
             if old and old!=(resource,deadline,lease_seconds):raise ValueError('DEADMAN_DEADLINE_IMMUTABLE')
             db.execute('INSERT OR IGNORE INTO leases VALUES (?,?,?,?,?,0,0)',(sid,resource,deadline,self.clock(),lease_seconds))
         return {'sessionId':sid,'resourceId':resource,'deadline':deadline,'leaseSeconds':lease_seconds,'independentHost':True,'ready':True,'simulation':True}
 
     def heartbeat(self,sid,resource,now):
-        with sqlite3.connect(self.path) as db:
+        with self.db() as db:
             row=db.execute('SELECT deadline,heartbeat,sent FROM leases WHERE session=? AND resource=?',(sid,resource)).fetchone()
             if not row or row[2] or now<row[1] or now>=row[0]:raise ValueError('DEADMAN_LEASE_CLOSED')
             db.execute('UPDATE leases SET heartbeat=? WHERE session=?',(min(now,self.clock()),sid))
 
     def tick(self):
-        with sqlite3.connect(self.path) as db:
+        with self.db() as db:
             for sid,resource,deadline,beat,lease,sent,stopped in db.execute('SELECT * FROM leases').fetchall():
                 if stopped:continue
                 if self.clock()>=deadline or self.clock()-beat>=lease:

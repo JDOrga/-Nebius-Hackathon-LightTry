@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "enabled": false,
+  "factory": "cpu_supervisor:build_sessions",
+  "guardRoot": "/var/lib/lighttry/guard",
+  "scopeFile": "/etc/lighttry/gpu-scope.json",
+  "protection": {
+    "mode": "cpu-only",
+    "cpuHostRiskAccepted": true
+  },
+  "binding": {
+    "providerFactory": "AUDITED_PROVIDER_MODULE:build",
+    "providerBinding": {},
+    "workerOrigin": "https://GPU_WORKER_HOST",
+    "workerTokenFile": "/run/secrets/lighttry-worker-token",
+    "workerCaFile": null
+  }
+}

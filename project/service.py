@@ -25,6 +25,7 @@ from inference.images import MAX_BYTES
 from persistence import Workspace
 from security import Accounts, RateLimiter, ProviderSecrets, create_temporary_account, LoginSessions
 from gpu_queue import GPUQueue
+from gpu_bootstrap import load_control
 
 ROOT = Path(__file__).resolve().parent.parent
 LOG = logging.getLogger('lighttry.service')
@@ -54,6 +55,10 @@ class Application:
         self.entry_start=None
         self.entry_thread=None
         self.gpu_scope=None  # Only trusted server bootstrap may install a new scope; never browser fields.
+        self.gpu_control=load_control(getattr(options,'gpu_control_config',None),ROOT)
+        if self.gpu_control:
+            self.gpu_sessions=self.gpu_control.sessions
+            self.gpu_scope=self.gpu_control.scope
         data = Path(options.data_root).expanduser()
         if not data.is_absolute() or data.resolve().is_relative_to(ROOT.resolve()):
             raise ValueError('DATA_ROOT_MUST_BE_ABSOLUTE_AND_OUTSIDE_CODE')
@@ -118,9 +123,10 @@ class Application:
         logs.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
         self.log_handler = logs
         LOG.addHandler(logs); LOG.setLevel(logging.INFO)
-        LOG.info('service initialized; paid services disabled')
+        LOG.info('service initialized; GPU control binding=%s; model dispatch disabled',bool(self.gpu_control))
 
     def close(self):
+        if self.gpu_control:self.gpu_control.close()
         self.queue.close()
         self.handler.task_store.close()
         LOG.info('service stopped')
@@ -226,7 +232,9 @@ class Application:
             reason=('启动请求已提交，请等待状态更新。' if pending['status']=='requested' else '上次启动未成功，请联系管理员核实。')
         return {'active':active,'state':state,'canStart':allowed,'message':reason,'simulation':snapshot.get('simulation') is True,
                 'configured':self.gpu_sessions is not None,'observedAt':observed if isinstance(observed,(int,float)) and not isinstance(observed,bool) else None,'stale':bool(observed is not None and not fresh),
-                'startStatus':pending.get('status') if pending else None}
+                'startStatus':pending.get('status') if pending else None,
+                'protectionMode':getattr(self.gpu_sessions,'protection_mode',None),
+                'hostLossProtected':False if getattr(self.gpu_sessions,'protection_mode',None)=='cpu-only' else None}
 
     def gpu_login_destination(self):
         return '/' if self.gpu_entry_info()['active'] else '/gpu-entry'
@@ -528,6 +536,8 @@ class Application:
 def parser():
     p = argparse.ArgumentParser(description='Linux/CPU standalone service; paid services remain OFF.')
     p.add_argument('--accounts-file',default=os.environ.get('LIGHTTRY_ACCOUNTS_FILE'))
+    p.add_argument('--gpu-control-config',type=Path,default=os.environ.get('LIGHTTRY_GPU_CONTROL_CONFIG'),
+                   help='Private audited control factory binding; no implicit cloud start.')
     p.add_argument('--init-account',action='store_true',help='Create runtime-only 7-day user account; no service/cloud start.')
     p.add_argument('--account-output',type=Path,help='Private plaintext login handoff file, outside code.')
     p.add_argument('--data-root', default=os.environ.get('LIGHTTRY_DATA_ROOT', '/var/lib/lighttry'))
@@ -553,6 +563,7 @@ def main(argv=None):
             raise KeyboardInterrupt()
         signal.signal(signal.SIGTERM, stop)
         app.queue.start()
+        if app.gpu_control:app.gpu_control.start_heartbeat()
         print('LightTry CPU service: 0.0.0.0:8080; data=' + str(app.workspace.root), flush=True)
         serve(app, listen='0.0.0.0:8080', threads=4, connection_limit=64,
               max_request_header_size=16384, max_request_body_size=32 * 1024 * 1024,

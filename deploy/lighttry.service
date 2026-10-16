@@ -1,6 +1,8 @@
 [Unit]
 Description=LightTry private CPU web service
-After=network.target
+After=network.target lighttry-guard.service
+# Optional same-host guard; deliberately NOT Requires/PartOf/BindsTo.
+Wants=lighttry-guard.service
 
 [Service]
 Type=simple
