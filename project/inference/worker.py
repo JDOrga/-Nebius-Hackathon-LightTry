@@ -94,21 +94,23 @@ def main():
                HF_HUB_OFFLINE='1', TRANSFORMERS_OFFLINE='1')
     try:
         emit('preflight')
-        head = subprocess.run(['git', '-C', str(repo), 'rev-parse', 'HEAD'], capture_output=True,
-                              text=True, check=True, timeout=10).stdout.strip()
-        if head != job['runConfig']['upstreamCommit']:
-            raise ValueError('UPSTREAM_COMMIT_MISMATCH')
-        patch = json.loads((PREP / 'manifests/patch_manifest.json').read_text())
-        for entry in patch['files']:
-            if sha(repo / entry['path']) != entry['after_sha256']:
-                raise ValueError('EXISTING_HDR_PATCH_MISMATCH')
-        # Fixed entry source is independently checked against the upstream Git blob.
-        for name in ('inference_inverse_renderer.py', 'inference_forward_renderer.py'):
-            rel = 'cosmos_predict1/diffusion/inference/' + name
-            original = subprocess.run(['git', '-C', str(repo), 'show', head + ':' + rel],
-                                      capture_output=True, check=True, timeout=10).stdout
-            if sha(repo / rel) != hashlib.sha256(original).hexdigest():
-                raise ValueError('MODEL_ENTRY_MODIFIED')
+        resident = runtime.get('executionMode') == 'resident'
+        if not resident:
+            head = subprocess.run(['git', '-C', str(repo), 'rev-parse', 'HEAD'], capture_output=True,
+                                  text=True, check=True, timeout=10).stdout.strip()
+            if head != job['runConfig']['upstreamCommit']:
+                raise ValueError('UPSTREAM_COMMIT_MISMATCH')
+            patch = json.loads((PREP / 'manifests/patch_manifest.json').read_text())
+            for entry in patch['files']:
+                if sha(repo / entry['path']) != entry['after_sha256']:
+                    raise ValueError('EXISTING_HDR_PATCH_MISMATCH')
+            # Fixed entry source is independently checked against the upstream Git blob.
+            for name in ('inference_inverse_renderer.py', 'inference_forward_renderer.py'):
+                rel = 'cosmos_predict1/diffusion/inference/' + name
+                original = subprocess.run(['git', '-C', str(repo), 'show', head + ':' + rel],
+                                          capture_output=True, check=True, timeout=10).stdout
+                if sha(repo / rel) != hashlib.sha256(original).hexdigest():
+                    raise ValueError('MODEL_ENTRY_MODIFIED')
         hdr_names = ('sunny_vondelpark_2k.hdr', 'pink_sunrise_2k.hdr', 'street_lamp_2k.hdr')
         presets = job.get('presets', [job['preset']])
         if not presets or len(presets) > 3 or job['preset'] not in presets or len({p['index'] for p in presets}) != len(presets):
@@ -122,28 +124,33 @@ def main():
         input_image = PREP / 'inputs/photo.png'
         if sha(input_image) != job['input']['sha256']:
             raise ValueError('INPUT_IDENTITY_MISMATCH')
-        run_bounded([sys.executable, '-B', str(PREP / 'scripts/preflight.py'), '--repo', str(repo),
-            '--checkpoint-dir', str(checkpoints), '--cuda-home', runtime['cuda_home'],
-            '--out', str(run / 'preflight.json')], repo, run / 'preflight.log', env, deadline)
-        emit('weights')
-        manifest = json.loads((PREP / 'manifests/weights_manifest.json').read_text())
-        mode = runtime.get('weights_mode', 'full')
-        if mode != job['runConfig']['weightVerification']:
-            raise ValueError('WEIGHT_POLICY_MISMATCH')
-        if mode == 'full':
-            for entry in manifest['files']:
-                if not verify(checkpoints / entry['path'], entry, deadline):
-                    raise ValueError('CHECKPOINT_VERIFICATION_FAILED_NO_DOWNLOAD')
-            weight_report = {'mode': 'full', 'content_verified_this_run': True, 'new_downloads': False}
-        elif mode == 'historical_metadata':
-            from weights_reuse import reuse_existing, validate_reference
-            reference = PREP / 'weight-reference'
-            validate_reference(PREP / 'manifests/weights_manifest.json', reference / 'manifest.json',
-                               reference / 'receipt.json', reference / 'reference.json')
-            weight_report = reuse_existing(checkpoints, reference / 'manifest.json', reference / 'receipt.json',
-                                           reference / 'reference.json', deadline)
+        if resident:
+            mode = 'resident_loaded'
+            weight_report = {'mode': mode, 'content_verified_this_run': False,
+                             'checkpoint_content_bytes_read': 0, 'preflight_skipped': True, 'new_downloads': False}
         else:
-            raise ValueError('UNKNOWN_WEIGHT_POLICY')
+            run_bounded([sys.executable, '-B', str(PREP / 'scripts/preflight.py'), '--repo', str(repo),
+                '--checkpoint-dir', str(checkpoints), '--cuda-home', runtime['cuda_home'],
+                '--out', str(run / 'preflight.json')], repo, run / 'preflight.log', env, deadline)
+            emit('weights')
+            manifest = json.loads((PREP / 'manifests/weights_manifest.json').read_text())
+            mode = runtime.get('weights_mode', 'full')
+            if mode != job['runConfig']['weightVerification']:
+                raise ValueError('WEIGHT_POLICY_MISMATCH')
+            if mode == 'full':
+                for entry in manifest['files']:
+                    if not verify(checkpoints / entry['path'], entry, deadline):
+                        raise ValueError('CHECKPOINT_VERIFICATION_FAILED_NO_DOWNLOAD')
+                weight_report = {'mode': 'full', 'content_verified_this_run': True, 'new_downloads': False}
+            elif mode == 'historical_metadata':
+                from weights_reuse import reuse_existing, validate_reference
+                reference = PREP / 'weight-reference'
+                validate_reference(PREP / 'manifests/weights_manifest.json', reference / 'manifest.json',
+                                   reference / 'receipt.json', reference / 'reference.json')
+                weight_report = reuse_existing(checkpoints, reference / 'manifest.json', reference / 'receipt.json',
+                                               reference / 'reference.json', deadline)
+            else:
+                raise ValueError('UNKNOWN_WEIGHT_POLICY')
         atomic(run / 'weights_verification.json', weight_report)
         command_args = argparse.Namespace(checkpoint_dir=checkpoints, input_dir=PREP / 'inputs',
             run_dir=run, height=704, width=1280, offload=False)
