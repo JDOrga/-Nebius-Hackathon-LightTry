@@ -1,5 +1,5 @@
 import {schemeWire} from './scheme-state.js';
-import {differences} from './console.js';
+import {userDifferences} from './console.js';
 import {uid,sameParameters} from './scheme-state.js';
 const $=id=>document.getElementById(id);
 export const sessionKey=s=>s.inputId+':'+s.planId;
@@ -17,19 +17,19 @@ export function createChat({get,api,environmentLabel,apply}){
  if(ref&&ref!==live.reference&&sessions[k].items.length){sessions[k].items.push({role:'notice',text:'编辑上下文已改变，下一次请求使用当前版本。旧建议不能直接应用。'});sessions[k].items=sessions[k].items.slice(-12);}ref=live.reference;return sessions[k];}
  function textNode(tag,text,cls){const e=document.createElement(tag);e.textContent=text;if(cls)e.className=cls;return e;}
  function update(){const live=get(),s=session();if(!live||!s)return;
- $('chat-context').textContent=live.label;$('chat-service').textContent=live.language.enabled?(live.language.developmentTestMode?'隔离测试 transport · 非 Nemotron / GPU':'Nemotron 文字服务已启用 · 发送可能产生文字费用，不生成图片'):'Nemotron 未配置 · 可浏览会话，仍可手动调光';
- $('chat-send').disabled=pending||!live.language.enabled;$('chat-send').textContent=pending?'等待中…':'发送';$('chat-send').title=!live.language.enabled?'服务未配置，未发出模型请求':pending?'请求仍在等待，不重复发送':'发送文字，不生成图片';
- const log=$('chat-history'),previousScroll=log.scrollTop,atEnd=log.scrollHeight-log.scrollTop-log.clientHeight<40;log.replaceChildren();if(live.confirmedApplication)log.append(textNode('p','当前方案已确认应用到 v'+live.confirmedApplication.version+'；'+(live.result.kind==='none'?'尚未生成。':'已有匹配结果。'),'chat-applied-summary'));if(!s.items.length)log.append(textNode('p','从一个想法开始，也可以询问理由。未配置时不会伪造回复。','chat-empty'));
+ $('chat-context').textContent=live.label;$('chat-service').textContent=live.language.enabled?(live.language.developmentTestMode?'演示模式 · 不调用真实模型':'AI 助手已启用 · 发送可能产生费用，不会生成图片'):'AI 助手暂不可用，仍可手动调光';
+ $('chat-send').disabled=pending||!live.language.enabled;$('chat-send').textContent=pending?'等待中…':'发送';$('chat-send').title=!live.language.enabled?'AI 助手暂不可用':pending?'请求仍在等待，不重复发送':'发送文字，不生成图片';
+ const log=$('chat-history'),previousScroll=log.scrollTop,atEnd=log.scrollHeight-log.scrollTop-log.clientHeight<40;log.replaceChildren();if(live.confirmedApplication)log.append(textNode('p','当前方案已确认应用到 v'+live.confirmedApplication.version+'；'+(live.result.kind==='none'?'尚未生成。':'已有匹配结果。'),'chat-applied-summary'));if(!s.items.length)log.append(textNode('p','描述你想要的光照效果，也可以询问调整建议。','chat-empty'));
  for(const m of s.items){const bubble=textNode('article',m.text,'chat-bubble '+m.role);log.append(bubble);
  if(m.operationId&&!m.value){const summary=textNode('div',m.state==='applied'?'已确认应用到 v'+m.appliedVersion+'；未由此操作提交生成。':m.state==='rejected'?'已拒绝；未应用。':'后续建议未应用；刷新恢复为只读记录，不可直接应用。','chat-suggestion');bubble.append(summary);for(const line of (Array.isArray(m.displayDiff)?m.displayDiff:[]).filter(x=>typeof x==='string'&&x.length<=160&&!sensitive(x)).slice(0,12))summary.append(textNode('p',line));}
  if(m.value?.status==='ready'){
  const v=m.value,card=document.createElement('div');card.className='chat-suggestion';bubble.append(card);
- card.append(textNode('strong','建议差异 · '+(v.source==='OFFLINE_SYNTHETIC'?'隔离替身':'文字服务')));
- for(const line of differences(m.before,v.parameters))card.append(textNode('p',line));
- if(v.parameters.schemaVersion===2)card.append(textNode('p','连续输入参数／程序化远场布光为工程实验范围；非精确照片曝光或物理灯位。','chat-experimental'));
- let why=live.busy?'真实任务处理中，稍后应用；不改变运行中的参照。':m.state==='applied'?('已应用到 v'+m.appliedVersion+'，尚未生成。'):m.state==='rejected'?'已拒绝，当前方案不变。':m.ref!==live.reference||m.draftEpoch!==editEpoch?'旧上下文／需求已变，需基于当前状态重新请求。':sameParameters(v.parameters,live.scheme.parameters)?'参数相同，无需修改或创建版本。':'尚未应用，当前配置不变。';card.append(textNode('p',why));
+ card.append(textNode('strong','建议差异 · '+(v.source==='OFFLINE_SYNTHETIC'?'演示建议':'文字服务')));
+ for(const line of userDifferences(m.before,v.parameters))card.append(textNode('p',line));
+ if(v.parameters.schemaVersion===2)card.append(textNode('p','建议仅供试光参考，效果以生成后的照片为准。','chat-experimental'));
+ let why=live.busy?'正在生成，请完成后再应用建议。':m.state==='applied'?('已应用到 v'+m.appliedVersion+'，尚未生成。'):m.state==='rejected'?'已拒绝，当前方案不变。':m.ref!==live.reference||m.draftEpoch!==editEpoch?'旧上下文／需求已变，需基于当前状态重新请求。':sameParameters(v.parameters,live.scheme.parameters)?'参数相同，无需修改或创建版本。':'尚未应用，当前配置不变。';card.append(textNode('p',why));
  const button=textNode('button','应用到当前方案');button.type='button';button.disabled=!applicable(m,live,editEpoch);card.append(button);
- button.onclick=()=>{const now=get();if(!applicable(m,now,editEpoch))return;const result=apply(v,m.ref);if(result){m.state='applied';m.appliedVersion=result.version;$('chat-status').textContent='实际应用：方案 '+result.planId.slice(0,8)+' / v'+result.version+'。未提交生成。';save();update();}};
+ button.onclick=()=>{const now=get();if(!applicable(m,now,editEpoch))return;const result=apply(v,m.ref);if(result){m.state='applied';m.appliedVersion=result.version;$('chat-status').textContent='已应用到版本 '+result.version+'，尚未生成。';save();update();}};
  const reject=textNode('button','拒绝建议');reject.type='button';reject.disabled=!!m.state;card.append(reject);reject.onclick=()=>{m.state='rejected';save();update();};
  }
  }
@@ -38,7 +38,7 @@ export function createChat({get,api,environmentLabel,apply}){
  async function send(e){e?.preventDefault();const live=get(),s=session(),text=$('chat-input').value.trim();if(pending||!live?.language.enabled||!text)return;if(sensitive(text)){$('chat-status').textContent='请去除密钥、网址或机器路径；仅发送光照文字。';return;}
  const captured=live.reference,epoch=editEpoch,rid=uid(),sk=selected;pending=true;
  const messages=boundedMessages(s.items.filter((m,i)=>m.role!=='user'||s.items.slice(i+1).find(n=>n.role==='assistant'||n.role==='user')?.role==='assistant').map(m=>({...m,text:m.text+(m.operationId?'（建议状态：'+(m.state==='applied'?'已应用到v'+m.appliedVersion:m.state==='rejected'?'已拒绝':m.ref===captured?'尚未应用':'旧上下文')+'）':'')}))),operations=s.items.filter(m=>m.operationId).slice(-4).map(m=>({operationId:m.operationId,state:m.state|| (m.ref===captured?'proposed':'stale')}));
- s.items.push({role:'user',text});$('chat-input').value='';s.draft='';$('chat-status').textContent='正在等待文字服务；收起或关闭不会取消上游请求。';save();update();$('chat-history').scrollTop=$('chat-history').scrollHeight;
+ s.items.push({role:'user',text});$('chat-input').value='';s.draft='';$('chat-status').textContent='正在等待回复；收起或关闭面板不会取消请求。';save();update();$('chat-history').scrollTop=$('chat-history').scrollHeight;
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),65000);
  try{
  const safeScheme={...schemeWire(live.scheme),name:'当前方案'};const normalized=await api('/api/lighting/normalize',{method:'POST',headers:{'Content-Type':'application/json','X-LightTry-Token':live.token},body:JSON.stringify(safeScheme)});
@@ -48,8 +48,8 @@ export function createChat({get,api,environmentLabel,apply}){
  const value=await api('/api/lighting/recommend',{method:'POST',headers:{'Content-Type':'application/json','X-LightTry-Token':live.token},body:JSON.stringify(body),signal:controller.signal});
  if(value.sessionId!==s.id||value.requestId!==rid)throw Error('响应关联身份不一致，未应用。');
  s.items.push({role:'assistant',text:[value.reason,value.question].filter(Boolean).join(' ')||'此需求暂无可执行建议。',value,operationId:value.status==='ready'?value.operationId:undefined,ref:captured,draftEpoch:epoch,before:live.scheme.parameters,displayDiff:value.status==='ready'?differences(live.scheme.parameters,value.parameters):[]});
- $('chat-status').textContent=(value.source==='OFFLINE_SYNTHETIC'?'隔离测试 transport 返回，非真实模型。':'文字响应已返回。')+' 未自动应用或生成。'+(get().reference!==captured||selected!==sk||epoch!==editEpoch?'旧上下文响应仅保留在原会话。':'');
- }catch(err){s.items.push({role:'notice',text:err.name==='AbortError'?'本机等待超时，上游可能已计费或仍在处理；不会自动重试，也未声称取消上游。':err.message});$('chat-status').textContent='请求未产生可应用结果；当前方案不变。'}
+ $('chat-status').textContent=(value.source==='OFFLINE_SYNTHETIC'?'演示回复，非真实模型生成。':'文字响应已返回。')+' 未自动应用或生成。'+(get().reference!==captured||selected!==sk||epoch!==editEpoch?'旧上下文响应仅保留在原会话。':'');
+ }catch(err){s.items.push({role:'notice',text:err.name==='AbortError'?'等待超时，服务可能仍在处理或已计费，不会自动重试。':err.message});$('chat-status').textContent='请求未产生可应用结果；当前方案不变。'}
  finally{clearTimeout(timer);pending=false;s.items=keep(s.items,12);save();update();}
  }
  $('chat-form').onsubmit=send;$('chat-input').oncompositionstart=()=>composing=true;$('chat-input').oncompositionend=()=>composing=false;

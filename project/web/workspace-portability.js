@@ -32,3 +32,12 @@ export function mergeLibraries(existing,incoming) {
  if(merged.size>200)throw Error('方案库最多200个版本。');
  return [...merged.values()];
 }
+
+// Local-only: never sends a request or changes service-side data.
+export function resetClientStorage(local,session,namespace='') {
+ const keys=['schemeLibrary','schemeCursor','schemeTasks','schemeSubmission','schemeOrigins','deletedFamilies','photoStubs','workspaceSplit'].map(k=>'lighttry.'+k+'.v1');
+ for(const key of keys)local.removeItem(namespace+key);
+ // Layout is initialized before account discovery in the existing workbench.
+ local.removeItem('lighttry.workspaceSplit.v1');
+ session.removeItem('lighttry.chat.tab.v1');
+}
