@@ -87,6 +87,66 @@ class Accounts:
         return name
 
 
+    def authenticate_key(self, access_key):
+        """One opaque access key, never a username/password pair. Ambiguity fails closed."""
+        if (not isinstance(access_key, str) or not 24 <= len(access_key) <= 256 or
+                any(ord(c) < 33 or ord(c) > 126 for c in access_key)):
+            return None
+        now = time.time()
+        matches = []
+        for name, record in self.users.items():
+            derived = hashlib.scrypt(access_key.encode(), salt=bytes.fromhex(record['salt']),
+                                     n=32768, r=8, p=1, maxmem=64*1024*1024, dklen=32)
+            valid = hmac.compare_digest(derived.hex(), record['hash'])
+            if valid and (record['expiresAt'] is None or now < record['expiresAt']):
+                matches.append(name)
+        return matches[0] if len(matches) == 1 else None
+
+
+class LoginSessions:
+    """Bounded in-memory sessions; plaintext browser tokens are never persisted."""
+    def __init__(self, accounts, clock=time.time):
+        self.accounts, self.clock = accounts, clock
+        self.sessions = {}
+        self.lock = threading.Lock()
+
+    def issue(self, owner):
+        now = self.clock()
+        record = self.accounts.users[owner]
+        expiry = min(now + 8*3600, record['expiresAt'] or now + 8*3600)
+        if expiry <= now:
+            raise ValueError('ACCESS_KEY_EXPIRED')
+        token = secrets.token_urlsafe(32)
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        with self.lock:
+            self.sessions = {k:v for k,v in self.sessions.items() if v[1] > now}
+            if len(self.sessions) >= 256:
+                raise JobError('LOGIN_BUSY', '登录人数已达上限，请稍后重试。', 429)
+            self.sessions[digest] = (owner, expiry, record['hash'])
+        return token, max(1, int(expiry-now))
+
+    def authenticate(self, token):
+        if not isinstance(token,str) or not re.fullmatch(r'[A-Za-z0-9_-]{43}', token):
+            return None
+        digest = hashlib.sha256(token.encode()).hexdigest()
+        with self.lock:
+            value = self.sessions.get(digest)
+            if not value:
+                return None
+            owner, expiry, fingerprint = value
+            record = self.accounts.users.get(owner)
+            now = self.clock()
+            if (expiry <= now or not record or record['hash'] != fingerprint or
+                    (record['expiresAt'] is not None and record['expiresAt'] <= now)):
+                self.sessions.pop(digest,None)
+                return None
+            return owner
+
+    def revoke(self, token):
+        with self.lock:
+            self.sessions.pop(hashlib.sha256(token.encode()).hexdigest(),None)
+
+
 class RateLimiter:
     def __init__(self, workspace, clock=time.time):
         self.workspace,self.clock=workspace,clock
@@ -147,6 +207,6 @@ def create_temporary_account(root, output, code_root, days=7):
     with account.open('x',encoding='utf-8') as stream:json.dump(value,stream);stream.flush();os.fsync(stream.fileno())
     account.chmod(0o600)
     with output.open('x',encoding='utf-8') as stream:
-        stream.write('username=lighttry\npassword='+password+'\nexpiresAt='+str(expiry)+'\n');stream.flush();os.fsync(stream.fileno())
+        stream.write('accessKey='+password+'\nexpiresAt='+str(expiry)+'\n');stream.flush();os.fsync(stream.fileno())
     output.chmod(0o600)
     return {'username':'lighttry','role':'user','expiresAt':expiry,'accountsFile':str(account),'privateCredentialsFile':str(output)}

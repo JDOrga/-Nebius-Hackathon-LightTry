@@ -30,6 +30,8 @@ def request(app,path,method='GET',body=b'',user='lighttry',password=PASS,extra=N
          'CONTENT_TYPE':'application/json','HTTP_HOST':'localhost:8080','REMOTE_ADDR':'127.0.0.1',
          'HTTP_AUTHORIZATION':AUTH(user,password) if user else '',
          'HTTP_ORIGIN':'http://localhost:8080','HTTP_X_LIGHTTRY_TOKEN':app.handler.csrf_token}
+    if user and app.accounts.authenticate(AUTH(user,password)) == user:
+        token,_=app.login_sessions.issue(user);env['HTTP_COOKIE']='lighttry_session='+token
     env.update(extra or {});captured=[]
     value=b''.join(app(env,lambda status,headers:captured.append((int(status.split()[0]),dict(headers)))))
     return captured[0][0],value,captured[0][1]

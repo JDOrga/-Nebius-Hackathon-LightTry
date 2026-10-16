@@ -35,6 +35,8 @@ def request(app, path, method='GET', body=b'', headers=None):
     if method != 'GET':
         env['HTTP_X_LIGHTTRY_TOKEN'] = app.handler.csrf_token
         env['HTTP_ORIGIN'] = 'http://localhost:8080'
+    if not headers or headers.get('HTTP_AUTHORIZATION',AUTH)==AUTH:
+        token,_=app.login_sessions.issue('lighttry');env['HTTP_COOKIE']='lighttry_session='+token
     env.update(headers or {})
     captured = []
     result = b''.join(app(env, lambda status, response_headers: captured.append((status, response_headers))))
@@ -127,11 +129,23 @@ class LinuxServiceTests(unittest.TestCase):
         original=poisoned.read_bytes() if poisoned.exists() else None
         poisoned.write_text('{"python":"WJX_PATH_MUST_NEVER_BE_READ","not_a_path":true}')
         runs=[]
+        from urllib.request import build_opener, HTTPCookieProcessor
+        from http.cookiejar import CookieJar
+        from urllib.parse import urlencode
+        browser = None
         def http(path,auth=True):
-            r=Request('http://localhost:8080'+path,headers={'Authorization':AUTH} if auth else {})
-            with urlopen(r,timeout=3) as response:return response.status,response.read()
+            nonlocal browser
+            if auth:
+                if browser is None:
+                    candidate=build_opener(HTTPCookieProcessor(CookieJar()))
+                    login=Request('http://localhost:8080/auth/login',data=urlencode({'accessKey':PASSWORD}).encode(),headers={'Origin':'http://localhost:8080'})
+                    with candidate.open(login,timeout=5) as response:response.read()
+                    browser=candidate
+                with browser.open('http://localhost:8080'+path,timeout=3) as response:return response.status,response.read()
+            with urlopen('http://localhost:8080'+path,timeout=3) as response:return response.status,response.read()
         try:
             for turn in (1,2):
+                browser=None
                 log=Path(self.tmp.name)/f'process-{turn}.log'
                 with log.open('wb') as stream:
                     process=subprocess.Popen([sys.executable,'-X','utf8','-B',str(ROOT/'start.py'),'--service',

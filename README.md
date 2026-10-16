@@ -117,7 +117,7 @@ sudo systemctl restart lighttry
 
 ## 临时账号与服务安全边界
 
-部署入口仍是 `start.py --service`，页面、静态脚本、业务 API、照片、HDR、任务和结果下载统一先认证；没有公开照片目录或例外下载入口。认证失败为401，限流为429（Retry-After:60），不存在/非本账号对象统一404。HTTP Basic 只用于本机/可信私网；公网必须经过 HTTPS 和防火墙，不能在公网明文发送登录密码。
+部署入口仍是 `start.py --service`，页面、静态脚本、业务 API、照片、HDR、任务和结果下载统一先认证；没有公开照片目录或例外下载入口。认证失败为401，限流为429（Retry-After:60），不存在/非本账号对象统一404。登录改为单字段访问密钥：未登录访问首页显示登录页，`GET /login` 可直接打开。`POST /auth/login` 使用表单正文传递 `accessKey`，不再接受 HTTP Basic。除登录页和登录提交外，业务页面、素材和 API 仍须认证。公网必须使用 HTTPS 和防火墙，不能明文传送密钥。
 
 ### 运行时临时账号
 
@@ -128,7 +128,13 @@ sudo systemctl restart lighttry
   --data-root /var/lib/lighttry --account-output /var/lib/lighttry/private-temporary-login.txt
 ```
 
-登录密码为随机生成的高熵密码，只写指定的私有交付文件，不打印到 stdout；服务保存独立随机盐的 scrypt 哈希于 `/var/lib/lighttry/auth/accounts.json`（0600）。账号文件与交付文件须由服务 UID 持有，私有目录0700。已有文件拒绝覆盖。通过 `LIGHTTRY_ACCOUNTS_FILE=/var/lib/lighttry/auth/accounts.json` 注入，模板见 `deploy/service.env.example`；旧 `LIGHTTRY_ACCESS_PASSWORD` 环境注入仅作为受控兼容，不存在源码默认密码。改账号后重启 CPU 服务；退出/撤销不能仅靠关掉浏览器标签，HTTP Basic 缓存需由浏览器清除，服务端账号期限仍强制检查。
+访问密钥使用高熵随机值，仅写指定的私有交付文件（字段 `accessKey`），不打印密钥到 stdout；服务仍保存独立盐的 scrypt 哈希于 `/var/lib/lighttry/auth/accounts.json`（0600）。内部 owner/role 与 schemaVersion 1 账号文件结构不变，已有照片、方案和任务归属不会迁移或删除。已有记录的原密码可作为同一 owner 的访问密钥使用，但不同 owner 不应共用同一密钥；匹配多个有效 owner 的密钥拒绝登录。密钥长度24–256位可见 ASCII，建议使用生成器提供的随机密钥。
+
+账号文件与交付文件须由服务 UID 持有，私有目录0700；已有文件拒绝覆盖。仍通过 `LIGHTTRY_ACCOUNTS_FILE` 注入账号文件；单用户环境可用 `LIGHTTRY_ACCESS_KEY`，旧 `LIGHTTRY_ACCESS_PASSWORD` 仅为部署配置兼容，不能通过用户名密码登录。更改账号文件后须重启 CPU 服务。
+
+登录成功签发随机会话令牌，服务端仅在内存保存其 SHA-256 摘要，浏览器仅在 HttpOnly、SameSite=Strict、Path=/ Cookie 中持有；HTTPS 时强制 Secure。有效期最多8小时且不超过密钥期限，服务重启需重新登录。不会把访问密钥写入 Cookie、localStorage、URL 或日志。顶栏“退出登录”以同源、CSRF保护的 POST `/auth/logout` 撤销当前会话；不会清除本机方案或影响其他已登录客户端。登录使用精确 Origin 校验、每 IP 限流、有限并发与有限会话容量；保留原有对象归属、角色和收费控制。
+
+本地 `start.py` 的开发工作台仍为127.0.0.1预览，不充当认证验收；新登录流程在 `start.py --service` 生效。本轮仅本地合成密钥测试，未改动服务器账号或部署文件。
 
 账号角色由受保护运行时文件提供，不接受网页修改/注册。临时账号角色为 user；operator 也不能绕过未配置的守护、预算或当前主机确认。`GET /api/me` 只返回用户名/角色，不返回密码、哈希或云凭据。
 

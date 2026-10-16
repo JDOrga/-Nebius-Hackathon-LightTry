@@ -14,13 +14,14 @@ import signal
 import tempfile
 import threading
 from types import SimpleNamespace
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
+from http.cookies import SimpleCookie
 
 import studio
 from inference.jobs import ID, JobError
 from inference.images import MAX_BYTES
 from persistence import Workspace
-from security import Accounts, RateLimiter, ProviderSecrets, create_temporary_account
+from security import Accounts, RateLimiter, ProviderSecrets, create_temporary_account, LoginSessions
 from gpu_queue import GPUQueue
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -41,7 +42,9 @@ class Application:
                 parsed.query or parsed.fragment or '*' in parsed.netloc):
             raise ValueError('EXACT_PUBLIC_ORIGIN_REQUIRED')
         self.origin = parsed.scheme + '://' + parsed.netloc
-        self.accounts = Accounts(options.accounts_file, ROOT, os.environ.get('LIGHTTRY_ACCESS_PASSWORD'))
+        self.accounts = Accounts(options.accounts_file, ROOT, os.environ.get('LIGHTTRY_ACCESS_KEY') or os.environ.get('LIGHTTRY_ACCESS_PASSWORD'))
+        self.login_sessions = LoginSessions(self.accounts)
+        self.login_slots = threading.BoundedSemaphore(2)
         self.provider_secrets = ProviderSecrets(ROOT)
         self.upload_slots = threading.BoundedSemaphore(2)
         self.gpu_sessions=None
@@ -118,8 +121,65 @@ class Application:
         LOG.info('service stopped')
         LOG.removeHandler(self.log_handler); self.log_handler.close()
 
+    def session_token(self, environ):
+        raw = environ.get('HTTP_COOKIE', '')
+        if len(raw) > 8192:
+            return ''
+        try:
+            cookie = SimpleCookie(); cookie.load(raw)
+            return cookie['lighttry_session'].value if 'lighttry_session' in cookie else ''
+        except Exception:
+            return ''
+
     def authorized(self, environ):
-        return self.accounts.authenticate(environ.get('HTTP_AUTHORIZATION',''))
+        # Basic authentication is deliberately no longer accepted.
+        return self.login_sessions.authenticate(self.session_token(environ))
+
+    def session_cookie(self, token, seconds):
+        secure = '; Secure' if self.origin.startswith('https://') else ''
+        return ('lighttry_session=' + token + '; Path=/; Max-Age=' + str(seconds) +
+                '; HttpOnly; SameSite=Strict' + secure)
+
+    def login_page(self, h, status=200, failed=False):
+        message = '访问密钥无效或已过期，请重新输入。' if failed else '输入访问密钥，继续你的光照创作。'
+        html = '''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>登录 · LightTry</title><style>
+:root{font:14px/1.6 "Segoe UI","Microsoft YaHei",sans-serif;color:#294738;background:#f2f6f3}*{box-sizing:border-box}body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;background:radial-gradient(ellipse at top right,#dcebe1,transparent 65%)}main{width:min(420px,100%);background:white;border:1px solid #dce7df;border-radius:22px;padding:38px;box-shadow:0 15px 60px #294d3210}.brand{font-size:26px;font-weight:750;letter-spacing:-1px}h1{font-size:21px;margin:28px 0 8px}p{font-size:13px;color:#75897b;margin:0 0 26px}label{display:block;font-size:12px;font-weight:650;margin:0 0 8px}input,button{font:inherit;width:100%;border-radius:10px;padding:12px 14px}input{border:1px solid #c9d9ce;background:#f8fbf9;color:#294738}input:focus-visible,button:focus-visible{outline:3px solid #67a48080;outline-offset:3px}button{border:0;background:#286d4e;color:white;font-weight:650;margin-top:18px;cursor:pointer}button:hover{background:#20573f}.privacy{font-size:11px;margin:20px 0 0;color:#8d9d92}</style><main><div class="brand">LightTry</div><h1>访问工作室</h1><p role="status">MESSAGE</p><form action="/auth/login" method="post"><label for="access-key">访问密钥</label><input id="access-key" name="accessKey" type="password" autocomplete="current-password" minlength="24" maxlength="256" required placeholder="输入你的访问密钥"><button type="submit">进入工作室</button></form><p class="privacy">请妥善保管密钥，不要分享给他人。</p></main></html>'''
+        h.send_bytes(html.replace('MESSAGE', message).encode('utf-8'), 'text/html; charset=utf-8', status=status)
+
+    def login_route(self, h, environ):
+        path = urlsplit(h.path).path
+        if path == '/login' and h.command == 'GET':
+            self.login_page(h)
+            return True
+        if path == '/auth/login' and h.command == 'POST':
+            if h.headers.get('Origin') != self.origin:
+                raise JobError('INVALID_ORIGIN', '请从本站登录页面提交。', 403)
+            self.limiter.consume('login', environ.get('REMOTE_ADDR','unknown'))
+            if h.headers.get_content_type() != 'application/x-www-form-urlencoded':
+                raise JobError('INVALID_BODY', '登录内容格式不正确。', 400)
+            body = self.body(h, 4096)
+            try:
+                values = parse_qs(body.decode('utf-8'), strict_parsing=True, max_num_fields=2)
+                if set(values) != {'accessKey'} or len(values['accessKey']) != 1:
+                    raise ValueError()
+                key = values['accessKey'][0]
+            except (ValueError, UnicodeError):
+                raise JobError('INVALID_BODY', '请重新输入访问密钥。', 400)
+            if not self.login_slots.acquire(blocking=False):
+                raise JobError('LOGIN_BUSY', '登录服务繁忙，请稍后重试。', 429)
+            try:
+                owner = self.accounts.authenticate_key(key)
+            finally:
+                self.login_slots.release()
+            if not owner:
+                self.login_page(h, 401, failed=True)
+                return True
+            self.login_sessions.revoke(self.session_token(environ))
+            token, seconds = self.login_sessions.issue(owner)
+            h.send_response(303); h.send_header('Location', '/')
+            h.send_header('Set-Cookie', self.session_cookie(token, seconds)); h.end_headers()
+            return True
+        return False
 
     def __call__(self, environ, start_response):
         h = self.handler.__new__(self.handler)
@@ -148,10 +208,14 @@ class Application:
             h.user=self.authorized(environ)
             if not h.valid_host():
                 h.job_error(JobError('INVALID_HOST', '访问地址未配置。', 403))
+            elif self.login_route(h, environ):
+                pass
             elif not h.user:
                 self.limiter.consume('login',environ.get('REMOTE_ADDR','unknown'))
-                h.job_error(JobError('AUTH_REQUIRED', '请使用工作室账号登录。', 401))
-                h.send_header('WWW-Authenticate', 'Basic realm="LightTry", charset="UTF-8"')
+                if h.command == 'GET' and urlsplit(h.path).path in ('/', '/index.html'):
+                    self.login_page(h, 401)
+                else:
+                    h.job_error(JobError('AUTH_REQUIRED', '请先使用访问密钥登录。', 401))
             elif not h.valid_origin():
                 h.job_error(JobError('INVALID_ORIGIN', '仅接受已配置的同源访问。', 403))
             elif h.command in ('POST', 'PUT', 'DELETE') and h.headers.get('X-LightTry-Token') != h.csrf_token:
@@ -170,7 +234,11 @@ class Application:
                         slot=self.upload_slots.acquire(blocking=False)
                         if not slot:raise JobError('UPLOAD_BUSY','解码通道繁忙，请稍后重试。',429)
                 self.check_ownership(h,path)
-                if self.private_route(h):pass
+                if path == '/auth/logout' and h.command == 'POST':
+                    self.login_sessions.revoke(self.session_token(environ))
+                    h.json_response({'status':'signed_out'})
+                    h.send_header('Set-Cookie', self.session_cookie('', 0))
+                elif self.private_route(h):pass
                 elif h.command=='GET':h.do_GET()
                 elif h.command=='POST':
                     with h.task_store.mutex:
@@ -188,6 +256,11 @@ class Application:
             h.job_error(JobError('STATE_UNAVAILABLE', '服务读写失败，请检查本机日志。', 503))
         finally:
             if slot:self.upload_slots.release()
+        h.response_headers = [(k,v) for k,v in h.response_headers if k.lower() not in ('cache-control','referrer-policy','x-content-type-options')]
+        h.send_header('Cache-Control', 'no-store')
+        # Same-origin forms need an Origin; never send referrers cross-origin.
+        h.send_header('Referrer-Policy', 'same-origin')
+        h.send_header('X-Content-Type-Options', 'nosniff')
         if h.response_status==429:h.send_header('Retry-After','60')
         LOG.info('request status=%s',h.response_status)
         start_response(f'{h.response_status} {HTTPStatus(h.response_status).phrase}', h.response_headers)
