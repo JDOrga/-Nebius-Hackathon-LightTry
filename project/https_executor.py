@@ -56,23 +56,36 @@ class HTTPSCosmosExecutor:
             target.write_bytes(data)
 
     def submit(self,folder,request):
-        state,grant=self.current();check_request(request,grant)
-        worker=self.control.sessions.worker
-        health=worker.health()
-        if (health.get('sessionId'),health.get('resourceId'),health.get('hostIdentity'))!=(state['sessionId'],state['resourceId'],state['hostIdentity']):
-            raise ValueError('HTTPS_WORKER_CURRENT_HOST_MISMATCH')
-        if not model_ready(health,state,simulation=grant.get('simulation',False)):
-            raise ValueError('RESIDENT_MODEL_NOT_READY')
-        authorization=job_authorization(request,grant) if grant.get('schemaVersion')==2 else None
-        raw=pack_input(folder,request,authorization);sha=hashlib.sha256(raw).hexdigest()
-        envelope={'jobId':request['taskId'],'sessionId':state['sessionId'],'resourceId':state['resourceId'],
-                  'artifactSha256':sha,'requestSha256':request_sha(request)}
-        binding=Path(folder)/'https-binding.json'
-        # Durable marker before ANY upload/submit. Recovery only queries the original job.
-        with binding.open('x',encoding='utf-8') as stream:json.dump({'envelope':envelope,'deadline':grant['expiresAt']},stream)
-        uploaded=worker.upload(raw)
-        if uploaded.get('sha256')!=sha or uploaded.get('bytes')!=len(raw):raise ValueError('HTTPS_UPLOAD_RECEIPT_MISMATCH')
-        self.control.sessions.submit(state['sessionId'],envelope)
+        stage='adapter_submit'
+        try:
+            stage='current_authorization'
+            state,grant=self.current();check_request(request,grant)
+            worker=self.control.sessions.worker
+            stage='worker_health'
+            health=worker.health()
+            if (health.get('sessionId'),health.get('resourceId'),health.get('hostIdentity'))!=(state['sessionId'],state['resourceId'],state['hostIdentity']):
+                raise ValueError('HTTPS_WORKER_CURRENT_HOST_MISMATCH')
+            if not model_ready(health,state,simulation=grant.get('simulation',False)):
+                raise ValueError('RESIDENT_MODEL_NOT_READY')
+            stage='pack_input'
+            authorization=job_authorization(request,grant) if grant.get('schemaVersion')==2 else None
+            raw=pack_input(folder,request,authorization);sha=hashlib.sha256(raw).hexdigest()
+            envelope={'jobId':request['taskId'],'sessionId':state['sessionId'],'resourceId':state['resourceId'],
+                      'artifactSha256':sha,'requestSha256':request_sha(request)}
+            binding=Path(folder)/'https-binding.json'
+            # Durable marker before ANY upload/submit. Recovery only queries the original job.
+            stage='binding_latch'
+            with binding.open('x',encoding='utf-8') as stream:json.dump({'envelope':envelope,'deadline':grant['expiresAt']},stream)
+            stage='artifact_upload'
+            uploaded=worker.upload(raw)
+            if uploaded.get('sha256')!=sha or uploaded.get('bytes')!=len(raw):raise ValueError('HTTPS_UPLOAD_RECEIPT_MISMATCH')
+            stage='session_dispatch'
+            self.control.sessions.submit(state['sessionId'],envelope)
+        except Exception as exc:
+            # Preserve exception type and original protocol contracts; attach only safe stage.
+            try:exc.dispatch_stage=stage
+            except Exception:pass
+            raise
 
     def reconcile(self,folder):
         folder=Path(folder);binding=read(folder/'https-binding.json');envelope=binding['envelope'];request=read(folder/'request.json')

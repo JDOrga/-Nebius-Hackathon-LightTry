@@ -1,4 +1,5 @@
 """Bounded Linux Nebius Devlab adapter. Construction performs NO CLI/cloud calls."""
+from contextlib import closing
 import hashlib
 import json
 import math
@@ -52,19 +53,68 @@ class NebiusProvider:
         if json_result:cmd+=['--format','json']
         return cmd
 
-    def _call(self,args,*,json_result=True,deadline=None):
-        timeout=6.0 if deadline is None else min(6.0,deadline-self.clock())
-        if timeout<=0:raise RuntimeError('NEBIUS_DEADLINE_EXPIRED')
-        cmd=self._command(args,json_result)
+    def _diagnostic(self, args, started, code, exit_code=None, stderr=''):
+        # Never persist raw commands, IDs, paths, stdout, or arbitrary stderr.
+        verbs={('iam','v2','project','get'):'project_get',
+               ('ai','devlab','get'):'devlab_get',
+               ('compute','instance','list'):'instance_list',
+               ('compute','instance','get'):'instance_get',
+               ('ai','devlab','restart'):'restart',('ai','devlab','stop'):'stop'}
+        verb=next((v for k,v in verbs.items() if tuple(args[:len(k)])==k),'other')
+        raw=stderr if isinstance(stderr,str) else ''
+        sample=raw[:8192].lower()
+        categories=[label for label,words in (
+            ('authentication',('unauthenticated','authentication failed','invalid token','expired token')),
+            ('permission',('permission denied','forbidden')),
+            ('timeout',('deadline exceeded','timed out','timeout')),
+            ('network',('connection refused','connection reset','no such host','network is unreachable')),
+            ('rate_limit',('resource exhausted','too many requests')),
+            ('invalid_argument',('invalid argument','unknown flag')))
+            if any(word in sample for word in words)]
+        receipt={'stage':verb,'code':code,'exitCode':exit_code,
+                 'durationMs':max(0,round((time.monotonic()-started)*1000)),
+                 'stderrSummary':categories or (['redacted'] if raw else []),
+                 'stderrChars':len(raw),'stderrTruncated':len(raw)>8192}
         try:
+            path=self.root/'provider-diagnostics.sqlite3'
+            if path.is_symlink():raise ValueError('DIAGNOSTIC_SYMLINK_FORBIDDEN')
+            with closing(sqlite3.connect(path,timeout=.1)) as db, db:
+                path.chmod(0o600)
+                db.execute('CREATE TABLE IF NOT EXISTS diagnostics(id INTEGER PRIMARY KEY,at REAL,body TEXT)')
+                db.execute('INSERT INTO diagnostics(at,body) VALUES (?,?)',(self.clock(),json.dumps(receipt)))
+                db.execute('DELETE FROM diagnostics WHERE id NOT IN (SELECT id FROM diagnostics ORDER BY id DESC LIMIT 256)')
+            receipt['persisted']=True
+        except Exception:
+            receipt['persisted']=False  # Diagnostics must never resend or mask provider outcomes.
+        return receipt
+
+    def _call(self,args,*,json_result=True,deadline=None):
+        started=time.monotonic();p=None;code='OK';cause=None;result=None
+        timeout=6.0 if deadline is None else min(6.0,deadline-self.clock())
+        try:
+            if timeout<=0:
+                code='NEBIUS_DEADLINE_EXPIRED';raise RuntimeError(code)
+            cmd=self._command(args,json_result)
             p=self.runner(cmd,stdin=subprocess.DEVNULL,capture_output=True,text=True,
                           timeout=timeout,shell=False,encoding='utf-8')
             if p.returncode:
-                raise RuntimeError('NEBIUS_AUTH_REQUIRED' if p.returncode==7 else 'NEBIUS_COMMAND_FAILED')
-            if len(p.stdout)>1024*1024:raise RuntimeError('NEBIUS_RESPONSE_TOO_LARGE')
-            return json.loads(p.stdout) if json_result else None
-        except RuntimeError:raise
-        except Exception:raise RuntimeError('NEBIUS_RESPONSE_UNCERTAIN') from None
+                code='NEBIUS_AUTH_REQUIRED' if p.returncode==7 else 'NEBIUS_COMMAND_FAILED'
+                raise RuntimeError(code)
+            if len(p.stdout)>1024*1024:
+                code='NEBIUS_RESPONSE_TOO_LARGE';raise RuntimeError(code)
+            result=json.loads(p.stdout) if json_result else None
+        except Exception as exc:
+            cause=exc
+            if code=='OK':
+                code=('NEBIUS_TIMEOUT' if isinstance(exc,subprocess.TimeoutExpired) else
+                      'NEBIUS_INVALID_JSON' if isinstance(exc,json.JSONDecodeError) else
+                      'NEBIUS_RESPONSE_UNCERTAIN')
+        receipt=self._diagnostic(args,started,code,p.returncode if p else None,
+                                 p.stderr if p else '')
+        if cause is not None:
+            error=RuntimeError(code);error.diagnostic=receipt
+            raise error from None
+        return result
 
     def _read(self,resource,deadline):
         if resource!=self.settings['resourceId']:raise ValueError('NEBIUS_RESOURCE_MISMATCH')

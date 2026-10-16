@@ -127,12 +127,15 @@ class Sessions:
                 'error':None,'label':LABELS['STARTING'],'revision':0}
             db.execute('INSERT INTO sessions VALUES (?,?,?,?)',(sid,scope['scopeId'],scope['resourceId'],canonical(value)))
             db.commit()  # Reserve identity before any side effects or network.
+        start_stage='preflight'
         try:
             preflight=self.provider.preflight(scope['resourceId'])
             if not self.proof(preflight,value) or preflight['state']!='STOPPED' or preflight.get('instances')!=[]:
                 raise ValueError('PREFLIGHT_NOT_STOPPED_EMPTY')
             bootstrap=getattr(self,'bootstrap',None)
+            start_stage='bootstrap_preflight'
             if bootstrap is not None:bootstrap.preflight(preflight)
+            start_stage='supervisor_arm'
             receipt=self.fallback.arm(sid,scope['resourceId'],value['absoluteDeadline'],30)
             protection_ok=(receipt.get('independentHost') is True if self.protection_mode=='off-host' else
                 receipt.get('independentHost') is False and receipt.get('protectionMode')=='cpu-only' and
@@ -149,11 +152,24 @@ class Sessions:
                 current['startSent']=True
             value,send=self.change(sid,'START_ATTEMPT_LATCHED',latch)
             if not send:return value
+            start_stage='provider_start'
             self.provider.start(scope['resourceId'],sid,value['absoluteDeadline'])
-        except Exception:
+        except Exception as exc:
+            diagnostic=getattr(exc,'diagnostic',None)
+            # Only accept the provider's closed-schema receipt, never exception text.
+            allowed={'NEBIUS_DEADLINE_EXPIRED','NEBIUS_AUTH_REQUIRED','NEBIUS_COMMAND_FAILED',
+                     'NEBIUS_RESPONSE_TOO_LARGE','NEBIUS_TIMEOUT','NEBIUS_INVALID_JSON','NEBIUS_RESPONSE_UNCERTAIN'}
+            failure={'stage':start_stage,'code':str(exc) if str(exc) in allowed else 'START_STAGE_FAILED'}
+            if isinstance(diagnostic,dict):
+                # Store only primitive bounded metadata, not arbitrary attached payloads.
+                if diagnostic.get('stage') in {'project_get','devlab_get','instance_list','instance_get','restart','stop','other'}:
+                    failure['providerStage']=diagnostic['stage']
+                if type(diagnostic.get('exitCode')) is int:failure['exitCode']=diagnostic['exitCode']
+                if type(diagnostic.get('durationMs')) is int:failure['durationMs']=max(0,min(diagnostic['durationMs'],2147483647))
             def uncertain(current):
                 if current['stopSent'] or current['verifiedStopped']:return False
                 current['state']='UNKNOWN';current['error']='START_OR_PREFLIGHT_UNCERTAIN'
+                current['startFailure']=failure
             self.change(sid,'START_UNCERTAIN',uncertain,record_noop=True)
         return self.get(sid)
 
@@ -301,6 +317,7 @@ class Sessions:
             if (envelope.get('sessionId')!=identity or envelope.get('resourceId')!=value['resourceId'] or
                     not ID.fullmatch(envelope.get('jobId',''))):raise JobError('JOB_BINDING_INVALID','任务与会话不匹配。',422)
             fingerprint=hashlib.sha256(canonical(envelope).encode()).hexdigest();job=envelope['jobId']
+            expected_host=value.get('hostIdentity')
             with self.db() as db:
                 old=db.execute('SELECT fingerprint,state FROM dispatches WHERE job=?',(job,)).fetchone()
                 if old and old[0]!=fingerprint:raise JobError('JOB_CONFLICT','任务身份内容冲突。',409)
@@ -315,12 +332,42 @@ class Sessions:
                 if any(remote.get(k)!=v for k,v in envelope.items()):return self.uncertain_job(value,envelope,fingerprint)
                 with self.db() as db:db.execute('INSERT OR REPLACE INTO dispatches VALUES (?,?,?,?,?)',(job,identity,fingerprint,canonical(envelope),'active' if remote['status'] in ('queued','dispatching','uncertain') else 'done'))
                 if remote['status']=='uncertain':return self.uncertain_job(value,envelope,fingerprint)
-                value['state']='EXECUTING' if remote['status'] in ('queued','dispatching') else 'READY'
-                if value['state']=='READY':value['idleDeadline']=min(self.clock()+value['idleSeconds'],value['workDeadline'])
-                self.save(value,'TASK_RECONCILED');return remote
+                def reconciled(current):
+                    if current['stopSent'] or current['verifiedStopped']:return False
+                    if self.clock()>=min(current['workDeadline'],current['absoluteDeadline']):return False
+                    current['state']='EXECUTING' if remote['status'] in ('queued','dispatching') else 'READY'
+                    if current['state']=='READY':current['idleDeadline']=min(self.clock()+current['idleSeconds'],current['workDeadline'])
+                self.change(identity,'TASK_RECONCILED',reconciled);return remote
             if old:return self.uncertain_job(value,envelope,fingerprint)  # 404 after lost ACK is not permission to rerun.
-            with self.db() as db:db.execute('INSERT INTO dispatches VALUES (?,?,?,?,?)',(job,identity,fingerprint,canonical(envelope),'attempted'))
-            value['state']='EXECUTING';self.save(value,'TASK_ATTEMPT_LATCHED')
+            # Query may have blocked while the independent guard advanced revision.
+            # Claim the job AND transition the latest session in one short transaction.
+            claimed=False
+            with self.db() as db:
+                db.execute('BEGIN IMMEDIATE')
+                value=json.loads(db.execute('SELECT body FROM sessions WHERE id=?',(identity,)).fetchone()[0])
+                existing=db.execute('SELECT fingerprint FROM dispatches WHERE job=?',(job,)).fetchone()
+                if existing:
+                    if existing[0]!=fingerprint:raise JobError('JOB_CONFLICT','任务身份内容冲突。',409)
+                else:
+                    if (value['state']!='READY' or value['stopSent'] or value['verifiedStopped'] or
+                            not value['hostConfirmed'] or value.get('hostIdentity')!=expected_host or
+                            not 0<=self.clock()-value['lastObservedAt']<=30 or
+                            self.clock()>=min(value['workDeadline'],value['absoluteDeadline'])):
+                        raise JobError('GPU_NOT_READY','当前会话未就绪或工作窗口已关闭。',409)
+                    if db.execute("SELECT 1 FROM dispatches WHERE session=? AND state IN ('attempted','uncertain','active')",(identity,)).fetchone():
+                        raise JobError('GPU_BUSY','单 GPU 已占用或任务待核实。',409)
+                    db.execute('INSERT INTO dispatches VALUES (?,?,?,?,?)',(job,identity,fingerprint,canonical(envelope),'attempted'))
+                    value['state']='EXECUTING';value['label']=LABELS['EXECUTING'];value['revision']=value.get('revision',0)+1
+                    db.execute('UPDATE sessions SET body=? WHERE id=?',(canonical(value),identity))
+                    db.execute('INSERT INTO events(session,event,at) VALUES (?,?,?)',(identity,'TASK_ATTEMPT_LATCHED',self.clock()))
+                    claimed=True
+            if not claimed:return self.uncertain_job(value,envelope,fingerprint)
+            # A stop committed after the claim is not permission to POST.
+            current=self.get(identity)
+            if (current['stopSent'] or current['verifiedStopped'] or not current['hostConfirmed'] or
+                    current.get('hostIdentity')!=expected_host or
+                    self.clock()>=min(current['workDeadline'],current['absoluteDeadline'])):
+                return self.uncertain_job(current,envelope,fingerprint)
             try:
                 remote=self.worker.submit(envelope)
                 if any(remote.get(k)!=v for k,v in envelope.items()) or remote.get('status') not in ('queued','dispatching','succeeded','failed'):
@@ -331,7 +378,10 @@ class Sessions:
 
     def uncertain_job(self,value,envelope,fingerprint):
         with self.db() as db:db.execute('INSERT OR REPLACE INTO dispatches VALUES (?,?,?,?,?)',(envelope['jobId'],value['sessionId'],fingerprint,canonical(envelope),'uncertain'))
-        value['state']='UNKNOWN';value['error']='TASK_RESPONSE_UNCERTAIN';self.save(value,'TASK_UNCERTAIN')
+        def uncertain(current):
+            if current['stopSent'] or current['verifiedStopped']:return False
+            current['state']='UNKNOWN';current['error']='TASK_RESPONSE_UNCERTAIN'
+        self.change(value['sessionId'],'TASK_UNCERTAIN',uncertain)
         return {'jobId':envelope['jobId'],'status':'uncertain','mustQueryBeforeRetry':True}
 
     def record_guard_exit(self, identity, observed_exited, sleep_released):

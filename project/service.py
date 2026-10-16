@@ -31,6 +31,15 @@ ROOT = Path(__file__).resolve().parent.parent
 LOG = logging.getLogger('lighttry.service')
 
 
+def wsgi_response_headers(headers):
+    """Transport headers belong to the WSGI server, including Connection-nominated fields."""
+    blocked={'connection','keep-alive','proxy-authenticate','proxy-authorization',
+             'te','trailer','transfer-encoding','upgrade','proxy-connection'}
+    for name,value in headers:
+        if name.lower()=='connection':blocked.update(token.strip().lower() for token in value.split(','))
+    return [(name,value) for name,value in headers if name.lower() not in blocked]
+
+
 class RequestConnection:
     # Waitress owns transport timeouts and buffering; business handlers keep their API.
     def settimeout(self, seconds):
@@ -416,7 +425,7 @@ class Application:
         h.send_header('X-Content-Type-Options', 'nosniff')
         if h.response_status==429:h.send_header('Retry-After','60')
         LOG.info('request status=%s',h.response_status)
-        start_response(f'{h.response_status} {HTTPStatus(h.response_status).phrase}', h.response_headers)
+        start_response(f'{h.response_status} {HTTPStatus(h.response_status).phrase}', wsgi_response_headers(h.response_headers))
         return [h.wfile.getvalue()]
 
     def check_ownership(self,h,path):

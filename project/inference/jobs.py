@@ -11,6 +11,30 @@ from pathlib import Path
 from .images import InputError, decode, digest, prepare, MAX_BYTES, crop_photo_region
 
 ID = re.compile(r'^[0-9a-f]{32}$')
+DISPATCH_STAGES={'adapter_submit','current_authorization','worker_health','pack_input',
+                 'binding_latch','artifact_upload','session_dispatch'}
+DISPATCH_CODES={'SESSION_CHANGED','GPU_NOT_READY','GPU_BUSY','JOB_CONFLICT',
+                'CURRENT_CONFIRMED_READY_GPU_REQUIRED','MODEL_GRANT_HOST_OR_DEADLINE_MISMATCH',
+                'HTTPS_WORKER_CURRENT_HOST_MISMATCH','RESIDENT_MODEL_NOT_READY',
+                'HTTPS_UPLOAD_RECEIPT_MISMATCH','WORKER_RESPONSE_UNCERTAIN',
+                'ALL_WORKER_TRANSPORTS_UNAVAILABLE','CURRENT_SESSION_NOT_ACTIVE'}
+
+def dispatch_diagnostic(exc,task_id,stage='adapter_submit'):
+    # No arbitrary message, repr, traceback, URL, command, or attached payload.
+    stage=getattr(exc,'dispatch_stage',stage)
+    raw=getattr(exc,'code',None)
+    if not isinstance(raw,str) or raw not in DISPATCH_CODES:
+        try:raw=str(exc)
+        except Exception:raw=None
+    code=raw if isinstance(raw,str) and raw in DISPATCH_CODES else 'UNCLASSIFIED_DISPATCH_FAILURE'
+    kind=('timeout' if isinstance(exc,TimeoutError) else 'io' if isinstance(exc,OSError) else
+          'validation' if isinstance(exc,ValueError) else 'other')
+    code=code if isinstance(code,str) and code in DISPATCH_CODES else 'UNCLASSIFIED_DISPATCH_FAILURE'
+    kind=kind if isinstance(kind,str) and kind in {'timeout','io','validation','other'} else 'other'
+    return {'taskId':task_id if isinstance(task_id,str) and ID.fullmatch(task_id) else None,
+            'stage':stage if isinstance(stage,str) and stage in DISPATCH_STAGES else 'adapter_submit',
+            'code':code,'category':kind,'retryPermitted':False}
+
 ACTIVE = {'queued', 'running'}
 STAGES = {'preflight', 'weights', 'inverse', 'forward', 'validating', 'transferring'}
 RUN_CONFIG = {'model': 'Cosmos Diffusion Renderer',
@@ -163,7 +187,11 @@ class TaskStore:
             atomic(folder / 'request.json', request)
             try:
                 self.executor.submit(folder, request)
-            except Exception:
+            except Exception as exc:
+                diagnostic=dispatch_diagnostic(exc,task_id)
+                try:atomic(folder/'dispatch-failure.json',diagnostic)
+                except Exception:pass  # Keep the original outcome even if the sidecar cannot be written.
+                task['dispatchDiagnostic']=diagnostic
                 task.update(status='failed', error={'code': 'DISPATCH_FAILED', 'message': '执行适配器未能确认接收任务；请核查本地执行记录。'},
                             executionUncertain=True, updatedAt=self.clock())
                 atomic(folder / 'task.json', task)
