@@ -196,7 +196,7 @@ $('import-library-file').onchange=async()=>{try{const f=$('import-library-file')
 $('save-server').onclick=async()=>{const button=$('save-server');if(button.disabled||!serverWorkspace)return;if(!confirm('保存全部方案到服务；若当前为用户照片，会上传原照片到私有数据目录。不会生成或收费。继续？'))return;button.disabled=true;try{if(file&&!input.sampleId){const photo=await api('/api/photos/'+input.id,{method:'POST',headers:{'Content-Type':file.type,'X-LightTry-Token':inference.csrfToken,'X-LightTry-Photo':btoa(unescape(encodeURIComponent(JSON.stringify({name:input.name}))))},body:file});serverPhotos=serverPhotos.filter(p=>p.id!==photo.id).concat(photo);}serverWorkspace=await api('/api/workspace',{method:'POST',headers:{'Content-Type':'application/json','X-LightTry-Token':inference.csrfToken},body:JSON.stringify({schemaVersion:1,schemes:archive(schemes).schemes})});serverPhotos=serverWorkspace.photos;persist();$('storage-note').textContent='已保存到服务私有目录；换浏览器登录同一服务可找回方案与已上传照片。';}catch(e){error(e.message+'；可能已保存照片，方案未全部保存，请核对后重试。');}finally{button.disabled=false;}};
 $('export-server').onclick=()=>{location.href='/api/workspace/export';};
 async function init(){try{try{const me=await api('/api/me');accountNamespace='lighttry.user.'+me.username+'.';$('logout').hidden=false;}catch(e){if(e.status!==404)throw e;}[catalog,lighting,inference]=await Promise.all([api('/api/catalog'),api('/api/lighting'),api('/api/inference')]);if(lighting.language.developmentTestMode)document.querySelector('.boundary').textContent+=' · 演示模式（不调用真实模型）';await lightConsole.load();try{serverWorkspace=await api('/api/workspace');serverPhotos=serverWorkspace.photos||[];$('save-server').hidden=false;$('export-server').hidden=false;}catch(e){if(e.status!==404)throw e;}deletedFamilies=(storageGet(deletedKey)||[]);if(!Array.isArray(deletedFamilies))deletedFamilies=[];deletedFamilies=deletedFamilies.filter(d=>d&&/^[a-f0-9]{32}$/.test(d.planId)&&Array.isArray(d.versions)).slice(-200).map(d=>({...d,versions:validateLibrary(d.versions,catalog.presets.map(p=>p.id)).filter(s=>s.planId===d.planId)}));schemeOrigins=storageGet(originsKey)||{};schemes=visibleFamilies(validateLibrary(storageGet(libraryKey),catalog.presets.map(p=>p.id)));if(serverWorkspace)schemes=mergeLibraries(schemes,visibleFamilies(validateLibrary(serverWorkspace.schemes,catalog.presets.map(p=>p.id))));schemes=mergeAcceptedLibrary(schemes,visibleFamilies(validateLibrary(lighting.importedSchemes||[],catalog.presets.map(p=>p.id))));schemes=visibleFamilies(schemes);$('photo-select').innerHTML=catalog.samples.map(s=>`<option value="${s.id}">${esc(photoTitle(s,null))}${s.unstable?' · 材质不稳定':''}</option>`).join('');$('environments').innerHTML=catalog.presets.map(p=>`<button type="button" data-environment="${p.id}" aria-pressed="false">${esc(p.name)}</button>`).join('');document.querySelectorAll('[data-environment]').forEach(b=>{b.onclick=()=>selectEnvironment(b.dataset.environment);b.onkeydown=e=>{const buttons=[...document.querySelectorAll('[data-environment]')];let i=buttons.indexOf(b);if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();i=e.key==='Home'?0:e.key==='End'?buttons.length-1:(i+(e.key==='ArrowLeft'?-1:1)+buttons.length)%buttons.length;buttons[i].focus();}};});$('environment').innerHTML=catalog.presets.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');for(const id of [...new Set([...(serverWorkspace?.taskIds||[]),...(storageGet(tasksKey)||[])])].slice(0,200)){if(/^[0-9a-f]{32}$/.test(id)){try{tasks.push(await api('/api/tasks/'+id))}catch{}}}const cursor=storageGet(cursorKey),unfinished=storageGet(submissionKey);if(unfinished?.meta?.requestId){try{const recovered=await api('/api/requests/'+unfinished.meta.requestId);if(!tasks.some(t=>t.taskId===recovered.taskId))tasks.push(recovered);rememberSubmission(null)}catch{error('上次提交未得到确认；请求身份保留，重新载入同一照片才可手动重试。')}}for(const photo of serverPhotos){$('photo-select').add(new Option(photo.name,'__saved_'+photo.id));}
-input={id:uid(),name:'待上传照片',width:1280,height:704,unbound:true};file=null;current=createScheme(catalog.presets[0].id,'未命名草稿',input.id);mode='result';compareKey=null;zoom=1;pan={x:0,y:0};await render();
+input={id:uid(),name:'待上传照片',width:1280,height:704,unbound:true};file=null;current=createScheme(catalog.presets[0].id,'未命名草稿',input.id);mode='result';compareKey=null;zoom=1;pan={x:0,y:0};await render();refreshGpuMonitor();
 // Keep saved libraries and unsettled request evidence, but never auto-select their photos.
 for(const task of tasks.filter(t=>['queued','running'].includes(t.status)||t.executionUncertain))poll(task.taskId).catch(e=>error('恢复任务失败：'+e.message));
 }catch(e){error(e.message)}}
@@ -242,3 +242,44 @@ $('confirm-reset-client').onclick=()=>{if(resetBlocked()){$('reset-client-warnin
 $('logout').onclick=async()=>{try{await api('/auth/logout',{method:'POST',headers:{'X-LightTry-Token':inference.csrfToken}});location.replace('/login');}catch(e){error('退出失败，请稍后重试。');}};
 
 try{const message=sessionStorage.getItem('lighttry.gpuEntryNotice');if(message){$('gpu-entry-notice').textContent=message;$('gpu-entry-notice').hidden=false;sessionStorage.removeItem('lighttry.gpuEntryNotice');}}catch{}
+
+// Read one local guard-snapshot stream; never asks the cloud provider to poll.
+let gpuMonitorInfo=null,gpuMonitorBusy=false,gpuStartBusy=false,gpuMonitorTimer=null;
+function paintGpuMonitor(info){
+ gpuMonitorInfo=info;
+ const labels={STOPPED:'已停止',STARTING:'启动中',LOADING:'准备中',READY:'运行中',EXECUTING:'生成中',STOPPING:'关闭中',UNKNOWN:'状态未知'};
+ let label=info.configured===false?'未连接':info.stale?'状态已过期':labels[info.state]||'状态未知';
+ if(info.startStatus==='requested'&&!info.active)label='启动请求已提交';
+ if(info.startStatus==='failed'&&!info.active)label='启动未成功';
+ $('gpu-monitor').dataset.state=info.configured===false?'DISCONNECTED':info.state||'UNKNOWN';
+ $('gpu-monitor').title=info.message||'GPU 服务器状态';
+ $('gpu-monitor-state').textContent=label;
+ $('gpu-monitor-demo').hidden=!info.simulation;
+ $('gpu-monitor-time').textContent=info.observedAt?'更新于 '+new Date(info.observedAt*1000).toLocaleTimeString('zh-CN',{hour12:false}):'';
+ $('gpu-monitor-start').disabled=gpuStartBusy||!info.canStart||!inference?.csrfToken;
+ $('gpu-monitor-start').title=info.canStart?'启动 GPU 可能产生费用':info.message||'当前不可启动';
+}
+async function refreshGpuMonitor(){
+ if(gpuMonitorBusy)return;
+ gpuMonitorBusy=true;$('gpu-monitor-refresh').disabled=true;
+ try{paintGpuMonitor(await api('/api/gpu/entry-status'));}
+ catch(e){paintGpuMonitor({state:'UNKNOWN',configured:e.status===404?false:undefined,canStart:false,message:e.status===404?'本地预览未连接 GPU 服务。':'暂时无法读取 GPU 状态，请稍后刷新。'});}
+ finally{gpuMonitorBusy=false;$('gpu-monitor-refresh').disabled=false;clearTimeout(gpuMonitorTimer);if(!document.hidden)gpuMonitorTimer=setTimeout(refreshGpuMonitor,15000);}
+}
+$('gpu-monitor-refresh').onclick=refreshGpuMonitor;
+$('gpu-monitor-start').onclick=()=>{if(gpuStartBusy||!gpuMonitorInfo?.canStart)return;$('gpu-monitor-warning').textContent='';$('gpu-monitor-confirm').disabled=false;$('gpu-monitor-dialog').showModal();};
+$('gpu-monitor-confirm').onclick=async()=>{
+ if(gpuStartBusy||!gpuMonitorInfo?.canStart||!inference?.csrfToken)return;
+ gpuStartBusy=true;$('gpu-monitor-confirm').disabled=true;$('gpu-monitor-start').disabled=true;
+ $('gpu-monitor-dialog').close();
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),5000);
+ try{
+  const response=await fetch('/api/gpu/entry-start',{method:'POST',headers:{'Content-Type':'application/json','X-LightTry-Token':inference.csrfToken},body:JSON.stringify({requestId:uid()}),signal:controller.signal});
+  if(!response.ok)throw Error('GPU 启动请求未被接受，请刷新状态后核实。');
+  const value=await response.json();
+  $('gpu-entry-notice').textContent=value.status==='already_active'?'GPU 已处于活动状态。':value.status==='failed'?'上次 GPU 启动未成功，请联系管理员核实。':'GPU 启动请求已提交，你可以继续编辑方案。';
+ }catch(e){$('gpu-entry-notice').textContent=e.name==='AbortError'?'启动请求结果尚未确认，请勿重复提交，稍后刷新状态。':e.message;}
+ finally{clearTimeout(timer);gpuStartBusy=false;$('gpu-entry-notice').hidden=false;await refreshGpuMonitor();}
+};
+document.addEventListener('visibilitychange',()=>{clearTimeout(gpuMonitorTimer);if(!document.hidden)refreshGpuMonitor();});
+window.addEventListener('pagehide',()=>clearTimeout(gpuMonitorTimer));

@@ -219,7 +219,13 @@ class Application:
             reason = 'GPU 暂不具备安全启动条件，可以先进入工作台。'
         with self.entry_lock:
             pending = dict(self.entry_start) if self.entry_start else None
+        if pending and (not scope or pending['scopeId']!=scope.get('scopeId')):
+            pending=None
+        if pending and not active:
+            allowed=False
+            reason=('启动请求已提交，请等待状态更新。' if pending['status']=='requested' else '上次启动未成功，请联系管理员核实。')
         return {'active':active,'state':state,'canStart':allowed,'message':reason,'simulation':snapshot.get('simulation') is True,
+                'configured':self.gpu_sessions is not None,'observedAt':observed if isinstance(observed,(int,float)) and not isinstance(observed,bool) else None,'stale':bool(observed is not None and not fresh),
                 'startStatus':pending.get('status') if pending else None}
 
     def gpu_login_destination(self):
