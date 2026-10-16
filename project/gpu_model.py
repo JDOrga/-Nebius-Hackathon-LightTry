@@ -10,7 +10,7 @@ import tarfile
 import threading
 import time
 
-from model_contract import grant_file,check_request,unpack_input,request_sha,MAX
+from model_contract import grant_file,check_request,unpack_input,request_sha,MAX,verify_job_authorization
 from security import runtime_file
 from inference.jobs import atomic,read
 from runtime.driver import BUNDLE_FILES
@@ -25,13 +25,14 @@ class CosmosWorkerExecutor:
     def __init__(self,ledger,config_file):
         value=json.loads(runtime_file(config_file,ROOT).decode('utf-8'))
         required={'schemaVersion','enabled','python','repo','checkpointDir','cudaHome','grantFile'}
-        if not isinstance(value,dict) or set(value)!=required or value['schemaVersion']!=1 or value['enabled'] is not True:
+        if not isinstance(value,dict) or set(value)-required-{'executionMode'} or not required<=set(value) or value['schemaVersion']!=1 or value['enabled'] is not True:
             raise ValueError('EXPLICIT_GPU_EXECUTOR_ENABLE_REQUIRED')
         for name in ('python','repo','checkpointDir','cudaHome'):
             p=Path(value[name])
             if not p.is_absolute() or not p.exists() or any(x.is_symlink() for x in (p,*p.parents)):
                 raise ValueError('EXPLICIT_EXISTING_GPU_RUNTIME_PATH_REQUIRED')
         self.ledger,self.config=ledger,value
+        if value.get('executionMode','per-job') not in ('resident','per-job'):raise ValueError('UNKNOWN_MODEL_EXECUTION_MODE')
         self.child=None;self.stopped=threading.Event();self.thread=None
         grant=self.grant()  # Only private local files, no probes/install/model load.
         ledger.max_jobs=grant['maxJobs'];ledger.host_identity=grant['hostIdentity']
@@ -39,10 +40,15 @@ class CosmosWorkerExecutor:
     def grant(self):return grant_file(self.config['grantFile'],self.ledger.session_id,self.ledger.resource_id)
 
     def authorize(self,envelope):
-        grant=self.grant();request,_=unpack_input(self.ledger.blob(envelope['artifactSha256']))
+        grant=self.grant();request,files=unpack_input(self.ledger.blob(envelope['artifactSha256']))
         if request['taskId']!=envelope['jobId'] or request_sha(request)!=envelope['requestSha256']:
             raise ValueError('MODEL_ENVELOPE_REQUEST_MISMATCH')
         check_request(request,grant)
+        if grant.get('schemaVersion')==2:
+            try:authorization=json.loads(files.get('authorization.json',b'null'))
+            except (ValueError,UnicodeError):raise ValueError('SIGNED_JOB_AUTHORIZATION_REQUIRED')
+            verify_job_authorization(request,grant,authorization)
+        elif 'authorization.json' in files:raise ValueError('UNEXPECTED_JOB_AUTHORIZATION')
         self.ledger.max_jobs=grant['maxJobs']
         return grant
 

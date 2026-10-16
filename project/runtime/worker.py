@@ -27,6 +27,7 @@ def install_legacy_imports():
 def main():
     parser=argparse.ArgumentParser(add_help=False)
     parser.add_argument('--request',type=Path,required=True)
+    parser.add_argument('--runtime',type=Path,required=True)
     options,_=parser.parse_known_args()
     job=read(options.request)
     policy=read(Path(__file__).with_name('policy.json'))
@@ -43,6 +44,19 @@ def main():
     if p['parameters']!=expected or p['environmentId']!=raw['environmentId']:
         raise ValueError('SCHEME_PARAMETERS_MISMATCH')
     old_command=batch.measured_command
+    original_runner=worker.run_bounded
+    resident_phases=[]
+    runtime=read(options.runtime)
+    if runtime.get('executionMode')=='resident':
+        from resident_ipc import phase_command,call
+        prep=Path(__file__).resolve().parents[2]
+        def resident_run(argv,repo,logfile,env,deadline,*,timing=None):
+            phase=phase_command(argv,prep)
+            if phase:
+                resident_phases.append(call(Path(runtime['phaseRuntimeRoot']),phase,argv,logfile,prep,deadline))
+                return
+            return original_runner(argv,repo,logfile,env,deadline,timing=timing)
+        worker.run_bounded=resident_run
     def command(argv,phase,run,state_root=None):
         result=old_command(argv,phase,run,state_root)
         if phase=='forward':result[2]=str(Path(__file__).with_name('entry.py'))
@@ -66,6 +80,11 @@ def main():
         if any(model[k]['shape']!=[1,3,1,704,1280] for k in ('env_ldr','env_log','env_nrm')):
             raise ValueError('ACTUAL_MODEL_CONDITION_MISMATCH')
         receipt=read(run/'receipt.json')
+        if runtime.get('executionMode')=='resident':
+            receipt.update(executionMode='resident',processExitCodes=[None,None],
+                residentExecution={'version':1,'taskId':job['taskId'],'nonce':job['nonce'],'phases':resident_phases})
+            from model_readiness import resident_receipt
+            if not resident_receipt(receipt,job['taskId'],job['nonce']):raise ValueError('RESIDENT_COMPLETION_UNPROVEN')
         receipt['lighting']={'recipeKey':p['recipeKey'],'parameters':expected,'adapterVersion':VERSION,
             'actualCondition':condition,'actualModelCondition':model,'derivedHdrSha256':p.get('derivedHdrSha256')}
         atomic(run/'receipt.json',receipt)
@@ -89,7 +108,7 @@ def main():
             original_atomic(prep/'run/execution.json',event)
         raise
     finally:
-        worker.atomic=original_atomic;batch.measured_command=old_command
+        worker.atomic=original_atomic;batch.measured_command=old_command;worker.run_bounded=original_runner
 
 
 if __name__=='__main__':main()

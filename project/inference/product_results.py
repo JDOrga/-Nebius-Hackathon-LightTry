@@ -186,7 +186,11 @@ def register_local(store, relative_job, run_id, original_task_id):
             primary=items[request['preset']['id']]['result']
             if primary and receipt is not None and (receipt.get('file')!='result.jpg' or receipt.get('sha256')!=primary['sha256'] or receipt.get('bytes')!=primary['bytes']):
                 raise ValueError('PRIMARY_RECEIPT_HASH_MISMATCH')
-            if event['status']=='succeeded' and receipt.get('processExitCodes') not in ([None,0],[0,0]): raise ValueError('RECEIPT_EXECUTION_INCOMPLETE')
+            if event['status']=='succeeded':
+                if receipt.get('executionMode')=='resident':
+                    from model_readiness import resident_receipt
+                    if not resident_receipt(receipt,request['taskId'],request['nonce']):raise ValueError('RESIDENT_COMPLETION_UNPROVEN')
+                elif receipt.get('processExitCodes') not in ([None,0],[0,0]):raise ValueError('RECEIPT_EXECUTION_INCOMPLETE')
             binding['results'] = {p:i['result']['sha256'] for p,i in items.items() if i['result']}
             binding['itemsSha256']=digest(json.dumps(items,sort_keys=True,separators=(',',':')).encode())
             if target.exists():

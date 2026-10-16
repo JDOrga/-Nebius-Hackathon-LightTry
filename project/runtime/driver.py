@@ -26,7 +26,7 @@ BUNDLE_FILES = ['scripts/run_experiment.py', 'scripts/weights.py', 'scripts/vali
     'manifests/weights_manifest.json', 'manifests/upstream.json', 'third_party/Cosmos-LICENSE',
     'project/inference/worker.py', 'project/inference/weights_reuse.py',
     'project/inference/jobs.py', 'project/inference/images.py', 'project/inference/__init__.py',
-    'project/inference/reuse.py', 'project/inference/batch.py',
+    'project/inference/reuse.py', 'project/inference/batch.py','project/resident_ipc.py','project/model_readiness.py',
     'project/inference/timing.py', 'project/inference/measured_entry.py',
     'project/lighting.py','project/light_console.py','project/experiments/__init__.py','project/experiments/controls.py',
     'project/runtime/layout.py','project/runtime/__init__.py','project/runtime/worker.py','project/runtime/entry.py',

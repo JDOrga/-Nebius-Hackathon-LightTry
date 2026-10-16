@@ -47,6 +47,10 @@ class ControlTests(unittest.TestCase):
     def test_default_off_and_explicit_parser(self):
         self.assertIsNone(load_control(None,ROOT));self.factory.assert_not_called()
         self.assertEqual(str(parser().parse_args(['--gpu-control-config',str(self.root/'control.json')]).gpu_control_config),str(self.root/'control.json'))
+    def test_unreviewed_bootstrap_factory_never_runs(self):
+        self.value['bootstrap']={'factory':'arbitrary_plugin:execute','binding':{}}
+        with self.assertRaisesRegex(ValueError,'AUDITED_SSH_BOOTSTRAP_FACTORY_REQUIRED'):self.load()
+        self.sessions.start.assert_not_called()
 
     def test_bind_without_observe_start_or_heartbeat(self):
         control=self.load()

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "publicOrigin": "http://127.0.0.1:8785",
+  "accountsFile": "ACCOUNTS_FILE",
+  "dataRoot": "PRIVATE_DATA_ROOT",
+  "statusSettingsFile": "STATUS_SETTINGS_FILE",
+  "gpuControlConfig": null,
+  "modelGrantFile": null,
+  "startPolicyFile": "PRIVATE_PER_CLICK_POLICY_FILE"
+}

@@ -11,8 +11,9 @@ class Timeline:
         self.path, self.phase, self.clock = path, phase, clock
         self.origin = clock()
         self.process = uuid.uuid4().hex
-        self.emit('process_start' if process_entry else 'session_start', pid=os.getpid(),
-                  freshPythonChild=process_entry, filesystemCacheTemperature='unknown')
+        resident=os.environ.get('LIGHTTRY_MODEL_RESIDENT')=='1'
+        self.emit('resident_phase_start' if resident and process_entry else 'process_start' if process_entry else 'session_start', pid=os.getpid(),
+                  freshPythonChild=process_entry and not resident, filesystemCacheTemperature='unknown')
 
     def emit(self, event, **fields):
         now = self.clock()

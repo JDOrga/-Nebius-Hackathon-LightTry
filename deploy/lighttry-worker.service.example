@@ -1,5 +1,5 @@
 [Unit]
-Description=LightTry authenticated GPU worker (no automatic model warmup)
+Description=LightTry authenticated GPU worker (explicit resident config preloads models)
 After=network.target
 ConditionPathExists=/etc/lighttry/worker.json
 

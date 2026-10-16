@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "enabled": false,
+  "executionMode": "resident",
   "python": "/home/jovyan/MODEL_VENV/bin/python",
   "repo": "/home/jovyan/COSMOS_REPO",
   "checkpointDir": "/home/jovyan/CHECKPOINT_DIR",

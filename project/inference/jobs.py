@@ -70,6 +70,7 @@ class TaskStore:
 
     def capabilities(self):
         return {'enabled': self.executor is not None, 'developmentTestMode': False,
+                'requiresGPUReady':bool(self.executor and getattr(self.executor,'requires_gpu_ready',False)),
                 'message': '推理服务已配置；只允许一个照片批次串行执行。' if self.executor else '已载入，尚未连接推理服务',
                 'cancelRunning': False, 'maxBytes': MAX_BYTES, 'maxPresets': 3,
                 'resultDelivery': '整批结束并取回校验后发布；不支持首张流式展示'}
@@ -175,6 +176,10 @@ class TaskStore:
         if any(receipt.get(k) != value for k, value in expected.items()):
             raise ValueError('RESULT_IDENTITY_MISMATCH')
         exits = receipt.get('processExitCodes')
+        resident=receipt.get('executionMode')=='resident'
+        if resident:
+            from model_readiness import resident_receipt
+            if not resident_receipt(receipt,task['taskId'],task['nonce']):raise ValueError('RESIDENT_COMPLETION_UNPROVEN')
         if exits == [0, 0] and receipt.get('inverseReuse', {}).get('reused') is True:
             raise ValueError('REUSED_INVERSE_HAS_FICTIONAL_PROCESS_EXIT')
         if exits == [None, 0]:
@@ -188,7 +193,7 @@ class TaskStore:
             if (reuse.get('reused') is not True or reuse.get('source') != provenance['source'] or
                     reuse.get('key') != provenance['key'] or provenance['source']['taskId'] == task['taskId']):
                 raise ValueError('REUSED_INVERSE_PROVENANCE_MISMATCH')
-        elif exits != [0, 0]:
+        elif exits != [0, 0] and not resident:
             raise ValueError('RESULT_NOT_FROM_COMPLETED_EXECUTION')
         if receipt.get('file') != 'result.jpg':
             raise ValueError('RESULT_NOT_FROM_COMPLETED_EXECUTION')
@@ -209,7 +214,8 @@ class TaskStore:
         result = {'url': f"/api/tasks/{task['taskId']}/result", 'downloadUrl': f"/api/tasks/{task['taskId']}/download",
             'width': 1280, 'height': 704, 'taskId': task['taskId'], 'inputId': task['input']['id'],
             'presetId': task['preset']['id'], 'sha256': meta['sha256'], 'bytes': meta['bytes'],
-            'validation': 'current task identity, successful process exits, JPEG decode, size and SHA256; visual review pending'}
+            'validation': ('current task identity, resident phase completion and CUDA synchronization, JPEG decode, size and SHA256; visual review pending' if resident else
+                           'current task identity, successful process exits, JPEG decode, size and SHA256; visual review pending')}
         if 'inverseReuse' in receipt:
             result['inverseReuse'] = {'reused': receipt['inverseReuse']['reused'],
                 'sourceTaskId': receipt['inverseReuse']['source']['taskId'], 'key': receipt['inverseReuse']['key']}

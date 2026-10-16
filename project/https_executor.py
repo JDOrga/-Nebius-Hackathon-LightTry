@@ -6,7 +6,7 @@ from pathlib import Path
 import threading
 import time
 
-from model_contract import grant_file,check_request,pack_input,request_sha,validate_result_archive
+from model_contract import grant_file,check_request,pack_input,request_sha,validate_result_archive,job_authorization
 from inference.jobs import atomic,read,ID
 from inference.images import digest
 from model_readiness import ready as model_ready
@@ -15,6 +15,7 @@ from runtime.driver import extract_result,extract_stage_evidence
 
 class HTTPSCosmosExecutor:
     supports_lighting_parameters=True
+    requires_gpu_ready=True
     def __init__(self,control,grant_path,tasks_root):
         self.control,self.grant_path,self.tasks_root=control,grant_path,Path(tasks_root)
         self.stop=threading.Event();self.thread=None
@@ -35,11 +36,12 @@ class HTTPSCosmosExecutor:
     def authorize_job(self,owner,metadata,fingerprint):
         try:
             _,g=self.current()
+            if g.get('schemaVersion')==2:return owner==g['jobAuthorization']['owner']
             return {'owner':owner,'fingerprint':fingerprint} in g['allowedMetadata']
         except Exception:return False
 
     def check_ready(self):self.current()
-    def run_config(self):return {'weightVerification':'full','weightContentHashesChecked':True,'lightingAdapterVersion':'single-scheme-hdr-adapter-v1'}
+    def run_config(self):return {'weightVerification':'full','weightContentHashesChecked':True,'lightingAdapterVersion':'single-scheme-hdr-adapter-v1','modelExecutionMode':'resident-v1'}
 
     def prepare_request(self,folder,request):
         _,grant=self.current();check_request(request,grant)
@@ -61,7 +63,8 @@ class HTTPSCosmosExecutor:
             raise ValueError('HTTPS_WORKER_CURRENT_HOST_MISMATCH')
         if not model_ready(health,state,simulation=grant.get('simulation',False)):
             raise ValueError('RESIDENT_MODEL_NOT_READY')
-        raw=pack_input(folder,request);sha=hashlib.sha256(raw).hexdigest()
+        authorization=job_authorization(request,grant) if grant.get('schemaVersion')==2 else None
+        raw=pack_input(folder,request,authorization);sha=hashlib.sha256(raw).hexdigest()
         envelope={'jobId':request['taskId'],'sessionId':state['sessionId'],'resourceId':state['resourceId'],
                   'artifactSha256':sha,'requestSha256':request_sha(request)}
         binding=Path(folder)/'https-binding.json'

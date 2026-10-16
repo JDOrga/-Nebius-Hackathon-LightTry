@@ -1,0 +1,18 @@
+{
+  "factory": "gpu_bootstrap_ssh:build",
+  "binding": {
+    "sshExecutable": "SSH_EXECUTABLE",
+    "scpExecutable": "SCP_EXECUTABLE",
+    "keyscanExecutable": "SSH_KEYSCAN_EXECUTABLE",
+    "keyFile": "PRIVATE_CLIENT_KEY_FILE",
+    "bundleManifestFile": "PRIVATE_FROZEN_BUNDLE_MANIFEST",
+    "workerConfigFile": "PRIVATE_CURRENT_WORKER_CONFIG",
+    "modelGrantFile": "PRIVATE_CURRENT_MODEL_GRANT",
+    "workerTokenFile": "PRIVATE_CURRENT_WORKER_TOKEN",
+    "workerCertificateFile": "PRIVATE_CURRENT_WORKER_CERTIFICATE",
+    "workerKeyFile": "PRIVATE_CURRENT_WORKER_CERTIFICATE_KEY",
+    "tunnelPort": 19080,
+    "workerPort": 9443,
+    "expectedImage": "EXPECTED_DEVLAB_IMAGE"
+  }
+}

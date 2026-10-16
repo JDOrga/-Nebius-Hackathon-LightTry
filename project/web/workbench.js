@@ -114,6 +114,7 @@ async function render(){
   $('generation-summary').textContent=r?'结果已就绪，无需重新生成':`新方案待生成：${schemeCaption(current,schemes)} · v${current.version}（仅此方案）。`;
   const generationBlocked=busy||tasks.some(t=>t.input?.id===input.id&&t.lightingScheme?.planId===current.planId&&t.lightingScheme?.version===current.version&&transferFailure(t))||!inference.enabled||!file||!!r||!allowed(current.parameters,lighting.capabilities);
   $('generate').dataset.baseDisabled=String(generationBlocked);$('generate').disabled=draftDirty||generationBlocked;
+  $('generate').dataset.nonGpuDisabled=String(generationBlocked);
   const failed=tasks.find(t=>t.input?.id===input.id&&t.lightingScheme?.planId===current.planId&&t.lightingScheme?.version===current.version&&t.status==='failed'&&!t.executionUncertain);$('generate').textContent=draftDirty?'先应用参数':r?'结果已就绪':failed?'确认重试此方案':inference.developmentTestMode?'确认模拟生成':'确认生成';
   const transfer=tasks.find(t=>t.input?.id===input.id&&t.lightingScheme?.planId===current.planId&&t.lightingScheme?.version===current.version&&transferFailure(t));$('recover').hidden=!transfer;$('recover').dataset.task=transfer?.taskId||'';if(transfer){$('generation-summary').textContent='执行已结束，结果取回失败；恢复取回，不重新生成。';$('generate').textContent='取回失败，请使用恢复';}
   const t=activeTask();const stages={preflight:'准备生成',weights:'准备模型',inverse:'分析照片',forward:'生成效果',validating:'检查结果',transferring:'下载结果'};
@@ -122,6 +123,7 @@ async function render(){
   ['environment','offset','strength','rename','clone','reuse'].forEach(id=>$(id).disabled=busy||(['offset','strength'].includes(id)&&$(id).options.length<2));
   $('download').disabled=!r;$('download').title=r?'下载当前来源的实际字节':'请先生成此方案，再下载结果';$('generate').title=!inference.enabled?'生成服务暂不可用':r?'已有有效结果':!file?'需载入原始照片':'提交当前方案';
   $('download').textContent=r?.simulation?'下载模拟演示图':region?'下载区域 PNG':'下载结果 JPEG';$('region').disabled=!!r?.simulation||(!selectedSample()?.canvas&&!input.canvas);
+  $('generate').dataset.readyText=failed?'确认重试此方案':'确认生成';applyGpuGenerationGate();
   $('region').textContent=region?'原照片区域 · 返回完整画布':'完整画布 · 查看原照片区域';
   $('compare-plan').innerHTML=schemes.filter(s=>s.inputId===input.id&&key(s)!==key(current)&&resultFor(s)&&($('show-history').checked||!schemes.some(n=>n.planId===s.planId&&n.version>s.version))).map(s=>`<option value="${key(s)}">${esc(schemeCaption(s,schemes))} · v${s.version} · ${esc(effectLabel(s.parameters))}</option>`).join('');
   compareKey=comparisonCursor([...$('compare-plan').options].map(o=>o.value),compareKey);
@@ -168,7 +170,7 @@ document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.datase
 $('compare-plan').onchange=()=>{compareKey=$('compare-plan').value;zoom=1;pan={x:0,y:0};render();};
 $('file').onchange=async()=>{const f=$('file').files[0];if(!f)return;if(!['image/jpeg','image/png','image/webp'].includes(f.type)||f.size>20*1024*1024){error('请选择不超过20MB的 JPG、PNG、WebP。');return}try{const url=URL.createObjectURL(f),image=new Image();image.src=url;await image.decode();if(Math.min(image.naturalWidth,image.naturalHeight)<32||Math.max(image.naturalWidth,image.naturalHeight)>16384||image.naturalWidth*image.naturalHeight>40000000)throw Error('照片尺寸不在允许范围。');const unfinished=storageGet(submissionKey);if(unfinished){const bytes=await f.arrayBuffer(),sha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');if(sha!==unfinished.originalSha)throw Error('上次提交状态待恢复；请重新载入同一文件，避免重复费用。');file=f;input={id:unfinished.meta.inputId,name:f.name,width:image.naturalWidth,height:image.naturalHeight,url,originalUrl:url};current=unfinished.meta.lightingScheme;requestId=unfinished.meta.requestId;persist();render();error('原请求身份已恢复；再次提交将沿用同一身份，不自动执行。');return;}const sourceBytes=await f.arrayBuffer(),originalSha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',sourceBytes))).map(x=>x.toString(16).padStart(2,'0')).join('');if(pendingPhotoAssociation){if(pendingPhotoAssociation.originalSha&&originalSha!==pendingPhotoAssociation.originalSha)throw Error('所选文件不是此方案的原照片，请重新选择。');file=f;input={id:pendingPhotoAssociation.inputId,name:f.name,width:image.naturalWidth,height:image.naturalHeight,originalSha,url,originalUrl:url,needsFile:false};pendingPhotoAssociation=null;persist();render();error(null);return;}if(input.needsFile&&originalSha===input.originalSha){file=f;input={...input,needsFile:false,url:input.canvas?input.url:url,originalUrl:url};persist();render();error(null);return;}file=f;mode='result';zoom=1;pan={x:0,y:0};input={id:uid(),originalSha,name:f.name,width:image.naturalWidth,height:image.naturalHeight,url,originalUrl:url};put({...variant(current,f.name+' · '+current.name),inputId:input.id});error(null)}catch(e){error(e.message)}};
 async function poll(taskId){for(;;){const t=await api('/api/tasks/'+taskId);tasks=tasks.filter(x=>x.taskId!==taskId).concat(t);if(t.input.id===input?.id&&['queued','running','succeeded'].includes(t.status))input={...input,...t.input};persist();render();if(!['queued','running'].includes(t.status))return;await new Promise(r=>setTimeout(r,2500));}}
-async function submitGeneration(){if(pending||activeTask()||!file||resultFor(current))return;pending=true;requestId=requestId||uid();render();try{const submittedFile=file,snapshot=schemeWire(structuredClone(current)),meta={inputId:input.id,requestId,name:input.name,lightingScheme:snapshot,...(schemeOrigins[key(snapshot)]?{languageProposalId:schemeOrigins[key(snapshot)]}: {})};const bytes=await submittedFile.arrayBuffer(),originalSha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');rememberSubmission({meta,originalSha});const encoded=btoa(unescape(encodeURIComponent(JSON.stringify(meta))));const task=await api('/api/tasks',{method:'POST',headers:{'Content-Type':submittedFile.type,'X-LightTry-Token':inference.csrfToken,'X-LightTry-Request':encoded},body:submittedFile});tasks.push(task);rememberSubmission(null);requestId=null;pending=false;persist();await poll(task.taskId)}catch(e){pending=false;error(e.message+'；请求身份保留，不自动重试。');render();}};
+async function submitGeneration(){if(pending||activeTask()||!file||resultFor(current))return;if(gpuGenerationBlocked()){error('模型尚未就绪，请等待服务器准备完成。');return;}pending=true;requestId=requestId||uid();render();try{const submittedFile=file,snapshot=schemeWire(structuredClone(current)),meta={inputId:input.id,requestId,name:input.name,lightingScheme:snapshot,...(schemeOrigins[key(snapshot)]?{languageProposalId:schemeOrigins[key(snapshot)]}: {})};const bytes=await submittedFile.arrayBuffer(),originalSha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');rememberSubmission({meta,originalSha});const encoded=btoa(unescape(encodeURIComponent(JSON.stringify(meta))));const task=await api('/api/tasks',{method:'POST',headers:{'Content-Type':submittedFile.type,'X-LightTry-Token':inference.csrfToken,'X-LightTry-Request':encoded},body:submittedFile});tasks.push(task);rememberSubmission(null);requestId=null;pending=false;persist();await poll(task.taskId)}catch(e){pending=false;error(e.message+'；请求身份保留，不自动重试。');render();}};
 $('generate').onclick=()=>{if(inference.developmentTestMode){$('generate-dialog').querySelector('h2').textContent='确认离线模拟';$('generate-dialog').querySelectorAll('p')[1].textContent='仅生成带水印的演示图，不调用真实模型，不收费。';$('confirm-generate').textContent='提交模拟生成';}$('confirm-summary').textContent=$('generation-summary').textContent;$('generate-dialog').dataset.ref=referenceKey(current,input.id);$('generate-dialog').showModal();};
 $('cancel-generate').onclick=()=>$('generate-dialog').close();
 $('confirm-generate').onclick=()=>{$('generate-dialog').close();if($('generate-dialog').dataset.ref!==referenceKey(current,input.id)){error('编辑参照已改变，请重新确认。');return;}submitGeneration();};
@@ -195,7 +197,7 @@ $('import-library').onclick=()=>$('import-library-file').click();
 $('import-library-file').onchange=async()=>{try{const f=$('import-library-file').files[0];if(!f)return;if(f.size>1024*1024)throw Error('方案 JSON 超过1MiB。');const value=readArchive(JSON.parse(await f.text()),catalog.presets.map(p=>p.id));const importedVisible=visibleFamilies(value.schemes);const merged=mergeLibraries(schemes,importedVisible);schemes=merged;$('all-photos').checked=true;const oldStubs=storageGet(photoStubsKey)||[];localStorage.setItem(accountNamespace+photoStubsKey,JSON.stringify([...oldStubs.filter(p=>!value.photos.some(n=>n.id===p.id)),...value.photos]));for(const id of value.taskIds){try{if(!tasks.some(t=>t.taskId===id))tasks.push(await api('/api/tasks/'+id));}catch{}}if(importedVisible.length){const selected=importedVisible.at(-1),sample=catalog.samples.find(s=>s.input.sha256.slice(0,32)===selected.inputId),photo=serverPhotos.find(p=>p.id===selected.inputId),stub=value.photos.find(p=>p.id===selected.inputId);if(sample)await chooseSample(sample.id);else if(photo)await chooseStoredPhoto(photo.id);else if(stub){input=stub;file=null;}if(input.id===selected.inputId)current=selected;}persist();render();$('storage-note').textContent='已导入浏览器草稿。照片/HDR 不在 JSON 内；请重新载入同一原文件或先导入 HDR，再点保存到服务。';}catch(e){error(e.message);}finally{$('import-library-file').value='';}};
 $('save-server').onclick=async()=>{const button=$('save-server');if(button.disabled||!serverWorkspace)return;if(!confirm('保存全部方案到服务；若当前为用户照片，会上传原照片到私有数据目录。不会生成或收费。继续？'))return;button.disabled=true;try{if(file&&!input.sampleId){const photo=await api('/api/photos/'+input.id,{method:'POST',headers:{'Content-Type':file.type,'X-LightTry-Token':inference.csrfToken,'X-LightTry-Photo':btoa(unescape(encodeURIComponent(JSON.stringify({name:input.name}))))},body:file});serverPhotos=serverPhotos.filter(p=>p.id!==photo.id).concat(photo);}serverWorkspace=await api('/api/workspace',{method:'POST',headers:{'Content-Type':'application/json','X-LightTry-Token':inference.csrfToken},body:JSON.stringify({schemaVersion:1,schemes:archive(schemes).schemes})});serverPhotos=serverWorkspace.photos;persist();$('storage-note').textContent='已保存到服务私有目录；换浏览器登录同一服务可找回方案与已上传照片。';}catch(e){error(e.message+'；可能已保存照片，方案未全部保存，请核对后重试。');}finally{button.disabled=false;}};
 $('export-server').onclick=()=>{location.href='/api/workspace/export';};
-async function init(){try{try{const me=await api('/api/me');accountNamespace='lighttry.user.'+me.username+'.';$('logout').hidden=false;}catch(e){if(e.status!==404)throw e;}[catalog,lighting,inference]=await Promise.all([api('/api/catalog'),api('/api/lighting'),api('/api/inference')]);if(lighting.language.developmentTestMode)document.querySelector('.boundary').textContent+=' · 演示模式（不调用真实模型）';await lightConsole.load();try{serverWorkspace=await api('/api/workspace');serverPhotos=serverWorkspace.photos||[];$('save-server').hidden=false;$('export-server').hidden=false;}catch(e){if(e.status!==404)throw e;}deletedFamilies=(storageGet(deletedKey)||[]);if(!Array.isArray(deletedFamilies))deletedFamilies=[];deletedFamilies=deletedFamilies.filter(d=>d&&/^[a-f0-9]{32}$/.test(d.planId)&&Array.isArray(d.versions)).slice(-200).map(d=>({...d,versions:validateLibrary(d.versions,catalog.presets.map(p=>p.id)).filter(s=>s.planId===d.planId)}));schemeOrigins=storageGet(originsKey)||{};schemes=visibleFamilies(validateLibrary(storageGet(libraryKey),catalog.presets.map(p=>p.id)));if(serverWorkspace)schemes=mergeLibraries(schemes,visibleFamilies(validateLibrary(serverWorkspace.schemes,catalog.presets.map(p=>p.id))));schemes=mergeAcceptedLibrary(schemes,visibleFamilies(validateLibrary(lighting.importedSchemes||[],catalog.presets.map(p=>p.id))));schemes=visibleFamilies(schemes);$('photo-select').innerHTML=catalog.samples.map(s=>`<option value="${s.id}">${esc(photoTitle(s,null))}${s.unstable?' · 材质不稳定':''}</option>`).join('');$('environments').innerHTML=catalog.presets.map(p=>`<button type="button" data-environment="${p.id}" aria-pressed="false">${esc(p.name)}</button>`).join('');document.querySelectorAll('[data-environment]').forEach(b=>{b.onclick=()=>selectEnvironment(b.dataset.environment);b.onkeydown=e=>{const buttons=[...document.querySelectorAll('[data-environment]')];let i=buttons.indexOf(b);if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();i=e.key==='Home'?0:e.key==='End'?buttons.length-1:(i+(e.key==='ArrowLeft'?-1:1)+buttons.length)%buttons.length;buttons[i].focus();}};});$('environment').innerHTML=catalog.presets.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');for(const id of [...new Set([...(serverWorkspace?.taskIds||[]),...(storageGet(tasksKey)||[])])].slice(0,200)){if(/^[0-9a-f]{32}$/.test(id)){try{tasks.push(await api('/api/tasks/'+id))}catch{}}}const cursor=storageGet(cursorKey),unfinished=storageGet(submissionKey);if(unfinished?.meta?.requestId){try{const recovered=await api('/api/requests/'+unfinished.meta.requestId);if(!tasks.some(t=>t.taskId===recovered.taskId))tasks.push(recovered);rememberSubmission(null)}catch{error('上次提交未得到确认；请求身份保留，重新载入同一照片才可手动重试。')}}for(const photo of serverPhotos){$('photo-select').add(new Option(photo.name,'__saved_'+photo.id));}
+async function init(){try{try{const me=await api('/api/me');accountNamespace=me.localWorkspace===true?'':'lighttry.user.'+me.username+'.';$('logout').hidden=false;}catch(e){if(e.status!==404)throw e;}[catalog,lighting,inference]=await Promise.all([api('/api/catalog'),api('/api/lighting'),api('/api/inference')]);if(lighting.language.developmentTestMode)document.querySelector('.boundary').textContent+=' · 演示模式（不调用真实模型）';await lightConsole.load();try{serverWorkspace=await api('/api/workspace');serverPhotos=serverWorkspace.photos||[];$('save-server').hidden=false;$('export-server').hidden=false;}catch(e){if(e.status!==404)throw e;}deletedFamilies=(storageGet(deletedKey)||[]);if(!Array.isArray(deletedFamilies))deletedFamilies=[];deletedFamilies=deletedFamilies.filter(d=>d&&/^[a-f0-9]{32}$/.test(d.planId)&&Array.isArray(d.versions)).slice(-200).map(d=>({...d,versions:validateLibrary(d.versions,catalog.presets.map(p=>p.id)).filter(s=>s.planId===d.planId)}));schemeOrigins=storageGet(originsKey)||{};schemes=visibleFamilies(validateLibrary(storageGet(libraryKey),catalog.presets.map(p=>p.id)));if(serverWorkspace)schemes=mergeLibraries(schemes,visibleFamilies(validateLibrary(serverWorkspace.schemes,catalog.presets.map(p=>p.id))));schemes=mergeAcceptedLibrary(schemes,visibleFamilies(validateLibrary(lighting.importedSchemes||[],catalog.presets.map(p=>p.id))));schemes=visibleFamilies(schemes);$('photo-select').innerHTML=catalog.samples.map(s=>`<option value="${s.id}">${esc(photoTitle(s,null))}${s.unstable?' · 材质不稳定':''}</option>`).join('');$('environments').innerHTML=catalog.presets.map(p=>`<button type="button" data-environment="${p.id}" aria-pressed="false">${esc(p.name)}</button>`).join('');document.querySelectorAll('[data-environment]').forEach(b=>{b.onclick=()=>selectEnvironment(b.dataset.environment);b.onkeydown=e=>{const buttons=[...document.querySelectorAll('[data-environment]')];let i=buttons.indexOf(b);if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();i=e.key==='Home'?0:e.key==='End'?buttons.length-1:(i+(e.key==='ArrowLeft'?-1:1)+buttons.length)%buttons.length;buttons[i].focus();}};});$('environment').innerHTML=catalog.presets.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');for(const id of [...new Set([...(serverWorkspace?.taskIds||[]),...(storageGet(tasksKey)||[])])].slice(0,200)){if(/^[0-9a-f]{32}$/.test(id)){try{tasks.push(await api('/api/tasks/'+id))}catch{}}}const cursor=storageGet(cursorKey),unfinished=storageGet(submissionKey);if(unfinished?.meta?.requestId){try{const recovered=await api('/api/requests/'+unfinished.meta.requestId);if(!tasks.some(t=>t.taskId===recovered.taskId))tasks.push(recovered);rememberSubmission(null)}catch{error('上次提交未得到确认；请求身份保留，重新载入同一照片才可手动重试。')}}for(const photo of serverPhotos){$('photo-select').add(new Option(photo.name,'__saved_'+photo.id));}
 input={id:uid(),name:'待上传照片',width:1280,height:704,unbound:true};file=null;current=createScheme(catalog.presets[0].id,'未命名草稿',input.id);mode='result';compareKey=null;zoom=1;pan={x:0,y:0};await render();refreshGpuMonitor();
 // Keep saved libraries and unsettled request evidence, but never auto-select their photos.
 for(const task of tasks.filter(t=>['queued','running'].includes(t.status)||t.executionUncertain))poll(task.taskId).catch(e=>error('恢复任务失败：'+e.message));
@@ -244,9 +246,22 @@ $('logout').onclick=async()=>{try{await api('/auth/logout',{method:'POST',header
 try{const message=sessionStorage.getItem('lighttry.gpuEntryNotice');if(message){$('gpu-entry-notice').textContent=message;$('gpu-entry-notice').hidden=false;sessionStorage.removeItem('lighttry.gpuEntryNotice');}}catch{}
 
 // Read one local guard-snapshot stream; never asks the cloud provider to poll.
-let gpuMonitorInfo=null,gpuMonitorBusy=false,gpuStartBusy=false,gpuMonitorTimer=null;
+let gpuMonitorInfo=null,gpuMonitorBusy=false,gpuStartBusy=false,gpuMonitorTimer=null,gpuHostBusy=false,gpuStopBusy=false;
+function gpuGenerationBlocked(){return inference?.requiresGPUReady===true&&(!gpuMonitorInfo?.canGenerate||gpuMonitorInfo.state!=='READY'||gpuMonitorInfo.stale===true);}
+function gpuGenerationLabel(){return gpuMonitorInfo?.hostConfirmation?.canConfirm?'先确认服务器连接':gpuMonitorInfo?.state==='STARTING'?'服务器启动中':gpuMonitorInfo?.state==='LOADING'?'模型加载中':'请先启动 GPU';}
+function applyGpuGenerationGate(){
+ if(inference?.requiresGPUReady!==true)return;
+ const button=$('generate');if(!button||button.dataset.nonGpuDisabled===undefined)return;
+ const wait=gpuGenerationBlocked(),base=button.dataset.nonGpuDisabled==='true';
+ button.dataset.baseDisabled=String(base||wait);button.disabled=draftDirty||base||wait;
+ if(!base){button.textContent=draftDirty?'先应用参数':wait?gpuGenerationLabel():button.dataset.readyText||'确认生成';
+  if(!draftDirty)$('stage').textContent=wait?'等待服务器和模型准备完成后即可生成。':'生成可能需要几分钟，请耐心等待。';
+  button.title=wait?gpuMonitorInfo?.message||'请等待模型就绪':'提交当前方案';}
+}
 function paintGpuMonitor(info){
  gpuMonitorInfo=info;
+ const budget=info.budgetUsdIncludingTax;
+ $('gpu-monitor-budget').textContent=Number.isFinite(budget)&&budget>0?`本次预算 ${budget.toFixed(2)} 美元（含税）。自动停机不保证账单硬封顶。请求提交后可继续编辑方案。`:'启动后可能产生费用。请求会在后台处理，无需等待，你可以继续编辑方案。';
  const labels={STOPPED:'已停止',STARTING:'启动中',LOADING:'准备中',READY:'运行中',EXECUTING:'生成中',STOPPING:'关闭中',UNKNOWN:'状态未知'};
  let label=info.providerConnected?labels[info.state]||'状态未知':info.configured===false?'未连接':info.stale?'状态已过期':labels[info.state]||'状态未知';
  if(info.startStatus==='requested'&&!info.active)label='启动请求已提交';
@@ -257,7 +272,13 @@ function paintGpuMonitor(info){
  $('gpu-monitor-demo').hidden=!info.simulation;
  $('gpu-monitor-time').textContent=info.observedAt?'更新于 '+new Date(info.observedAt*1000).toLocaleTimeString('zh-CN',{hour12:false}):'';
  $('gpu-monitor-start').disabled=gpuStartBusy||!info.canStart||!inference?.csrfToken;
+ $('gpu-monitor-start').hidden=info.active===true;
+ $('gpu-monitor-enroll').hidden=!info.hostConfirmation?.canConfirm;
+ $('gpu-monitor-enroll').disabled=gpuHostBusy;
+ $('gpu-monitor-stop').hidden=!info.canStop;
+ $('gpu-monitor-stop').disabled=gpuStopBusy;
  $('gpu-monitor-start').title=info.canStart?'启动 GPU 可能产生费用':info.message||'当前不可启动';
+ applyGpuGenerationGate();
 }
 async function refreshGpuMonitor(){
  if(gpuMonitorBusy)return;
@@ -267,6 +288,44 @@ async function refreshGpuMonitor(){
  finally{gpuMonitorBusy=false;$('gpu-monitor-refresh').disabled=false;clearTimeout(gpuMonitorTimer);if(!document.hidden)gpuMonitorTimer=setTimeout(refreshGpuMonitor,15000);}
 }
 $('gpu-monitor-refresh').onclick=refreshGpuMonitor;
+let pendingGpuHost=null,pendingGpuStop=null;
+$('gpu-monitor-enroll').onclick=()=>{
+ const proposal=gpuMonitorInfo?.hostConfirmation;if(gpuHostBusy||!proposal?.canConfirm)return;
+ pendingGpuHost=JSON.parse(JSON.stringify(proposal));
+ $('gpu-host-vm').textContent=proposal.hostIdentity.vmId;
+ $('gpu-host-ip').textContent=proposal.hostIdentity.ip;
+ $('gpu-host-fingerprint').textContent=proposal.fingerprint;
+ $('gpu-host-confirm').disabled=false;$('gpu-host-dialog').showModal();
+};
+async function gpuControlAction(path,body){
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),5000);
+ try{
+  const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-LightTry-Token':inference.csrfToken},
+   body:JSON.stringify(body),signal:controller.signal});
+  if(!response.ok)throw Error('服务器未接受操作，请刷新状态后核查。');
+  return await response.json();
+ }finally{clearTimeout(timer);}
+}
+$('gpu-host-confirm').onclick=async()=>{
+ if(gpuHostBusy||!pendingGpuHost||!inference?.csrfToken)return;
+ gpuHostBusy=true;$('gpu-host-confirm').disabled=true;$('gpu-host-dialog').close();
+ try{
+  await gpuControlAction('/api/gpu/confirm-host',{sessionId:pendingGpuHost.sessionId,hostIdentity:pendingGpuHost.hostIdentity,fingerprint:pendingGpuHost.fingerprint});
+  $('gpu-entry-notice').textContent='已确认本次连接，将继续连接并加载模型。';
+ }catch(e){$('gpu-entry-notice').textContent=e.name==='AbortError'?'确认结果尚未收到，请先刷新状态，不要重复操作。':e.message;}
+ finally{pendingGpuHost=null;gpuHostBusy=false;$('gpu-entry-notice').hidden=false;await refreshGpuMonitor();}
+};
+$('gpu-monitor-stop').onclick=()=>{
+ if(gpuStopBusy||!gpuMonitorInfo?.canStop)return;
+ pendingGpuStop=gpuMonitorInfo.sessionId;$('gpu-stop-confirm').disabled=false;$('gpu-stop-dialog').showModal();
+};
+$('gpu-stop-confirm').onclick=async()=>{
+ if(gpuStopBusy||!pendingGpuStop||!inference?.csrfToken)return;
+ gpuStopBusy=true;$('gpu-stop-confirm').disabled=true;$('gpu-stop-dialog').close();
+ try{await gpuControlAction('/api/gpu/stop',{sessionId:pendingGpuStop});$('gpu-entry-notice').textContent='停止请求已提交，请等待服务器释放。';}
+ catch(e){$('gpu-entry-notice').textContent=e.name==='AbortError'?'停止结果尚未确认，请刷新状态后核查。':e.message;}
+ finally{pendingGpuStop=null;gpuStopBusy=false;$('gpu-entry-notice').hidden=false;await refreshGpuMonitor();}
+};
 $('gpu-monitor-start').onclick=()=>{if(gpuStartBusy||!gpuMonitorInfo?.canStart)return;$('gpu-monitor-warning').textContent='';$('gpu-monitor-confirm').disabled=false;$('gpu-monitor-dialog').showModal();};
 $('gpu-monitor-confirm').onclick=async()=>{
  if(gpuStartBusy||!gpuMonitorInfo?.canStart||!inference?.csrfToken)return;

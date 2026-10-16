@@ -9,6 +9,7 @@ scripts/**
 !cloud/
 cloud/**
 !cloud/cli_bridge.py
+!cloud/remote_probe.py
 !manifests/
 manifests/**
 !manifests/patch_manifest.json

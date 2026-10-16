@@ -36,6 +36,7 @@ class Sessions:
             db.executescript('''PRAGMA journal_mode=WAL;
                 CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,scope TEXT UNIQUE NOT NULL,resource TEXT NOT NULL,body TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS dispatches(job TEXT PRIMARY KEY,session TEXT NOT NULL,fingerprint TEXT NOT NULL,body TEXT NOT NULL,state TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS cpu_liveness(session TEXT PRIMARY KEY,at REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS events(sequence INTEGER PRIMARY KEY AUTOINCREMENT,session TEXT,event TEXT,at REAL);''')
 
     @contextmanager
@@ -47,13 +48,20 @@ class Sessions:
         finally:db.close()
 
     def get(self, identity):
-        with self.db() as db:row=db.execute('SELECT body FROM sessions WHERE id=?',(identity,)).fetchone()
+        with self.db() as db:
+            row=db.execute('SELECT body FROM sessions WHERE id=?',(identity,)).fetchone()
+            heartbeat=db.execute('SELECT at FROM cpu_liveness WHERE session=?',(identity,)).fetchone()
         if not row:raise JobError('SESSION_NOT_FOUND','会话不存在。',404)
-        return json.loads(row[0])
+        value=json.loads(row[0])
+        if heartbeat:value['cpuHeartbeatAt']=max(value['cpuHeartbeatAt'],heartbeat[0])
+        return value
 
     def latest(self):
         with self.db() as db:row=db.execute('SELECT body FROM sessions ORDER BY rowid DESC LIMIT 1').fetchone()
         value=json.loads(row[0]) if row else {'state':'STOPPED','label':LABELS['STOPPED'],'providerState':None,'verifiedStopped':False,'configured':True}
+        if row:
+            with self.db() as db:heartbeat=db.execute('SELECT at FROM cpu_liveness WHERE session=?',(value['sessionId'],)).fetchone()
+            if heartbeat:value['cpuHeartbeatAt']=max(value['cpuHeartbeatAt'],heartbeat[0])
         if self.protection_mode=='cpu-only' and (not row or value.get('verifiedStopped')):
             snapshot=self.fallback.snapshot()
             value.update(snapshot)
@@ -70,6 +78,24 @@ class Sessions:
             value['revision']=value.get('revision',0)+1
             db.execute('UPDATE sessions SET body=? WHERE id=?',(canonical(value),value['sessionId']))
             db.execute('INSERT INTO events(session,event,at) VALUES (?,?,?)',(value['sessionId'],event,self.clock()))
+
+    def change(self,identity,event,apply,*,record_noop=False):
+        """Short atomic transition. No network or caller-supplied code inside the DB lock."""
+        with self.lock,self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute('SELECT body FROM sessions WHERE id=?',(identity,)).fetchone()
+            if not row:raise JobError('SESSION_NOT_FOUND','会话不存在。',404)
+            value=json.loads(row[0])
+            heartbeat=db.execute('SELECT at FROM cpu_liveness WHERE session=?',(identity,)).fetchone()
+            if heartbeat:value['cpuHeartbeatAt']=max(value['cpuHeartbeatAt'],heartbeat[0])
+            if apply(value) is False:
+                if record_noop:db.execute('INSERT INTO events(session,event,at) VALUES (?,?,?)',(identity,event,self.clock()))
+                return value,False
+            if value['state'] not in STATES:raise ValueError('INVALID_GPU_STATE')
+            value['label']=LABELS[value['state']];value['revision']=value.get('revision',0)+1
+            db.execute('UPDATE sessions SET body=? WHERE id=?',(canonical(value),identity))
+            db.execute('INSERT INTO events(session,event,at) VALUES (?,?,?)',(identity,event,self.clock()))
+            return value,True
 
     def start(self, scope):
         now=self.clock()
@@ -91,7 +117,7 @@ class Sessions:
             value={'sessionId':sid,'scopeId':scope['scopeId'],'resourceId':scope['resourceId'],
                 'state':'STARTING','providerState':None,'simulation':scope['simulation'],
                 'protectionMode':self.protection_mode,
-                'createdAt':now,'startupDeadline':min(now+600,scope['expiresAt']),
+                'recoveryMode':getattr(self,'recovery_mode',False) is True,'createdAt':now,'startupDeadline':min(now+600,scope['expiresAt']),
                 'absoluteDeadline':min(now+2400,scope['expiresAt']),
                 'runningAt':None,'workDeadline':None,'stopDeadline':None,'verifyDeadline':None,
                 'idleSeconds':scope['idleSeconds'],'idleDeadline':None,'stopWaitDeadline':None,
@@ -105,6 +131,8 @@ class Sessions:
             preflight=self.provider.preflight(scope['resourceId'])
             if not self.proof(preflight,value) or preflight['state']!='STOPPED' or preflight.get('instances')!=[]:
                 raise ValueError('PREFLIGHT_NOT_STOPPED_EMPTY')
+            bootstrap=getattr(self,'bootstrap',None)
+            if bootstrap is not None:bootstrap.preflight(preflight)
             receipt=self.fallback.arm(sid,scope['resourceId'],value['absoluteDeadline'],30)
             protection_ok=(receipt.get('independentHost') is True if self.protection_mode=='off-host' else
                 receipt.get('independentHost') is False and receipt.get('protectionMode')=='cpu-only' and
@@ -114,11 +142,19 @@ class Sessions:
                     receipt.get('deadline')!=value['absoluteDeadline'] or receipt.get('leaseSeconds')!=30 or
                     (scope['simulation'] is False and receipt.get('simulation') is not False)):
                 raise ValueError('SUPERVISOR_NOT_READY')
-            value['startSent']=True;self.save(value,'START_ATTEMPT_LATCHED')
+            def latch(current):
+                if current['startSent']:return False
+                if current['stopSent'] or current['state']!='STARTING' or self.clock()>=current['startupDeadline']:
+                    raise ValueError('CURRENT_START_WINDOW_CLOSED')
+                current['startSent']=True
+            value,send=self.change(sid,'START_ATTEMPT_LATCHED',latch)
+            if not send:return value
             self.provider.start(scope['resourceId'],sid,value['absoluteDeadline'])
         except Exception:
-            value=self.get(sid)
-            value['state']='UNKNOWN';value['error']='START_OR_PREFLIGHT_UNCERTAIN';self.save(value,'START_UNCERTAIN')
+            def uncertain(current):
+                if current['stopSent'] or current['verifiedStopped']:return False
+                current['state']='UNKNOWN';current['error']='START_OR_PREFLIGHT_UNCERTAIN'
+            self.change(sid,'START_UNCERTAIN',uncertain,record_noop=True)
         return self.get(sid)
 
     @staticmethod
@@ -130,30 +166,38 @@ class Sessions:
     def confirm_host(self, identity, host_identity):
         with self.lock:
             value=self.get(identity)
-            if value['state']!='LOADING' or not value['hostIdentity'] or host_identity!=value['hostIdentity']:
+            if (value['state']!='LOADING' or not value['hostIdentity'] or host_identity!=value['hostIdentity'] or
+                self.clock()>=value['workDeadline'] or not 0<=self.clock()-value['lastObservedAt']<=30 or
+                not value.get('recoveryMode') and value['idleDeadline'] is not None and self.clock()>=value['idleDeadline']):
                 raise JobError('CURRENT_HOST_CONFIRMATION_REQUIRED','当前 RUNNING 主机身份不匹配。',409)
             value['hostConfirmed']=True;self.save(value,'CURRENT_HOST_CONFIRMED');return value
 
     def heartbeat(self, identity):
         with self.lock:
             value=self.get(identity);now=self.clock()
-            if now<value['lastObservedAt']:raise JobError('CLOCK_REGRESSED','时钟回退；不得续租。',409)
-            value['cpuHeartbeatAt']=now;self.save(value,'CPU_HEARTBEAT')
+            if now<max(value['lastObservedAt'],value['cpuHeartbeatAt']):raise JobError('CLOCK_REGRESSED','时钟回退；不得续租。',409)
+            # Heartbeats must not invalidate a slow provider observation's revision.
+            with self.db() as db:
+                db.execute('INSERT INTO cpu_liveness VALUES (?,?) ON CONFLICT(session) DO UPDATE SET at=max(at,excluded.at)',(identity,now))
+                db.execute('INSERT INTO events(session,event,at) VALUES (?,?,?)',(identity,'CPU_HEARTBEAT',now))
             # Remote deadman never receives a later absolute deadline.
             self.fallback.heartbeat(identity,value['resourceId'],now)
 
     def request_stop(self, identity, reason='OPERATOR_STOP'):
         with self.lock:
-            value=self.get(identity)
-            if value['state']=='STOPPED' or value['stopSent']:return value
-            now=self.clock()
-            value['state']='STOPPING';value['error']=reason
-            upper=value['verifyDeadline'] or min(value['startupDeadline']+120,value['absoluteDeadline'])
-            value['stopWaitDeadline']=min(now+120,upper,value['absoluteDeadline'])
-            value['stopSent']=True;self.save(value,'STOP_ATTEMPT_LATCHED')
+            def latch(value):
+                if value['state']=='STOPPED' or value['stopSent']:return False
+                now=self.clock();value['state']='STOPPING';value['error']=reason
+                upper=value['verifyDeadline'] or min(value['startupDeadline']+120,value['absoluteDeadline'])
+                value['stopWaitDeadline']=min(now+120,upper,value['absoluteDeadline']);value['stopSent']=True
+            value,send=self.change(identity,'STOP_ATTEMPT_LATCHED',latch)
+            if not send:return value
             try:self.provider.stop(value['resourceId'],identity)
             except Exception:
-                value['error']='STOP_RESPONSE_UNCERTAIN';self.save(value,'STOP_UNCERTAIN')
+                def uncertain(current):
+                    if current['verifiedStopped']:return False
+                    current['error']='STOP_RESPONSE_UNCERTAIN'
+                self.change(identity,'STOP_UNCERTAIN',uncertain,record_noop=True)
             return self.get(identity)
 
     def poll(self, identity):
@@ -161,14 +205,14 @@ class Sessions:
         with self.lock:
             value=self.get(identity);now=self.clock()
             if value['verifiedStopped']:return value
-            if now<value['lastObservedAt']:
+            if now<max(value['lastObservedAt'],value['cpuHeartbeatAt']):
                 value['state']='UNKNOWN';value['error']='CLOCK_REGRESSED';self.save(value,'CLOCK_REGRESSED');return value
             value['lastObservedAt']=now
             stopping=value['stopSent'];ready=False
             due=(now>=value['absoluteDeadline'] or now-value['cpuHeartbeatAt']>=value['cpuLeaseSeconds'] or
                  (value['runningAt'] is None and now>=value['startupDeadline']) or
                  (value['workDeadline'] is not None and now>=value['workDeadline']) or
-                 (value['idleDeadline'] is not None and value['state'] in ('READY','LOADING') and now>=value['idleDeadline']))
+                 (not value.get('recoveryMode') and value['idleDeadline'] is not None and value['state'] in ('READY','LOADING') and now>=value['idleDeadline']))
             if due and not stopping:
                 self.save(value,'DEADLINE_DUE');return self.request_stop(identity,'DEADLINE_OR_CPU_LEASE')
             stop_bound_exceeded=stopping and now>=value['stopWaitDeadline']
@@ -177,7 +221,19 @@ class Sessions:
                 # Off-host stop-only fallback remains armed; do not extend work/verification.
             try:
                 observed=self.provider.observe(value['resourceId'])
+                received=self.clock()
+                if received<now:raise ValueError('CLOCK_REGRESSED_DURING_OBSERVATION')
+                now=received;value['lastObservedAt']=received
+                value['cpuHeartbeatAt']=max(value['cpuHeartbeatAt'],self.get(identity)['cpuHeartbeatAt'])
+                if not stopping and (now>=value['absoluteDeadline'] or now-value['cpuHeartbeatAt']>=value['cpuLeaseSeconds'] or
+                    value['runningAt'] is None and now>=value['startupDeadline'] or
+                    value['workDeadline'] is not None and now>=value['workDeadline'] or
+                    not value.get('recoveryMode') and value['idleDeadline'] is not None and value['state'] in ('READY','LOADING') and now>=value['idleDeadline']):
+                    self.save(value,'DEADLINE_DURING_OBSERVATION');return self.request_stop(identity,'DEADLINE_DURING_OBSERVATION')
+                stop_bound_exceeded=bool(stopping and now>=value['stopWaitDeadline'])
+                if stop_bound_exceeded:value['error']='STOPPING_BOUND_EXCEEDED'
                 if not self.proof(observed,value):raise ValueError('PROVIDER_IDENTITY_MISMATCH')
+                if value.get('error')=='OBSERVATION_UNCERTAIN':value['error']=None
                 value['providerState']=observed['state']
                 if observed['state']=='STOPPED':
                     if observed.get('instances')!=[]:raise ValueError('STOPPED_NOT_EMPTY')
@@ -188,6 +244,12 @@ class Sessions:
                     value['state']='UNKNOWN' if stop_bound_exceeded else 'STOPPING'
                 elif observed['state']=='RUNNING':
                     if not value['startSent']:raise ValueError('UNOWNED_RUNNING_INSTANCE')
+                    if value['runningAt'] is not None and (observed.get('hostIdentity')!=value['hostIdentity'] or
+                            value.get('image') is not None and observed.get('image')!=value['image']):
+                        if value.get('recoveryMode'):
+                            value.update(state='UNKNOWN',hostConfirmed=False,error='CURRENT_HOST_CHANGED',observedUnconfirmedHostIdentity=observed.get('hostIdentity'))
+                            self.save(value,'RECOVERY_HOLD_IDENTITY_CHANGED_NO_DISPATCH');return value
+                        self.save(value,'CURRENT_HOST_CHANGED');return self.request_stop(identity,'CURRENT_HOST_CHANGED')
                     if value['runningAt'] is None:
                         value['runningAt']=now
                         value['workDeadline']=min(now+1080,value['absoluteDeadline'])
@@ -195,9 +257,11 @@ class Sessions:
                         value['verifyDeadline']=min(now+1620,value['absoluteDeadline'])
                         value['idleDeadline']=min(now+value['idleSeconds'],value['workDeadline'])
                         value['hostIdentity']=observed.get('hostIdentity')
+                        value['image']=observed.get('image')
                         value['state']='LOADING'
                     if not value['hostConfirmed']:value['state']='LOADING'
-                    if value['hostConfirmed']:
+                    bootstrap=getattr(self,'bootstrap',None)
+                    if value['hostConfirmed'] and (bootstrap is None or bootstrap.connected(identity)):
                         health=self.worker.health()
                         if (health.get('sessionId')!=identity or health.get('resourceId')!=value['resourceId']):
                             raise ValueError('WORKER_SESSION_MISMATCH')
@@ -205,6 +269,7 @@ class Sessions:
                             'hostIdentity':value['hostIdentity']},simulation=value['simulation'])
                         if ready and value['state']!='EXECUTING':value['state']='READY'
                         elif not ready:value['state']='LOADING'
+                    elif value['hostConfirmed']:value['state']='LOADING'
                 else:value['state']='STARTING'
                 if not value['stopSent']:
                     with self.db() as db:pending=db.execute("SELECT body FROM dispatches WHERE session=? AND state IN ('active','uncertain','attempted') ORDER BY rowid LIMIT 1",(identity,)).fetchone()
@@ -216,7 +281,16 @@ class Sessions:
                             value['state']='READY' if ready else 'LOADING';value['idleDeadline']=min(now+value['idleSeconds'],value['workDeadline'])
                         elif remote['status'] in ('queued','dispatching'):value['state']='EXECUTING'
                         else:raise ValueError('TASK_UNKNOWN')
-            except Exception:
+            except Exception as failure:
+                allowed={'NEBIUS_AUTH_REQUIRED','NEBIUS_COMMAND_FAILED','NEBIUS_RESPONSE_UNCERTAIN',
+                    'NEBIUS_RESPONSE_TOO_LARGE','NEBIUS_INSTANCES_PROOF_REQUIRED','NEBIUS_PROJECT_NOT_PROVEN_EMPTY',
+                    'NEBIUS_STOPPED_CHANGED_DURING_PROOF','NEBIUS_VM_CHANGED_DURING_OBSERVATION',
+                    'NEBIUS_CURRENT_VM_NOT_UNIQUE','NEBIUS_CURRENT_VM_ID_INVALID','NEBIUS_AUTHORIZED_PUBLIC_KEY_MISMATCH',
+                    'PROVIDER_IDENTITY_MISMATCH','CLOCK_REGRESSED_DURING_OBSERVATION','API_IP_MISMATCH',
+                    'VM_NOT_RUNNING','CURRENT_VM_NOT_UNIQUE','WORKER_RESPONSE_UNCERTAIN'}
+                code=str(failure)
+                if code not in allowed:code='UNCLASSIFIED_OBSERVATION_FAILURE'
+                value['lastObservationFailure']={'code':code,'at':self.clock()}
                 value['state']='UNKNOWN';value['error']='OBSERVATION_UNCERTAIN'
             self.save(value,'GUARD_OBSERVATION');return value
 

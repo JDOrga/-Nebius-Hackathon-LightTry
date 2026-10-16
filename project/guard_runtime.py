@@ -21,13 +21,15 @@ ROOT=Path(__file__).resolve().parent.parent
 
 def cpu_guard_step(control):
     """The only CPU-only provider observation loop, separate from Web."""
+    control.refresh_scope()
     guard=control.sessions
     state=guard.latest()
     if state.get('sessionId'):
         state=guard.get(state['sessionId'])  # Durable state, not merged idle snapshot.
     observation=None
     if state.get('sessionId') and not state.get('verifiedStopped'):
-        guard.poll(state['sessionId'])
+        current=guard.poll(state['sessionId'])
+        if getattr(control,'bootstrap',None):control.bootstrap.step(current)
     else:
         try:
             observation=guard.provider.preflight(control.scope['resourceId'])
@@ -46,6 +48,8 @@ def main(argv=None):
     p.add_argument('--session-id');p.add_argument('--resource-id')
     p.add_argument('--worker-token-file',default=os.environ.get('LIGHTTRY_WORKER_TOKEN_FILE'))
     p.add_argument('--worker-config',type=Path,help='Explicit private Cosmos runtime configuration; absent means no model executor.')
+    p.add_argument('--worker-tls-cert',type=Path);p.add_argument('--worker-tls-key',type=Path)
+    p.add_argument('--worker-tls-bind',default='127.0.0.1');p.add_argument('--worker-tls-port',type=int,default=9443)
     p.add_argument('--guard-config',type=Path)
     p.add_argument('--gpu-control-config',type=Path,default=os.environ.get('LIGHTTRY_GPU_CONTROL_CONFIG'))
     args=p.parse_args(argv)
@@ -58,18 +62,30 @@ def main(argv=None):
             raise ValueError('EXPLICIT_WORKER_IDENTITY_AND_RUNTIME_TOKEN_REQUIRED')
         token=runtime_file(args.worker_token_file,ROOT,4096).decode().strip()
         ledger=WorkerLedger(args.data_root/args.session_id,token,args.session_id,args.resource_id)
-        executor=None
+        executor=None;tls_server=None
         try:
+            if args.worker_tls_cert or args.worker_tls_key:
+                if not args.worker_tls_cert or not args.worker_tls_key:raise ValueError('TLS_CERTIFICATE_AND_KEY_REQUIRED')
+                from worker_tls import create_server
+                tls_server=create_server(ledger,args.worker_tls_cert,args.worker_tls_key,ROOT,
+                    bind=args.worker_tls_bind,port=args.worker_tls_port)
             if args.worker_config:
                 from gpu_model import CosmosWorkerExecutor
-                executor=CosmosWorkerExecutor(ledger,args.worker_config)
+                private=json.loads(runtime_file(args.worker_config,ROOT).decode('utf-8'))
+                if private.get('executionMode')=='resident':
+                    from resident_executor import ResidentCosmosExecutor
+                    executor=ResidentCosmosExecutor(ledger,args.worker_config)
+                else:executor=CosmosWorkerExecutor(ledger,args.worker_config)
                 ledger.simulation=False;ledger.executor=executor;executor.start()
-            from waitress import serve
             def shutdown(*_):raise KeyboardInterrupt()
             signal.signal(signal.SIGTERM,shutdown)
-            serve(WorkerApplication(ledger),listen='127.0.0.1:9080',threads=2,max_request_body_size=32*1024*1024,
-                  max_request_header_size=8192,channel_timeout=10,channel_request_lookahead=0,expose_tracebacks=False)
+            if tls_server:tls_server.serve_forever(poll_interval=.2)
+            else:
+                from waitress import serve
+                serve(WorkerApplication(ledger),listen='127.0.0.1:9080',threads=2,max_request_body_size=32*1024*1024,
+                      max_request_header_size=8192,channel_timeout=10,channel_request_lookahead=0,expose_tracebacks=False)
         finally:
+            if tls_server:tls_server.server_close()
             if executor:executor.close()
             ledger.close()
         return
@@ -98,7 +114,9 @@ def main(argv=None):
                     current=guard.get(current['sessionId'])
                     if not current.get('verifiedStopped'):
                         guard.request_stop(current['sessionId'],'CPU_GUARD_SHUTDOWN')
-            finally:guard.fallback.close()
+            finally:
+                if control.bootstrap:control.bootstrap.close()
+                guard.fallback.close()
         return
     if not args.guard_config:raise ValueError('RUNTIME_GUARD_BINDING_REQUIRED')
     value=json.loads(runtime_file(args.guard_config,ROOT).decode())

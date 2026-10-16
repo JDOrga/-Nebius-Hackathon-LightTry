@@ -45,13 +45,17 @@ class NebiusProvider:
         self.clock=time.time
         self.runner=subprocess.run
 
-    def _call(self,args,*,json_result=True,deadline=None):
-        timeout=6.0 if deadline is None else min(6.0,deadline-self.clock())
-        if timeout<=0:raise RuntimeError('NEBIUS_DEADLINE_EXPIRED')
+    def _command(self,args,json_result):
         cmd=[str(self.cli),*args,'--config',self.settings['configFile'],'--profile',self.settings['profile'],
              '--no-browser','--no-check-update','--no-progress','--color=false','--auth-timeout=2s',
              '--timeout=5s','--per-retry-timeout=5s','--retries=1']
         if json_result:cmd+=['--format','json']
+        return cmd
+
+    def _call(self,args,*,json_result=True,deadline=None):
+        timeout=6.0 if deadline is None else min(6.0,deadline-self.clock())
+        if timeout<=0:raise RuntimeError('NEBIUS_DEADLINE_EXPIRED')
+        cmd=self._command(args,json_result)
         try:
             p=self.runner(cmd,stdin=subprocess.DEVNULL,capture_output=True,text=True,
                           timeout=timeout,shell=False,encoding='utf-8')
@@ -68,11 +72,31 @@ class NebiusProvider:
         project=self._call(['iam','v2','project','get','--id',s['project_id']],deadline=deadline)
         validate_project_owner(project,s)
         raw=self._call(['ai','devlab','get','--id',resource],deadline=deadline)
-        if not isinstance(raw.get('status',{}).get('instances'),list):
+        status=raw.get('status',{})
+        if 'instances' in status and not isinstance(status['instances'],list):
             raise ValueError('NEBIUS_INSTANCES_PROOF_REQUIRED')
         summary=devlab_summary(raw,s)
         if self.public_key not in [canonical_key(k) for k in raw.get('spec',{}).get('ssh_authorized_keys',[])]:
             raise ValueError('NEBIUS_AUTHORIZED_PUBLIC_KEY_MISMATCH')
+        status=raw.get('status',{})
+        if not isinstance(status.get('instances'),list):
+            # ProtoJSON omits empty repeated fields. Omission alone is NOT proof:
+            # require a complete independent project-wide VM list, then recheck
+            # the same STOPPED Devlab/spec. Null/malformed values stay rejected.
+            if 'instances' in status or summary['state']!='STOPPED':
+                raise ValueError('NEBIUS_INSTANCES_PROOF_REQUIRED')
+            listing=self._call(['compute','instance','list','--parent-id',s['project_id'],'--all'],deadline=deadline)
+            if type(listing) is not dict or listing not in ({},{'items':[]}):
+                raise ValueError('NEBIUS_PROJECT_NOT_PROVEN_EMPTY')
+            fresh=self._call(['ai','devlab','get','--id',resource],deadline=deadline)
+            current=devlab_summary(fresh,s)
+            fresh_status=fresh.get('status',{})
+            if (current['state']!='STOPPED' or fresh.get('spec')!=raw.get('spec') or
+                    ('instances' in fresh_status and fresh_status['instances']!=[])):
+                raise ValueError('NEBIUS_STOPPED_CHANGED_DURING_PROOF')
+            raw={**fresh,'status':{**fresh_status,'instances':[]},
+                 '_lighttry_instances_proof':'project-wide-empty-list-and-stopped-recheck'}
+            summary=devlab_summary(raw,s)
         return s,raw,summary
 
     def observe(self,resource):
@@ -83,7 +107,8 @@ class NebiusProvider:
                 'PROVISIONING':'STARTING','STARTING':'STARTING','IMAGE_PULLING':'STARTING'}
         if state not in mapped:raise RuntimeError('NEBIUS_RESOURCE_ABNORMAL')
         result={'resourceId':resource,'independent':True,'state':mapped[state],
-                'instances':summary['instances'],'simulation':False}
+                'instances':summary['instances'],'simulation':False,'image':summary['image'],
+                'instancesProof':raw.get('_lighttry_instances_proof','devlab-explicit-array')}
         # Missing/null instances never counts as release proof (legacy summary defaults []).
         if not isinstance(raw.get('status',{}).get('instances'),list):
             raise ValueError('NEBIUS_INSTANCES_PROOF_REQUIRED')

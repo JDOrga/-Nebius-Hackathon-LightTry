@@ -330,16 +330,31 @@ GPU worker入口将私有data-root按sessionId分目录，worker.sqlite3也持�
 
 ### 当前本地8785接线
 
-普通根start.py入口现在在原studio后端挂载local_cpu_api：/api/health、/api/gpu/entry-status、/api/gpu/status及/api/inference/capabilities。它加载同一NebiusProvider/HTTPSWorker/HTTPSCosmosExecutor类，并复用生产GPU状态计算，但不构造云提供者、不读真实云凭据、不运行guard或模型；未配置时返回configured=false、state=UNKNOWN、canStart=false，不再404，也不把未知状态称为停止。
+根 start.py 通过被忽略的 .local/studio.json 中 local_cpu_config 路径进入 project/local_cpu.py 的 LocalApplication，复用生产 Application、密钥认证、同源/CSRF、操作者权限、串行 GPUQueue 和 HTTPSCosmosExecutor 接线，而不是再做一套付费 API。仅监听 127.0.0.1:8785。私有认证/队列数据库在代码外；原 tasks_dir、素材、accepted 包与环境库原路径继续使用，不移动或复制照片/任务。仅这个受认证单用户本地配置返回 localWorkspace=true，以保留原浏览器存储命名空间；生产多用户模式仍按账号隔离。本地配置若出现第二个账号即拒绝启动。
 
-本地开发入口无登录，因此云控制POST即使同源CSRF正确仍503，缺少CSRF/同源则403，GET控制405。真实启停/模型只能通过已配置且密钥认证的start.py --service入口，新接口挂载不等于远程GPU连通。生产DeploymentHandler显式禁用local-only路由继承。此次重启沿用.local/studio.json原目录、素材与accepted包，不迁移或复制工作台数据。
+已配置本地认证时，匿名页面/API/启动均被拒绝；访问密钥经同一 scrypt + HttpOnly/SameSite 会话体系验证，旧用户名密码 Basic 入口不恢复。启动按钮 POST 直接走同一 start_gpu_from_entry；只有当前 scope、守护与权限都满足才提交一次。当前 gpuControlConfig/modelGrantFile 显式 null，因此实际启动仍503且不调用云。启用私有配置不能从无关环境变量继承付费选项。LocalCPUAPI 仅为未配置认证路径的旧预览兼容入口，那里仍拒绝付费控制；不要把它当成已启用的正式启动服务。无认证路径不能读取当前正式服务的私有工作区。
+
+Windows 本地控制使用 nebius_wsl:build：Windows 负责 sessions.sqlite3 和副作用锁存，WSL 只运行显式指定的 CLI，不跨 Windows/WSL 共写同一 SQLite。UNC 凭据文件、distro 和 Linux config 路径必须对应；调用沿用原身份/公钥/资源核验、固定短超时、shell=false 与单次 restart/stop 锁存。模板 deploy/gpu-control-wsl.example.json 仍 disabled；构造适配器只核对本机文件，不调用云。Linux CPU 保留原 nebius_provider:build，不受此本地实现影响。
+
+本轮按用户新确认保存单会话预算偏好 3 美元（含税），私有 gpu-start-policy.json 为 enabled=false、approvalMode=per-click、scopeCreated=false；只在登录准备页与启动确认对话框展示，不创建 scope 或启动实例。实际费率尚未登记，不能将它宣称为供应商账单硬封顶。临时本地 operator 密钥保存在代码外 access-key.txt，目录 ACL 仅当前用户与 SYSTEM；不进入源码、补丁或日志。CPU venv 补齐现有 requirements-cpu.txt 的 waitress3.0.2/PyYAML6.0.3，未安装模型依赖或加载权重。
 # 当前一键 GPU 工作流的未完成项（2026-10-16）
 
 目标是：密钥认证后点击启动，CPU 守护提交一次 Nebius 启动；确认本轮主机身份后建立受认证 HTTPS；常驻模型实际加载完成才进入 READY；用户点击生成后派发当前任务。打开页面、读取状态、进程存活及授权文件有效都不能替代模型加载成功。
 
-当前本地开发入口只连接真实 Nebius 状态查询，没有注册收费启动控制器。`/api/gpu/connection-readiness` 明确返回未完成的认证控制绑定、当前启动范围、GPU HTTPS 部署、常驻模型实现和当前主机登记。该接口不执行云操作、不探测模型、不暴露密钥。
+当前本地入口已完成真实密钥认证与生产控制器路由接线，但当前启动范围和远端模型配置仍未启用。`/api/gpu/connection-readiness` 返回 authenticated=true；剩余 GPU 控制绑定/当前启动范围、GPU HTTPS 部署、常驻模型部署和当前主机登记仍列为未完成。residentModelImplemented=true 仅表示源码已经提供；residentModelConfigured/httpsWorkerDeployed/realEndToEndVerified 仍为 false。该接口只读本机快照，不执行云操作、不探测模型、不暴露密钥。
 
-现有 CosmosWorkerExecutor 是按任务启动原有受核验子进程的旧适配器，**不是常驻预加载实现**。不再把有效 grant 直接报告为模型 ready。真实会话必须同时收到当前 session/resource/host 匹配、simulation=false、executionMode=resident、modelLoaded=true、modelState=ready，才允许 READY；任务上传前再次核验。进程和模型常驻方式仍需实现及远端部署，不能用给旧适配器设置一个 ready 布尔值代替。
+CosmosWorkerExecutor 保留为旧的逐任务冷加载适配器，不报告 ready。新增 ResidentCosmosExecutor：私有 worker.json 显式 executionMode=resident 且 enabled=true 后，GPU worker 的显式启动才创建 inverse/forward 两个常驻相位进程；构造对象、打开页面及 GET 不加载。每个相位先核对原 commit、原入口、HDR patch 和全权重哈希，再用固定参数构造原 Pipeline 并 CUDA synchronize；二者均存活、当前 session/resource 匹配且加载成功才报告 modelLoaded。固定 grant 变化/撤销/到期、子进程死亡、加载失败均撤销 ready，不自动重启或重新加载。双模型同时驻留能否满足实际显存与运行环境，尚未实机验证；OOM 必须失败并由原守护收尾，不能静默换模型或 offload。
+
+任务仍经过原 runtime/worker.py 的身份、权重、输入、HDR、逆向输出与实际光照条件核验；仅相位调用改为有界私有 IPC，复用已初始化 Pipeline。每次调用重置随机数与临时生成 hooks；不会接受上传的脚本。IPC 请求/boot 均先持久锁存，超时不重投，进程重启不重载同一会话。新任务写明 modelExecutionMode=resident-v1。常驻结果不伪造相位进程退出：processExitCodes=[null,null]，必须有绑定当前 taskId/nonce、inverse+forward、boot/调用身份、PID、CUDA 同步及完成时刻的 residentExecution；产品校验器核验这些凭据后才接受。历史逐任务结果原校验保持。新增代码只完成离线替身验证，未部署或加载真实权重。
 
 当前 GPU 已关机，未安装本轮 HTTPS worker、未登记当前证书与主机、未运行模型。首次真实部署和整链验收需要另行允许开机；本轮“不要启动 GPU”的限制保持。以前已关闭的预算、主机信任和模型任务白名单不能继承。正式按钮不能接到未认证开发页，也不能绕过这些缺口强行显示可用。
 
+
+
+### 2026-10-16：网页启动链衔接（尚未实机验收）
+已实现守护收到 RUNNING 后捕获当前 SSH 指纹、由操作者确认后单次上传冻结源码包、严格主机校验 SSH 隧道、私网 HTTPS worker 与常驻模型启动衔接。健康查询不加载模型；只有当前会话隧道及两阶段模型实际 ready 才允许生成。慢云查询与 CPU 心跳并发已用独立 liveness 表修复，原截止时间不延长。
+验证仅包含离线替身、并发回归与真实本机 TLS；未启动 GPU、未远程部署、未加载实际模型，Docker 镜像未构建。3 美元含税仅为未来每会话预算偏好，不是启动授权或供应商硬封顶。当前私有控制和模型授权仍未启用；尚需补齐每次点击的新 scope 与动态逐任务授权，再做经授权的真实端到端验收。CPU 整机故障下无独立停机保证，不能声称已有独立守护。
+
+
+#### 当前会话模型授权衔接（2026-10-16，本地代码验证）
+可选私有 `modelPolicyFile` 明确模型许可与任务上限，并与 `scopePolicyFile`、SSH bootstrap 同时配置后，CPU 守护在当前主机确认通过后创建本次 v2 模型授权。每会话独立随机签名密钥与原截止时间不可续期；保存原始授权，重启复用，不把历史主机信任或预算带到新会话。新照片任务通过签名传到 GPU 校验，无需修改常驻模型的启动授权。缺许可、当前点击、主机确认或新鲜状态时拒绝；删除/撤销本次已发布授权不会自动补发。仍未实际开机、部署或加载模型，私有运行配置未启用。

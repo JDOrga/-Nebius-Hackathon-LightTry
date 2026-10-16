@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "enabled": false,
+  "factory": "cpu_supervisor:build_sessions",
+  "guardRoot": "PRIVATE_GUARD_ROOT",
+  "scopeFile": "PRIVATE_CURRENT_SCOPE_FILE",
+  "protection": {
+    "mode": "cpu-only",
+    "cpuHostRiskAccepted": true
+  },
+  "binding": {
+    "providerFactory": "nebius_wsl:build",
+    "providerBinding": {
+      "cliPath": "C:/Windows/System32/wsl.exe",
+      "configFile": "\\\\wsl.localhost\\WSL_DISTRO\\home\\USER\\.nebius\\config.yaml",
+      "profile": "PROFILE",
+      "tenantId": "TENANT_ID",
+      "projectId": "PROJECT_ID",
+      "resourceId": "RESOURCE_ID",
+      "publicKeyFile": "PRIVATE_PUBLIC_KEY_FILE",
+      "guardRoot": "PRIVATE_GUARD_ROOT",
+      "wslDistro": "WSL_DISTRO",
+      "linuxCliPath": "/home/USER/.nebius/bin/nebius",
+      "linuxConfigFile": "/home/USER/.nebius/config.yaml"
+    },
+    "workerOrigin": "https://localhost:19080",
+    "workerTokenFile": "PRIVATE_WORKER_TOKEN_FILE",
+    "workerCaFile": "PRIVATE_WORKER_CA_FILE",
+    "workerCertificateSha256": "CURRENT_GPU_CERTIFICATE_SHA256_64_HEX"
+  },
+  "scopePolicyFile": "PRIVATE_PER_CLICK_SCOPE_POLICY_FILE",
+  "modelPolicyFile": "PRIVATE_MODEL_LICENSE_POLICY_FILE",
+  "bootstrap": {
+    "factory": "gpu_bootstrap_ssh:build",
+    "binding": {
+      "sshExecutable": "SSH_EXECUTABLE",
+      "scpExecutable": "SCP_EXECUTABLE",
+      "keyscanExecutable": "SSH_KEYSCAN_EXECUTABLE",
+      "keyFile": "PRIVATE_CLIENT_KEY_FILE",
+      "bundleManifestFile": "PRIVATE_FROZEN_BUNDLE_MANIFEST",
+      "workerConfigFile": "PRIVATE_CURRENT_WORKER_CONFIG",
+      "modelGrantFile": "PRIVATE_CURRENT_MODEL_GRANT",
+      "workerTokenFile": "PRIVATE_CURRENT_WORKER_TOKEN",
+      "workerCertificateFile": "PRIVATE_CURRENT_WORKER_CERTIFICATE",
+      "workerKeyFile": "PRIVATE_CURRENT_WORKER_CERTIFICATE_KEY",
+      "tunnelPort": 19080,
+      "workerPort": 9443,
+      "expectedImage": "EXPECTED_DEVLAB_IMAGE"
+    }
+  }
+}

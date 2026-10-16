@@ -77,7 +77,9 @@ class Application:
         os.environ['LIGHTTRY_INVERSE_CACHE'] = str(data / 'inverse-cache')
         # Uploaded bodies buffered by Waitress must also stay on the private data volume.
         (data / 'tmp').mkdir(exist_ok=True, mode=0o700)
-        tempfile.tempdir = str(data / 'tmp')
+        self.previous_tempdir=tempfile.tempdir
+        self.runtime_tmp=str(data/'tmp')
+        tempfile.tempdir = self.runtime_tmp
         origin = self.origin
 
         class DeploymentHandler(studio.Handler):
@@ -100,7 +102,14 @@ class Application:
             def log_message(self, fmt, *args):
                 pass  # Never log raw request targets, names, credentials or body content.
 
-        args = SimpleNamespace(assets_dir=str(assets), tasks_dir=data / 'tasks',
+        task_root=data/'tasks'
+        if getattr(options,'local_task_root',None) is not None:
+            if getattr(options,'local_loopback',False) is not True or parsed.hostname!='127.0.0.1':
+                raise ValueError('LOCAL_TASK_PATH_OVERRIDE_REQUIRES_LOOPBACK_PROFILE')
+            task_root=Path(options.local_task_root)
+            if not task_root.is_absolute() or any(p.is_symlink() for p in (task_root,*task_root.parents)):
+                raise ValueError('LOCAL_TASK_PATH_UNSAFE')
+        args = SimpleNamespace(assets_dir=str(assets), tasks_dir=task_root,
                                evidence_config=options.evidence_config,
                                accepted_package=options.accepted_package, no_demo=not options.assets_dir,
                                language_key_file=None, inference_config=None)
@@ -139,6 +148,7 @@ class Application:
         self.handler.task_store.close()
         LOG.info('service stopped')
         LOG.removeHandler(self.log_handler); self.log_handler.close()
+        if tempfile.tempdir==self.runtime_tmp:tempfile.tempdir=self.previous_tempdir
 
     def session_token(self, environ):
         raw = environ.get('HTTP_COOKIE', '')
@@ -216,9 +226,13 @@ class Application:
         state = snapshot.get('state') if fresh else 'UNKNOWN'
         active = state in ('STARTING','LOADING','READY','EXECUTING')
         scope = self.gpu_scope
+        issuer=getattr(getattr(self,'gpu_control',None),'scope_issuer',None)
+        current_scope_ok=bool(scope and scope.get('budgetApproved') is True and scope.get('expiresAt',0)>time.time())
+        if issuer:
+            try:issuer.limits();current_scope_ok=True
+            except ValueError:current_scope_ok=False
         allowed = bool(owner and self.accounts.users[owner]['role']=='operator' and
-                       self.gpu_sessions and scope and scope.get('budgetApproved') is True and
-                       scope.get('expiresAt',0)>time.time() and state=='STOPPED' and
+                       self.gpu_sessions and scope and current_scope_ok and state=='STOPPED' and
                        snapshot.get('verifiedStopped') is True)
         reason = ''
         if not self.gpu_sessions or not scope:
@@ -235,10 +249,23 @@ class Application:
             pending = dict(self.entry_start) if self.entry_start else None
         if pending and (not scope or pending['scopeId']!=scope.get('scopeId')):
             pending=None
+        if issuer and pending and snapshot.get('sessionId') and snapshot.get('verifiedStopped') and snapshot.get('scopeId')==pending['scopeId']:
+            pending=None
         if pending and not active:
             allowed=False
             reason=('启动请求已提交，请等待状态更新。' if pending['status']=='requested' else '上次启动未成功，请联系管理员核实。')
-        return {'active':active,'state':state,'canStart':allowed,'message':reason,'simulation':snapshot.get('simulation') is True,
+        bootstrap=getattr(getattr(self,'gpu_control',None),'bootstrap',None)
+        enrollment=bootstrap.public(snapshot) if bootstrap else {'stage':'not_configured','canConfirm':False}
+        operator=bool(owner and self.accounts.users[owner]['role']=='operator')
+        if not operator:enrollment['canConfirm']=False
+        if state=='LOADING' and bootstrap:
+            reason={'awaiting_host_confirmation':'请先核对并确认本次服务器连接。','waiting_authorization':'正在等待本次模型授权。',
+                    'deploying':'正在连接模型服务。','deployed':'服务器已连接，正在加载模型。',
+                    'uncertain':'服务器连接未确认，请先停止并核查。'}.get(enrollment['stage'],'正在准备服务器连接。')
+        can_stop=bool(operator and scope and snapshot.get('sessionId') and snapshot.get('scopeId')==scope.get('scopeId') and
+                      snapshot.get('resourceId')==scope.get('resourceId') and not snapshot.get('verifiedStopped') and not snapshot.get('stopSent'))
+        return {'active':active,'state':state,'canStart':allowed,'canStop':can_stop,'hostConfirmation':enrollment,
+                'sessionId':snapshot.get('sessionId'),'message':reason,'simulation':snapshot.get('simulation') is True,
                 'configured':self.gpu_sessions is not None,'canGenerate':bool(fresh and state=='READY'),
                 'observedAt':observed if isinstance(observed,(int,float)) and not isinstance(observed,bool) else None,'stale':bool(observed is not None and not fresh),
                 'startStatus':pending.get('status') if pending else None,
@@ -259,6 +286,9 @@ class Application:
 :root{font:14px/1.7 "Segoe UI","Microsoft YaHei",sans-serif;color:#294738;background:#f2f6f3}*{box-sizing:border-box}body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;background:radial-gradient(ellipse at top right,#dcebe1,transparent 65%)}main{width:min(470px,100%);background:white;border:1px solid #dce7df;border-radius:22px;padding:38px;box-shadow:0 15px 60px #294d3210}.brand{font-size:26px;font-weight:750;letter-spacing:-1px}h1{font-size:23px;margin:26px 0 10px}p{font-size:13px;color:#75897b;margin:0 0 22px}.actions{display:grid;gap:10px}button,a{font:inherit;border-radius:10px;padding:12px 14px;text-align:center;font-weight:650}button{border:1px solid #286d4e;background:#286d4e;color:white;cursor:pointer}button:hover:not(:disabled){background:#20573f}button:disabled{background:#e7eee9;border-color:#d9e3dc;color:#91a194;cursor:not-allowed}a{border:1px solid #cdded2;text-decoration:none;color:#426c51;background:#f8fbf9}a:hover{background:#edf4ef}:focus-visible{outline:3px solid #67a48080;outline-offset:3px}.note{font-size:11px;margin:20px 0 0;color:#879a8c}</style><main id="gpu-entry" data-token="TOKEN"><div class="brand">LightTry</div><h1>TITLE</h1><p>INTRO</p><div class="actions"><button id="start-gpu"DISABLED>启动 GPU 并进入工作台</button><a href="/">暂不启动，直接进入</a></div><p class="note">启动 GPU 可能产生费用。提交后立即进入工作台，无需等待启动完成。</p><p class="note" role="status">REASON</p></main><script src="/gpu-entry.js" defer></script></html>'''
         if info['simulation']:
             html=html.replace('<div class="brand">LightTry</div>','<div class="brand">LightTry</div><p class="note">离线演示 · 不会启动真实 GPU</p>')
+        budget=info.get('budgetUsdIncludingTax')
+        if type(budget) in (int,float) and 0<budget<=1000:
+            html=html.replace('启动 GPU 可能产生费用。','本次预算 '+format(budget,'.2f')+' 美元（含税）。自动停机不保证账单硬封顶。')
         html=html.replace('TOKEN',h.csrf_token).replace('TITLE',title).replace('INTRO',intro).replace('DISABLED',disabled).replace('REASON',info['message'])
         h.send_bytes(html.encode('utf-8'),'text/html; charset=utf-8')
 
@@ -277,11 +307,18 @@ class Application:
             raise JobError('CONTROL_NOT_CONFIGURED','启动服务暂不可用，未启动 GPU。',503)
         scope=copy.deepcopy(self.gpu_scope)
         with self.entry_lock:
-            if self.entry_start and self.entry_start['scopeId']==scope.get('scopeId'):
+            issuer=getattr(getattr(self,'gpu_control',None),'scope_issuer',None)
+            if self.entry_start and ((issuer and self.entry_start.get('requestId')==body['requestId']) or (not issuer and self.entry_start['scopeId']==scope.get('scopeId'))):
                 h.json_response({'status':self.entry_start['status']},202);return
             if not info['canStart'] or (self.entry_thread and self.entry_thread.is_alive()):
                 raise JobError('START_BLOCKED','暂不能安全启动 GPU，请先进入工作台。',409)
-            self.entry_start={'scopeId':scope.get('scopeId'),'status':'requested'}
+            control=getattr(self,'gpu_control',None)
+            if getattr(control,'scope_issuer',None):
+                try:scope=control.issue_scope(body['requestId'],h.user)
+                except ValueError:
+                    raise JobError('CURRENT_SCOPE_UNAVAILABLE','本次启动授权无法安全建立，未启动 GPU。',409)
+                self.gpu_scope=scope
+            self.entry_start={'scopeId':scope.get('scopeId'),'requestId':body['requestId'],'status':'requested'}
             def run():
                 status='unknown'
                 try:
@@ -428,9 +465,12 @@ class Application:
             body=studio.shared.strict_json(self.body(h,8192).decode('utf-8'))
             if path=='/api/gpu/start':
                 if set(body)!={'requestId'} or not ID.fullmatch(body['requestId']):raise JobError('INVALID_BODY','只接受本次点击身份，不接受客户端预算或主机参数。',422)
-                h.json_response(self.gpu_sessions.start(self.gpu_scope),202)
+                self.start_gpu_from_entry(h)
             elif path=='/api/gpu/confirm-host':
-                if set(body)!={'sessionId','hostIdentity'}:raise JobError('INVALID_BODY','需要本会话的当前主机确认。',422)
+                bootstrap=getattr(self.gpu_control,'bootstrap',None)
+                expected={'sessionId','hostIdentity','fingerprint'} if bootstrap else {'sessionId','hostIdentity'}
+                if set(body)!=expected:raise JobError('INVALID_BODY','需要本会话的当前主机确认。',422)
+                if bootstrap:bootstrap.confirm(body['sessionId'],body['hostIdentity'],body['fingerprint'])
                 h.json_response(self.gpu_sessions.confirm_host(body['sessionId'],body['hostIdentity']))
             elif path=='/api/gpu/stop':
                 if set(body)!={'sessionId'}:raise JobError('INVALID_BODY','需要会话身份。',422)

@@ -27,7 +27,7 @@ def build_sessions(root,binding):
     ca=binding['workerCaFile']
     if ca is not None:runtime_file(ca,ROOT,65536)
     pin=binding.get('workerCertificateSha256')
-    if binding['providerFactory']=='nebius_provider:build' and pin is None:
+    if binding['providerFactory'] in ('nebius_provider:build','nebius_wsl:build') and pin is None:
         raise ValueError('NEBIUS_WORKER_CERTIFICATE_PIN_REQUIRED')
     worker=HTTPSWorker(binding['workerOrigin'],token,ca_file=ca,timeout=5,certificate_sha256=pin)
     module,symbol=binding['providerFactory'].split(':')

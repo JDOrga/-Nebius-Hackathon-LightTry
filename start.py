@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 ROOT = Path(__file__).resolve().parent
-FIELDS = {'python', 'offline_python', 'assets_dir', 'tasks_dir', 'evidence_config', 'accepted_packages', 'inverse_cache_dir'}
+FIELDS = {'python', 'offline_python', 'assets_dir', 'tasks_dir', 'evidence_config', 'accepted_packages', 'inverse_cache_dir','local_cpu_config'}
 
 def local_options(argv):
     parser = argparse.ArgumentParser(add_help=False)
@@ -31,11 +31,15 @@ def local_options(argv):
                  'tasks_dir': path(cfg.get('tasks_dir', '.local/state/tasks')),
                  'inverse_cache_dir': path(cfg.get('inverse_cache_dir', '.local/state/inverse-cache')),
                  'accepted_packages': [path(p) for p in cfg.get('accepted_packages', [])]}
-    for name in ('python', 'offline_python', 'evidence_config'):
+    for name in ('python', 'offline_python', 'evidence_config','local_cpu_config'):
         if name in cfg: effective[name] = path(cfg[name])
     return options, effective, remaining
 
 def main():
+    if '--model-phase' in sys.argv[1:]:
+        sys.path.insert(0,str(ROOT/'project'))
+        from resident_model import main as serve_phase
+        return serve_phase(sys.argv[1:])
     if any(a in sys.argv[1:] for a in ('--worker','--guard','--deadman')):
         sys.path.insert(0, str(ROOT/'project'))
         from guard_runtime import main as serve_runtime
@@ -55,6 +59,10 @@ def main():
         os.execv(runtime, [runtime, '-X', 'utf8', '-B', str(Path(__file__).resolve()), *sys.argv[1:]])
     os.environ['LIGHTTRY_INVERSE_CACHE'] = cfg['inverse_cache_dir']
     sys.path.insert(0, str(ROOT/'project'))
+    if cfg.get('local_cpu_config'):
+        if remaining:raise ValueError('AUTHENTICATED_LOCAL_PROFILE_OWNS_LISTEN_AND_RUNTIME_OPTIONS')
+        from local_cpu import main as serve_local_cpu
+        return serve_local_cpu(cfg)
     from studio import main as serve
     args = ['--assets-dir', cfg['assets_dir'], '--tasks-dir', cfg['tasks_dir']]
     if cfg.get('evidence_config'): args += ['--evidence-config', cfg['evidence_config']]

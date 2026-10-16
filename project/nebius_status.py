@@ -15,6 +15,7 @@ class NebiusStatus:
         self.lock=threading.Lock()
         self.value=None
         self.error=None
+        self.stopped=threading.Event();self.thread=None
 
     def refresh(self):
         def wsl_path(p):
@@ -59,11 +60,16 @@ class NebiusStatus:
                           'Nebius 状态暂不可用，请检查本机认证与网络。'}
 
     def start(self):
+        if self.thread is not None:return
         def run():
-            while True:
+            while not self.stopped.is_set():
                 self.refresh()
-                time.sleep(60)
-        threading.Thread(target=run,name='nebius-read-only-status',daemon=True).start()
+                self.stopped.wait(60)
+        self.thread=threading.Thread(target=run,name='nebius-read-only-status',daemon=True);self.thread.start()
+
+    def close(self):
+        self.stopped.set()
+        if self.thread:self.thread.join(timeout=1)
 
 
 def from_environment():

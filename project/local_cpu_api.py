@@ -29,9 +29,9 @@ class LocalCPUAPI:
     def connection_readiness(self):
         info=self.info()
         return {'providerConnected':info.get('providerConnected',False),'controlConfigured':False,
-                'httpsWorkerDeployed':False,'residentModelConfigured':False,'canStart':False,'canGenerate':False,
+                'httpsWorkerDeployed':False,'residentModelConfigured':False,'residentModelImplemented':True,'canStart':False,'canGenerate':False,
                 'blockers':['AUTHENTICATED_CONTROL_BINDING_REQUIRED','CURRENT_START_SCOPE_REQUIRED',
-                            'GPU_HTTPS_DEPLOYMENT_REQUIRED','RESIDENT_MODEL_IMPLEMENTATION_REQUIRED',
+                            'GPU_HTTPS_DEPLOYMENT_REQUIRED','RESIDENT_MODEL_DEPLOYMENT_REQUIRED',
                             'CURRENT_HOST_ENROLLMENT_REQUIRED'],
                 'realEndToEndVerified':False}
 

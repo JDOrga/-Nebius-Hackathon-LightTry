@@ -10,6 +10,7 @@ from pathlib import Path
 import sys
 import uuid
 import time
+import os
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from inference.jobs import atomic, read
@@ -114,7 +115,7 @@ def run_forward(args, module, timeline, state_root, validate_output):
     finally:
         module.DiffusionRendererPipeline = constructor
         timeline.emit('forward_session_end', initializationCount=initialization_count,
-                      modelRetainedAfterExit=False)
+                      modelRetainedAfterExit=os.environ.get('LIGHTTRY_MODEL_RESIDENT')=='1')
 
 
 def main():

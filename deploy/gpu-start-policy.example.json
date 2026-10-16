@@ -1,0 +1,9 @@
+{
+  "enabled": false,
+  "resourceId": "RESOURCE_ID",
+  "budgetUsdIncludingTax": 3,
+  "hourlyUsdIncludingTax": null,
+  "billingReserveSeconds": 120,
+  "maxSessionSeconds": 2400,
+  "idleSeconds": 60
+}
