@@ -24,7 +24,7 @@ class LinkUncertain(Exception):
 
 
 class HTTPSWorker:
-    def __init__(self, url, token, *, ca_file=None, timeout=5, connection_factory=None, certificate_sha256=None):
+    def __init__(self, url, token, *, ca_file=None, timeout=5, connection_factory=None, certificate_sha256=None, client_certificate=None, client_key=None):
         endpoint=urlsplit(url)
         if (endpoint.scheme!='https' or not endpoint.hostname or endpoint.username or
                 endpoint.password or endpoint.query or endpoint.fragment or endpoint.path not in ('','/')):
@@ -38,6 +38,12 @@ class HTTPSWorker:
         self.endpoint,self.token,self.timeout=endpoint,token,timeout
         self.simulation=connection_factory is not None
         self.context=ssl.create_default_context(cafile=ca_file)
+        if bool(client_certificate)!=bool(client_key):raise ValueError('CLIENT_CERTIFICATE_AND_KEY_REQUIRED')
+        if client_certificate:
+            from security import runtime_file
+            root=Path(__file__).resolve().parent.parent
+            runtime_file(client_certificate,root);runtime_file(client_key,root)
+            self.context.load_cert_chain(str(client_certificate),str(client_key))
         self.factory=connection_factory or http.client.HTTPSConnection
 
     def request(self, method, path, body=None):

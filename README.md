@@ -361,4 +361,6 @@ CosmosWorkerExecutor 保留为旧的逐任务冷加载适配器，不报告 read
 
 
 ### 非 SSH GPU HTTPS 通道（本地准备，未部署）
-可选 `binding.directWorkerFile` 启用本轮主机绑定的直连 HTTPS，SSH HTTPS 作为备用。默认关闭；直连入口、IP SAN 证书、CPU 出口 /32 和公网可达性必须在下一次授权会话确认。见 [直连接线说明](deploy/DIRECT_HTTPS.md)。切换只探测健康并查询原任务，不自动重发 POST/PUT，不重启模型或延长预算窗口。GPU/容器/整条网络故障仍可能使两路同时失效。
+可选 `binding.directWorkerFile` 启用本轮主机绑定的直连 HTTPS，SSH HTTPS 作为备用。默认关闭；直连入口、IP SAN 证书、CPU 客户端证书和公网可达性必须在下一次授权会话确认。见 [直连接线说明](deploy/DIRECT_HTTPS.md)。切换只探测健康并查询原任务，不自动重发 POST/PUT，不重启模型或延长预算窗口。GPU/容器/整条网络故障仍可能使两路同时失效。
+
+动态热点/VPN：直连入口改为 mTLS 验证 CPU 证书，不再使用固定来源 IP 白名单；入口与内部 worker 分别验证 TLS。实现与未部署边界见上述接线说明。

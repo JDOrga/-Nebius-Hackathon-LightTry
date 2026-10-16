@@ -14,6 +14,14 @@ class DualHTTPSWorker:
         self.lock=threading.RLock();self.ssh=ssh;self.direct_file=Path(direct_file);self.clock=clock;self.factory=factory
         self.simulation=ssh.simulation;self.direct=None;self.active=None;self.binding=None;self.state=None;self.direct_available=False;self.valid_session=False
 
+    # Bootstrap validates the SSH endpoint, never the public direct endpoint.
+    @property
+    def endpoint(self):return self.ssh.endpoint
+    @property
+    def certificate_sha256(self):return self.ssh.certificate_sha256
+    @property
+    def token(self):return self.ssh.token
+
     def bind_session(self,value):
         with self.lock:return self._bind_session(value)
 
@@ -28,12 +36,13 @@ class DualHTTPSWorker:
         if cfg=={'schemaVersion':1,'enabled':False}:
             if self.active and self.active[0]=='direct_https':self.active=None
             self.direct=None;return
-        required={'schemaVersion','enabled','sessionId','resourceId','hostIdentity','origin','tokenFile','caFile','certificateSha256'}
+        required={'schemaVersion','enabled','sessionId','resourceId','hostIdentity','origin','tokenFile','caFile','certificateSha256','clientCertificateFile','clientKeyFile'}
         if set(cfg)!=required or cfg['schemaVersion']!=1 or cfg['enabled'] is not True or any(cfg[k]!=binding[k] for k in binding):raise ValueError('DIRECT_CURRENT_SESSION_BINDING_REQUIRED')
+        if any(not isinstance(cfg[k],str) or not cfg[k] for k in ('clientCertificateFile','clientKeyFile')):raise ValueError('DIRECT_MTLS_CLIENT_IDENTITY_REQUIRED')
         if urlsplit(cfg['origin']).hostname!=binding['hostIdentity']['ip']:raise ValueError('DIRECT_CURRENT_IP_REQUIRED')
         identity=json.dumps(cfg,sort_keys=True)
         if self.direct is None or getattr(self,'direct_identity',None)!=identity:
-            self.active=None;self.direct=self.factory(cfg['origin'],runtime_file(cfg['tokenFile'],ROOT,4096).decode().strip(),ca_file=cfg['caFile'],certificate_sha256=cfg['certificateSha256'],timeout=5);self.direct_identity=identity
+            self.active=None;self.direct=self.factory(cfg['origin'],runtime_file(cfg['tokenFile'],ROOT,4096).decode().strip(),ca_file=cfg['caFile'],certificate_sha256=cfg['certificateSha256'],client_certificate=cfg['clientCertificateFile'],client_key=cfg['clientKeyFile'],timeout=5);self.direct_identity=identity
         self.direct_available=True
 
     def health(self):

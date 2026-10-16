@@ -109,9 +109,11 @@ class GuardTests(unittest.TestCase):
         self.clock.now=original['idleDeadline'];reboot.heartbeat(value['sessionId'])
         self.assertEqual(reboot.poll(value['sessionId'])['state'],'STOPPING');self.assertEqual(self.provider.stops,1)
 
-    def test_startup_limit_600_and_absolute_limit_not_reset(self):
-        value=self.sessions.start(self.scope);self.assertEqual(value['startupDeadline']-value['createdAt'],600)
-        self.clock.step(600);self.sessions.heartbeat(value['sessionId'])
+    def test_startup_limit_1800_and_absolute_limit_not_reset(self):
+        value=self.sessions.start(self.scope);self.assertEqual(value['startupDeadline']-value['createdAt'],1800)
+        self.clock.step(1799);self.sessions.heartbeat(value['sessionId'])
+        value=self.sessions.poll(value['sessionId']);self.assertFalse(value['stopSent'])
+        self.clock.step(1);self.sessions.heartbeat(value['sessionId'])
         value=self.sessions.poll(value['sessionId']);self.assertEqual(value['state'],'STOPPING')
         self.assertLessEqual(value['stopWaitDeadline'],value['absoluteDeadline'])
 

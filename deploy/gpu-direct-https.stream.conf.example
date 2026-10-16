@@ -1,12 +1,26 @@
-# Nginx stream module required. Raw TLS passthrough; no TLS termination or credentials here.
-# Install only after current VM identity, container address and CPU source are verified.
+# Nginx stream+stream_ssl modules required; NOT installed by renderer.
+# Dedicated current-session client CA. No source IP whitelist.
 stream {
+    limit_conn_zone $binary_remote_addr zone=per_source:1m;
     server {
-        listen 443;
-        allow 198.51.100.5/32;
-        deny all;
+        listen 443 ssl;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_certificate /etc/lighttry/server.crt;
+        ssl_certificate_key /etc/lighttry/server.key;
+        ssl_client_certificate /etc/lighttry/cpu-ca.crt;
+        ssl_verify_client on;
+        ssl_verify_depth 1;
+        ssl_handshake_timeout 5s;
+        ssl_session_cache off;
+        ssl_session_tickets off;
+        limit_conn per_source 4;
         proxy_connect_timeout 3s;
         proxy_timeout 15s;
+        proxy_ssl on;
+        proxy_ssl_verify on;
+        proxy_ssl_trusted_certificate /etc/lighttry/worker-ca.crt;
+        proxy_ssl_name localhost;
+        proxy_ssl_server_name on;
         proxy_pass 172.18.0.3:9443;
     }
 }

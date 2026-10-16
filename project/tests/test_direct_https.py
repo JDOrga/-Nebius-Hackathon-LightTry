@@ -11,7 +11,7 @@ class DirectTests(unittest.TestCase):
   self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name)
   self.file=self.root/'direct.json';token=self.root/'token';token.write_text('x'*48)
   self.value={'sessionId':'a'*32,'resourceId':'FIXTURE','hostIdentity':{'vmId':'VM_FIXTURE','ip':'203.0.113.9'},'hostConfirmed':True,'workDeadline':200,'absoluteDeadline':300}
-  self.cfg={'schemaVersion':1,'enabled':True,**{k:self.value[k] for k in ['sessionId','resourceId','hostIdentity']},'origin':'https://203.0.113.9:443','tokenFile':str(token),'caFile':'CA_FIXTURE','certificateSha256':'b'*64};self.write()
+  self.cfg={'schemaVersion':1,'enabled':True,**{k:self.value[k] for k in ['sessionId','resourceId','hostIdentity']},'origin':'https://203.0.113.9:443','tokenFile':str(token),'caFile':'CA_FIXTURE','certificateSha256':'b'*64,'clientCertificateFile':'CLIENT_CERT_FIXTURE','clientKeyFile':'CLIENT_KEY_FIXTURE'};self.write()
   self.health={k:self.value[k] for k in ['sessionId','resourceId','hostIdentity']};self.health.update(modelLoaded=True,modelState='ready',executionMode='resident',simulation=False)
   self.ssh=Mock(simulation=True);self.direct=Mock();self.ssh.health.return_value=self.health;self.direct.health.return_value=self.health
   self.worker=DualHTTPSWorker(self.ssh,self.file,clock=lambda:100,factory=lambda *a,**k:self.direct);self.worker.state=lambda:self.value
@@ -36,6 +36,10 @@ class DirectTests(unittest.TestCase):
   with self.assertRaises(LinkUncertain):self.worker.submit({'jobId':'c'*32})
   self.direct.submit.assert_called_once();self.ssh.submit.assert_not_called()
   self.direct.health.side_effect=LinkUncertain();self.worker.health();self.worker.query('c'*32);self.ssh.query.assert_called_once_with('c'*32);self.ssh.submit.assert_not_called()
+ def test_missing_mtls_identity_cannot_enable_direct(self):
+  self.cfg['clientCertificateFile']=None;self.cfg['clientKeyFile']=None;self.write()
+  with self.assertRaisesRegex(ValueError,'DIRECT_MTLS_CLIENT_IDENTITY_REQUIRED'):self.worker.health()
+  self.ssh.health.assert_not_called()
  def test_wrong_health_identity_not_fallback(self):
   self.direct.health.return_value={**self.health,'sessionId':'d'*32}
   with self.assertRaisesRegex(ValueError,'WORKER_SESSION_MISMATCH'):self.worker.health()
@@ -78,13 +82,13 @@ class DirectTests(unittest.TestCase):
   server=create_server(ledger,cert,key,Path(__file__).resolve().parents[2],bind='127.0.0.1',port=0)
   thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
   try:
-   self.cfg.update(origin='https://127.0.0.1:'+str(server.server_port),caFile=str(cert),certificateSha256=hashlib.sha256(ssl.PEM_cert_to_DER_cert(cert.read_text())).hexdigest());self.write()
+   self.cfg.update(clientCertificateFile=str(cert),clientKeyFile=str(key),origin='https://127.0.0.1:'+str(server.server_port),caFile=str(cert),certificateSha256=hashlib.sha256(ssl.PEM_cert_to_DER_cert(cert.read_text())).hexdigest());self.write()
    worker=DualHTTPSWorker(self.ssh,self.file,clock=lambda:100);worker.state=lambda:self.value
    self.ssh.health.side_effect=LinkUncertain();health=worker.health();self.assertEqual(worker.active_transport,'direct_https');self.assertFalse(health['modelLoaded'])
    blob=worker.upload(b'SYNTHETIC_DIRECT_TLS_BYTES');self.assertEqual(worker.download(blob['sha256']),b'SYNTHETIC_DIRECT_TLS_BYTES');self.ssh.health.assert_not_called();self.assertEqual(ledger.executor,None)
   finally:server.shutdown();thread.join(timeout=2);server.server_close();ledger.close()
- def test_proxy_tls_passthrough_restricted(self):
-  text=render('198.51.100.5/32','172.18.0.3');self.assertIn('allow 198.51.100.5/32;',text);self.assertIn('deny all;',text);self.assertIn('proxy_pass 172.18.0.3:9443;',text);self.assertNotIn('http://',text)
-  for cpu,target in [('0.0.0.0/0','172.18.0.3'),('198.51.100.5/32','8.8.8.8')]:
+ def test_proxy_mtls_without_source_whitelist(self):
+  text=render(None,'172.18.0.3');self.assertIn('ssl_verify_client on;',text);self.assertIn('proxy_ssl_verify on;',text);self.assertIn('proxy_pass 172.18.0.3:9443;',text);self.assertNotIn('allow ',text);self.assertNotIn('http://',text)
+  for cpu,target in [('198.51.100.5/32','172.18.0.3'),(None,'8.8.8.8')]:
    with self.assertRaises(ValueError):render(cpu,target)
 if __name__=='__main__':unittest.main()

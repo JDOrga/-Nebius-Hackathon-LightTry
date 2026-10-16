@@ -52,12 +52,16 @@ class SilentHandler(WSGIRequestHandler):
         return True
 
 
-def create_server(ledger,certificate,key,code_root,*,bind='127.0.0.1',port=9443):
+def create_server(ledger,certificate,key,code_root,*,bind='127.0.0.1',port=9443,client_ca=None):
     bind=private_bind(bind)
     if type(port) is not int or not 0<=port<=65535:raise ValueError('TLS_PORT_INVALID')
     runtime_file(certificate,code_root);runtime_file(key,code_root)
     context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.minimum_version=ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(str(certificate),str(key))
+    if client_ca:
+        runtime_file(client_ca,code_root)
+        context.load_verify_locations(cafile=str(client_ca))
+        context.verify_mode=ssl.CERT_REQUIRED
     server=PrivateTLS((bind,port),SilentHandler)
     try:
         server.set_app(WorkerApplication(ledger))
