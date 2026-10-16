@@ -261,7 +261,8 @@ class Sessions:
                         value['state']='LOADING'
                     if not value['hostConfirmed']:value['state']='LOADING'
                     bootstrap=getattr(self,'bootstrap',None)
-                    if value['hostConfirmed'] and (bootstrap is None or bootstrap.connected(identity)):
+                    if hasattr(self.worker,'bind_session'):self.worker.bind_session(value)
+                    if value['hostConfirmed'] and (bootstrap is None or bootstrap.connected(identity) or getattr(self.worker,'direct_available',False) is True):
                         health=self.worker.health()
                         if (health.get('sessionId')!=identity or health.get('resourceId')!=value['resourceId']):
                             raise ValueError('WORKER_SESSION_MISMATCH')

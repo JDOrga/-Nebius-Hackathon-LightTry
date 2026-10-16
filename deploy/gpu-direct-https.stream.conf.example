@@ -1,0 +1,12 @@
+# Nginx stream module required. Raw TLS passthrough; no TLS termination or credentials here.
+# Install only after current VM identity, container address and CPU source are verified.
+stream {
+    server {
+        listen 443;
+        allow 198.51.100.5/32;
+        deny all;
+        proxy_connect_timeout 3s;
+        proxy_timeout 15s;
+        proxy_pass 172.18.0.3:9443;
+    }
+}

@@ -17,7 +17,7 @@ def build_sessions(root,binding):
     """Audited provider plug-in + existing HTTPS worker; construction is offline."""
     from gpu_session import Sessions
     from worker_link import HTTPSWorker
-    if (not isinstance(binding,dict) or set(binding)-{'providerFactory','providerBinding','workerOrigin','workerTokenFile','workerCaFile','workerCertificateSha256'} or
+    if (not isinstance(binding,dict) or set(binding)-{'providerFactory','providerBinding','workerOrigin','workerTokenFile','workerCaFile','workerCertificateSha256','directWorkerFile'} or
             not {'providerFactory','providerBinding','workerOrigin','workerTokenFile','workerCaFile'}<=set(binding) or
             not isinstance(binding['providerFactory'],str) or
             not re.fullmatch(r'[a-zA-Z_][a-zA-Z0-9_.]*:[a-zA-Z_][a-zA-Z0-9_]*',binding['providerFactory']) or
@@ -37,7 +37,12 @@ def build_sessions(root,binding):
     if hasattr(provider,'root') and provider.root.resolve()!=Path(root).resolve():
         raise ValueError('NEBIUS_PROVIDER_GUARD_ROOT_MISMATCH')
     # load_control installs the local readiness gate only after explicit CPU policy.
-    return Sessions(root,provider,worker,None,protection_mode='cpu-only')
+    sessions=Sessions(root,provider,worker,None,protection_mode='cpu-only')
+    if binding.get('directWorkerFile'):
+        from worker_transport import DualHTTPSWorker
+        sessions.worker=DualHTTPSWorker(worker,binding['directWorkerFile'])
+        sessions.worker.state=sessions.latest
+    return sessions
 
 
 class CPUHostSupervisor:
