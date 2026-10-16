@@ -104,7 +104,7 @@ def load_control(path, code_root, clock=time.time, *, observer=False):
         return None
     value = json.loads(runtime_file(path, code_root).decode('utf-8'))
     if (not isinstance(value, dict) or
-            set(value)-{'schemaVersion','enabled','factory','guardRoot','scopeFile','binding','protection','bootstrap','scopePolicyFile','modelPolicyFile','recoveryPolicy'} or
+            set(value)-{'schemaVersion','enabled','factory','guardRoot','scopeFile','binding','protection','bootstrap','scopePolicyFile','modelPolicyFile','recoveryPolicy','directTLS'} or
             not {'schemaVersion','enabled','factory','guardRoot','scopeFile','binding'}<=set(value) or
             value['schemaVersion'] != 1 or type(value['enabled']) is not bool or (not observer and not value['enabled']) or
             not isinstance(value['factory'], str) or
@@ -166,6 +166,10 @@ def load_control(path, code_root, clock=time.time, *, observer=False):
             raise ValueError('AUDITED_SSH_BOOTSTRAP_FACTORY_REQUIRED')
         from gpu_bootstrap_ssh import build
         control.bootstrap=build(control,bootstrap['binding']);sessions.bootstrap=control.bootstrap
+    if value.get('directTLS') is not None:
+        if not control.bootstrap:raise ValueError('DIRECT_BOOTSTRAP_REQUIRES_SSH_DEPLOYMENT')
+        from direct_bootstrap import DirectBootstrap
+        control.direct_bootstrap=DirectBootstrap(control,value['directTLS'])
     if value.get('modelPolicyFile'):
         if not control.scope_issuer or not control.bootstrap:raise ValueError('CURRENT_CLICK_AND_BOOTSTRAP_REQUIRED_FOR_MODEL_POLICY')
         from session_grants import SessionGrantIssuer

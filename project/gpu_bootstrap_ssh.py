@@ -254,19 +254,28 @@ class SSHBootstrap:
         try:self.check(sid,confirmed=True)
         except Exception:self.close_tunnel();raise
         self.write(self.directory(sid)/'deployed.json',receipt)
+        direct=getattr(self.control,'direct_bootstrap',None)
+        if direct:
+            self.status(sid,'deploying_direct_https')
+            direct.deploy(self,sid,metadata,receipt,deadline)
         self.status(sid,'deployed')  # This is NOT model READY; only authenticated health can prove that.
 
     def step(self,value):
         sid=value.get('sessionId')
         if not sid:return
         if value.get('verifiedStopped') or value.get('stopSent'):
-            self.close_tunnel();return
+            self.close_tunnel()
+            direct=getattr(self.control,'direct_bootstrap',None)
+            if direct:direct.revoke(sid)
+            return
         if value.get('state') not in ('LOADING','READY','EXECUTING'):return
         with self.lock:
             if self.thread and self.thread.is_alive():return
             directory=self.directory(sid);directory.mkdir(parents=True,exist_ok=True,mode=0o700)
             if (directory/'deployed.json').exists():
-                if self.tunnel is None or self.tunnel.poll() is not None:self.status(sid,'uncertain',error='SSH_TUNNEL_NOT_LIVE_NO_RECONNECT')
+                if self.tunnel is None or self.tunnel.poll() is not None:
+                    if (directory/'direct-ready.json').is_file() and getattr(self.control.sessions.worker,'direct_available',False) is True:self.status(sid,'direct_https_configured_ssh_unavailable')
+                    else:self.status(sid,'uncertain',error='SSH_TUNNEL_NOT_LIVE_NO_RECONNECT')
                 return
             if (directory/'failed.json').exists():return
             def run():

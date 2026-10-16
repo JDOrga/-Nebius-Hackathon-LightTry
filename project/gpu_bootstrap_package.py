@@ -15,7 +15,7 @@ FILES=sorted(set(BUNDLE_FILES+['start.py','project/guard_runtime.py','project/gp
     'project/security.py','project/mtls_relay.py','project/worker_tls.py','project/inference/driver.py','project/runtime/driver.py']))
 HELPERS=['cloud/remote_probe.py','project/gpu_bootstrap_vm.py','project/gpu_bootstrap_container.py',
          'project/gpu_bootstrap_ssh.py','project/gpu_bootstrap_package.py','project/gpu_bootstrap.py',
-         'project/gpu_session.py','project/worker_link.py']
+         'project/gpu_session.py','project/worker_link.py','project/direct_bootstrap.py']
 
 
 def helper_sha():

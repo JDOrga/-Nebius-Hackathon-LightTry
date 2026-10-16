@@ -135,6 +135,16 @@ class BootstrapTests(TLSFixture):
         self.child.poll.return_value=255;self.bootstrap.step(self.value)
         self.assertEqual(read(self.bootstrap.directory(self.sid)/'status.json')['stage'],'uncertain')
         self.bootstrap.spawn.assert_called_once();self.assertFalse(self.bootstrap.connected(self.sid))
+    def test_auto_direct_hook_is_after_worker_once_and_revoked_at_stop(self):
+        self.confirmed();direct=Mock();self.control.direct_bootstrap=direct
+        self.bootstrap.step(self.value);self.bootstrap.thread.join(5)
+        direct.deploy.assert_called_once();self.bootstrap.spawn.assert_called_once()
+        self.bootstrap.step(self.value);direct.deploy.assert_called_once()
+        self.bootstrap.write(self.bootstrap.directory(self.sid)/'direct-ready.json',{'sessionId':self.sid})
+        self.sessions.worker.direct_available=True;self.child.poll.return_value=255
+        self.bootstrap.step(self.value)
+        self.assertEqual(read(self.bootstrap.directory(self.sid)/'status.json')['stage'],'direct_https_configured_ssh_unavailable')
+        self.value['stopSent']=True;self.bootstrap.step(self.value);direct.revoke.assert_called_once_with(self.sid)
     def test_failed_install_ack_is_not_reissued_after_restart(self):
         self.confirmed()
         original=self.bootstrap.runner.side_effect
@@ -273,7 +283,7 @@ class GuardIdentityTests(unittest.TestCase):
         f=fixtures.GuardTests();f.setUp()
         try:
             value=f.sessions.start(f.scope);f.provider.state='RUNNING';observe=f.provider.observe
-            f.clock.step(590);f.sessions.heartbeat(value['sessionId'])
+            f.clock.step(value['startupDeadline']-f.clock()-10);f.sessions.heartbeat(value['sessionId'])
             def late(resource):f.clock.step(20);return observe(resource)
             f.provider.observe=late
             stopped=f.sessions.poll(value['sessionId'])

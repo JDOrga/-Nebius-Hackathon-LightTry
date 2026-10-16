@@ -364,3 +364,7 @@ CosmosWorkerExecutor 保留为旧的逐任务冷加载适配器，不报告 read
 可选 `binding.directWorkerFile` 启用本轮主机绑定的直连 HTTPS，SSH HTTPS 作为备用。默认关闭；直连入口、IP SAN 证书、CPU 客户端证书和公网可达性必须在下一次授权会话确认。见 [直连接线说明](deploy/DIRECT_HTTPS.md)。切换只探测健康并查询原任务，不自动重发 POST/PUT，不重启模型或延长预算窗口。GPU/容器/整条网络故障仍可能使两路同时失效。
 
 动态热点/VPN：直连入口改为 mTLS 验证 CPU 证书，不再使用固定来源 IP 白名单；入口与内部 worker 分别验证 TLS。实现与未部署边界见上述接线说明。
+
+第九轮真实连接验收：公网 mTLS 与主动关闭 SSH 后的直连健康/合成 blob 下载已通过；未换 IP、未提交推理、模型 READY 未确认。实测使用 `project/mtls_relay.py`，不是 Nginx。当前已安全停机、撤销本轮直连配置；每次新会话的自动代理部署/证书绑定和完整模型推理验收仍待完成。
+
+自动mTLS接线已在本地接入主机确认后的部署链（可选私有directTLS），不再依赖逐轮手工脚本；健康绑定通过才发布，停止自动撤销。自动版本尚未重新实机验收，当前GPU仍关闭。
