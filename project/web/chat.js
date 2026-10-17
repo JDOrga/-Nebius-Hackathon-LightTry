@@ -1,5 +1,5 @@
 import {schemeWire} from './scheme-state.js';
-import {userDifferences} from './console.js';
+import {differences,userDifferences} from './console.js';
 import {uid,sameParameters} from './scheme-state.js';
 const $=id=>document.getElementById(id);
 export const sessionKey=s=>s.inputId+':'+s.planId;

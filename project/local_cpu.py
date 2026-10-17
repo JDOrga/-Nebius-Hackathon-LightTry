@@ -36,6 +36,32 @@ class LocalApplication(Application):
         super().__init__(opts)
         if set(self.accounts.users)!={'lighttry'}:
             super().close();raise ValueError('SINGLE_OWNER_LOCAL_WORKSPACE_REQUIRED')
+        # Explicit, bounded server-only text scope; never inferred from a key alone.
+        text_config=os.environ.get('LIGHTTRY_RECIPE_LANGUAGE_CONFIG_FILE')
+        if text_config:
+            try:
+                from recipe_language import RecipeLanguage
+                from studio import measured_context
+                cfg=json.loads(runtime_file(text_config,ROOT).decode('utf-8'))
+                if (set(cfg)!={'schemaVersion','ledgerFile','maxCalls','budgetUsd'} or cfg['schemaVersion']!=1
+                        or type(cfg['maxCalls']) is not int or not 1<=cfg['maxCalls']<=3
+                        or type(cfg['budgetUsd']) not in (int,float) or not 0<cfg['budgetUsd']<=.066):
+                    raise ValueError('BOUNDED_LOCAL_TEXT_SCOPE_REQUIRED')
+                ledger=Path(cfg['ledgerFile'])
+                if (not ledger.is_absolute() or ledger.resolve().is_relative_to(ROOT.resolve())
+                        or any(p.is_symlink() for p in (ledger,*ledger.parents))):
+                    raise ValueError('PRIVATE_TEXT_LEDGER_REQUIRED')
+                key=self.provider_secrets.get('nemotron').lstrip('\ufeff')
+                if not key.isascii() or not 20<=len(key)<=4096 or any(c.isspace() for c in key):
+                    raise ValueError('KEY_FILE_FORMAT_INVALID_NO_REQUEST')
+                self.handler.recipe_language=RecipeLanguage(self.handler.catalog['presets'],
+                    self.handler.lighting_capabilities,key,ledger,max_calls=cfg['maxCalls'],
+                    budget=cfg['budgetUsd'],repair_limit=0,
+                    measured_cases=measured_context(self.handler.studies))
+                self.handler.task_store.approved_language_operation=self.handler.recipe_language.approved_operation
+            except Exception:
+                super().close()
+                raise
         self.start_policy=None
         if getattr(opts,'start_policy_file',None):
             policy=json.loads(runtime_file(opts.start_policy_file,ROOT).decode())

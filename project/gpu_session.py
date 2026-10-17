@@ -36,6 +36,7 @@ class Sessions:
             db.executescript('''PRAGMA journal_mode=WAL;
                 CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,scope TEXT UNIQUE NOT NULL,resource TEXT NOT NULL,body TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS dispatches(job TEXT PRIMARY KEY,session TEXT NOT NULL,fingerprint TEXT NOT NULL,body TEXT NOT NULL,state TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS client_presence(session TEXT PRIMARY KEY,at REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS cpu_liveness(session TEXT PRIMARY KEY,at REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS events(sequence INTEGER PRIMARY KEY AUTOINCREMENT,session TEXT,event TEXT,at REAL);''')
 
@@ -54,11 +55,14 @@ class Sessions:
         if not row:raise JobError('SESSION_NOT_FOUND','会话不存在。',404)
         value=json.loads(row[0])
         if heartbeat:value['cpuHeartbeatAt']=max(value['cpuHeartbeatAt'],heartbeat[0])
+        if value.get('presenceVersion') and value.get('runningAt') is not None:
+            with self.db() as db:presence=db.execute('SELECT at FROM client_presence WHERE session=?',(identity,)).fetchone()
+            value['idleDeadline']=min(max(value['runningAt'],presence[0] if presence else value['runningAt'])+300,value['workDeadline'])
         return value
 
     def latest(self):
         with self.db() as db:row=db.execute('SELECT body FROM sessions ORDER BY rowid DESC LIMIT 1').fetchone()
-        value=json.loads(row[0]) if row else {'state':'STOPPED','label':LABELS['STOPPED'],'providerState':None,'verifiedStopped':False,'configured':True}
+        value=self.get(json.loads(row[0])['sessionId']) if row else {'state':'STOPPED','label':LABELS['STOPPED'],'providerState':None,'verifiedStopped':False,'configured':True}
         if row:
             with self.db() as db:heartbeat=db.execute('SELECT at FROM cpu_liveness WHERE session=?',(value['sessionId'],)).fetchone()
             if heartbeat:value['cpuHeartbeatAt']=max(value['cpuHeartbeatAt'],heartbeat[0])
@@ -118,9 +122,9 @@ class Sessions:
                 'state':'STARTING','providerState':None,'simulation':scope['simulation'],
                 'protectionMode':self.protection_mode,
                 'recoveryMode':getattr(self,'recovery_mode',False) is True,'createdAt':now,'startupDeadline':min(now+1800,scope['expiresAt']),
-                'absoluteDeadline':min(now+3420,scope['expiresAt']),
+                'absoluteDeadline':min(now+5520,scope['expiresAt']),'presenceVersion':1,
                 'runningAt':None,'workDeadline':None,'stopDeadline':None,'verifyDeadline':None,
-                'idleSeconds':scope['idleSeconds'],'idleDeadline':None,'stopWaitDeadline':None,
+                'idleSeconds':300,'idleDeadline':None,'stopWaitDeadline':None,
                 'lastObservedAt':now,'cpuHeartbeatAt':now,'cpuLeaseSeconds':30,
                 'startSent':False,'stopSent':False,'hostConfirmed':False,'hostIdentity':None,
                 'verifiedStopped':False,'instancesEmpty':False,'guardExited':False,'sleepHeld':False,
@@ -188,6 +192,16 @@ class Sessions:
                 raise JobError('CURRENT_HOST_CONFIRMATION_REQUIRED','当前 RUNNING 主机身份不匹配。',409)
             value['hostConfirmed']=True;self.save(value,'CURRENT_HOST_CONFIRMED');return value
 
+    def client_presence(self, identity):
+        """Workbench presence is not CPU liveness or task activity."""
+        with self.lock:
+            value=self.get(identity);now=self.clock()
+            if not value.get('presenceVersion') or value['stopSent'] or value['verifiedStopped']:return
+            if now<value['createdAt']:raise ValueError('CLOCK_REGRESSED')
+            if value['idleDeadline'] is not None and now>=value['idleDeadline']:return
+            with self.db() as db:
+                db.execute('INSERT INTO client_presence VALUES (?,?) ON CONFLICT(session) DO UPDATE SET at=max(at,excluded.at)',(identity,now))
+
     def heartbeat(self, identity):
         with self.lock:
             value=self.get(identity);now=self.clock()
@@ -228,7 +242,7 @@ class Sessions:
             due=(now>=value['absoluteDeadline'] or now-value['cpuHeartbeatAt']>=value['cpuLeaseSeconds'] or
                  (value['runningAt'] is None and now>=value['startupDeadline']) or
                  (value['workDeadline'] is not None and now>=value['workDeadline']) or
-                 (not value.get('recoveryMode') and value['idleDeadline'] is not None and value['state'] in ('READY','LOADING') and now>=value['idleDeadline']))
+                 ((value.get('presenceVersion') or not value.get('recoveryMode')) and value['idleDeadline'] is not None and (value.get('presenceVersion') or value['state'] in ('READY','LOADING')) and now>=value['idleDeadline']))
             if due and not stopping:
                 self.save(value,'DEADLINE_DUE');return self.request_stop(identity,'DEADLINE_OR_CPU_LEASE')
             stop_bound_exceeded=stopping and now>=value['stopWaitDeadline']
@@ -240,11 +254,13 @@ class Sessions:
                 received=self.clock()
                 if received<now:raise ValueError('CLOCK_REGRESSED_DURING_OBSERVATION')
                 now=received;value['lastObservedAt']=received
-                value['cpuHeartbeatAt']=max(value['cpuHeartbeatAt'],self.get(identity)['cpuHeartbeatAt'])
+                fresh=self.get(identity)
+                value['cpuHeartbeatAt']=max(value['cpuHeartbeatAt'],fresh['cpuHeartbeatAt'])
+                if value.get('presenceVersion'):value['idleDeadline']=fresh['idleDeadline']
                 if not stopping and (now>=value['absoluteDeadline'] or now-value['cpuHeartbeatAt']>=value['cpuLeaseSeconds'] or
                     value['runningAt'] is None and now>=value['startupDeadline'] or
                     value['workDeadline'] is not None and now>=value['workDeadline'] or
-                    not value.get('recoveryMode') and value['idleDeadline'] is not None and value['state'] in ('READY','LOADING') and now>=value['idleDeadline']):
+                    (value.get('presenceVersion') or not value.get('recoveryMode')) and value['idleDeadline'] is not None and (value.get('presenceVersion') or value['state'] in ('READY','LOADING')) and now>=value['idleDeadline']):
                     self.save(value,'DEADLINE_DURING_OBSERVATION');return self.request_stop(identity,'DEADLINE_DURING_OBSERVATION')
                 stop_bound_exceeded=bool(stopping and now>=value['stopWaitDeadline'])
                 if stop_bound_exceeded:value['error']='STOPPING_BOUND_EXCEEDED'
@@ -268,9 +284,9 @@ class Sessions:
                         self.save(value,'CURRENT_HOST_CHANGED');return self.request_stop(identity,'CURRENT_HOST_CHANGED')
                     if value['runningAt'] is None:
                         value['runningAt']=now
-                        value['workDeadline']=min(now+1080,value['absoluteDeadline'])
-                        value['stopDeadline']=min(now+1500,value['absoluteDeadline'])
-                        value['verifyDeadline']=min(now+1620,value['absoluteDeadline'])
+                        value['workDeadline']=min(now+3600,value['absoluteDeadline'])
+                        value['stopDeadline']=min(now+3600,value['absoluteDeadline'])
+                        value['verifyDeadline']=min(now+3720,value['absoluteDeadline'])
                         value['idleDeadline']=min(now+value['idleSeconds'],value['workDeadline'])
                         value['hostIdentity']=observed.get('hostIdentity')
                         value['image']=observed.get('image')

@@ -42,7 +42,7 @@ class ScopeIssuer:
         if not isinstance(p['resourceId'],str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,200}',p['resourceId']):raise ValueError('RESOURCE_REQUIRED')
         for name in ('budgetUsdIncludingTax','hourlyUsdIncludingTax'):
             if type(p[name]) not in (int,float) or not math.isfinite(p[name]) or p[name]<=0:raise ValueError('CURRENT_RATE_AND_BUDGET_REQUIRED')
-        for name,low,high in [('billingReserveSeconds',60,600),('maxSessionSeconds',60,3600),('idleSeconds',10,300)]:
+        for name,low,high in [('billingReserveSeconds',60,600),('maxSessionSeconds',60,5520),('idleSeconds',10,300)]:
             if type(p[name]) is not int or not low<=p[name]<=high:raise ValueError('BOUNDED_SESSION_POLICY_REQUIRED')
         seconds=min(p['maxSessionSeconds'],math.floor(p['budgetUsdIncludingTax']/p['hourlyUsdIncludingTax']*3600)-p['billingReserveSeconds'])
         # Keep a meaningful startup window; never silently enlarge a tiny budget.

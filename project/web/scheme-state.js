@@ -98,3 +98,12 @@ export function schemeCaption(s,all){
 }
 
 export const schemeWire=s=>Object.fromEntries(["schemaVersion","planId","version","name","parameters","inputId","parentVersion"].map(k=>[k,s[k]]));
+
+// Restore only an exact saved version bound to an available sample; never guess a plan.
+export function savedSampleSelection(cursor,schemes,samples){
+ if(!cursor||typeof cursor.key!=='string'||typeof cursor.inputId!=='string')return null;
+ const scheme=schemes.find(s=>s.planId+':'+s.version===cursor.key&&s.inputId===cursor.inputId);
+ if(!scheme)return null;
+ const sample=samples.find(s=>s.id===cursor.sampleId&&s.input?.sha256?.slice(0,32)===scheme.inputId);
+ return sample?{scheme,sample}:null;
+}

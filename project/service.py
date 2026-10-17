@@ -462,6 +462,11 @@ class Application:
             self.gpu_entry_page(h)
         elif path=='/gpu-entry.js' and h.command=='GET':
             h.send_bytes((ROOT/'project/web/gpu-entry.js').read_bytes(),'application/javascript; charset=utf-8')
+        elif path=='/api/gpu/presence' and h.command=='POST':
+            if self.gpu_sessions:
+                current=self.gpu_sessions.latest()
+                if current.get('sessionId'):self.gpu_sessions.client_presence(current['sessionId'])
+            h.json_response({'ok':True})
         elif path=='/api/gpu/entry-status' and h.command=='GET':
             h.json_response(self.gpu_entry_info(h.user))
         elif path=='/api/gpu/entry-start' and h.command=='POST':

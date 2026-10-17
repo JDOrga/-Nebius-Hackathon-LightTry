@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {allowed,createScheme,revise,variant,removeFamily,sameParameters,matchingTask,validateLibrary,referenceKey,restoreInputStub} from '../web/scheme-state.js';
+import {savedSampleSelection,allowed,createScheme,revise,variant,removeFamily,sameParameters,matchingTask,validateLibrary,referenceKey,restoreInputStub} from '../web/scheme-state.js';
 const policy={approvedVariants:{sunny:[[0,.7],[45,1]]}};
 
 test('deleting a family removes every version and selects the latest remaining plan for this photo',()=>{
@@ -26,3 +26,17 @@ test('changed recipe or normalized HDR binding cannot borrow task result',()=>{c
 test('unsubmitted input restore is identity-only, never stale blob or sample pixels',()=>{const stub=restoreInputStub({id:'a'.repeat(32),originalSha:'b'.repeat(64),name:'my photo',width:80,height:64,url:'blob:stale'});assert.equal(stub.needsFile,true);assert.equal(stub.url,undefined);assert.equal(stub.id,'a'.repeat(32));assert.equal(restoreInputStub({id:'bad'}),null);});
 
 test('editing an old version never collides with an existing later version',()=>{const a=createScheme('sunny','A','b'.repeat(32));const b=revise(a,{...a.parameters,strength:.7});const c=revise(a,{...a.parameters,offsetDeg:45},a.name,[a,b]);assert.equal(c.version,3);assert.equal(c.parentVersion,1);assert.equal(b.parameters.strength,.7);});
+
+test('refresh restores exact sample and version, not the first other plan or latest version',()=>{
+ const inputId='b'.repeat(32),a=createScheme('sunny','A',inputId),a2=revise(a,{...a.parameters,strength:.7071}),a3=revise(a2,{...a2.parameters,strength:.8}),other=variant(a,'B');
+ const sample={id:'pot',input:{sha256:inputId+'c'.repeat(32)}};
+ const cursor={key:a2.planId+':'+a2.version,sampleId:'pot',inputId};
+ const result=savedSampleSelection(cursor,[other,a,a2,a3],[sample]);
+ assert.equal(result.scheme,a2);assert.equal(result.sample,sample);assert.equal(result.scheme.parameters.strength,.7071);
+ assert.equal(savedSampleSelection({...cursor,key:'missing:2'},[a2],[sample]),null);
+ assert.equal(savedSampleSelection({...cursor,inputId:'d'.repeat(32)},[a2],[sample]),null);
+ assert.equal(savedSampleSelection({...cursor,sampleId:'wrong'},[a2],[sample]),null);
+ assert.equal(savedSampleSelection(cursor,[],[sample]),null);
+ assert.equal(savedSampleSelection(cursor,[a2],[]),null);
+ assert.equal(savedSampleSelection(null,[a2],[sample]),null);
+});

@@ -3,7 +3,7 @@ import {archive,readArchive,mergeLibraries} from './workspace-portability.js';
 import {createConsole} from './console.js';
 import {createChat} from './chat.js';
 import {paintGenerationButton,paintGpuConsole} from './gpu-monitor.js';
-import {allowed,removeFamily,createScheme,revise as reviseBase,variant,sameParameters,matchingTask,validateLibrary,referenceKey,uid,restoreInputStub,photoTitle,schemePresentation,environmentEdit,comparisonCursor,schemeCaption,mergeAcceptedLibrary,schemeWire} from './scheme-state.js';
+import {savedSampleSelection,allowed,removeFamily,createScheme,revise as reviseBase,variant,sameParameters,matchingTask,validateLibrary,referenceKey,uid,restoreInputStub,photoTitle,schemePresentation,environmentEdit,comparisonCursor,schemeCaption,mergeAcceptedLibrary,schemeWire} from './scheme-state.js';
 const $=id=>document.getElementById(id), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let catalog,lighting,inference,schemes=[],current,input,file=null,tasks=[],mode='result',compareKey=null,pending=false,requestId=null,region=false,zoom=1,pan={x:0,y:0};
 const libraryKey='lighttry.schemeLibrary.v1',cursorKey='lighttry.schemeCursor.v1',tasksKey='lighttry.schemeTasks.v1',submissionKey='lighttry.schemeSubmission.v1',originsKey='lighttry.schemeOrigins.v1';
@@ -200,8 +200,16 @@ $('import-library-file').onchange=async()=>{try{const f=$('import-library-file')
 $('save-server').onclick=async()=>{const button=$('save-server');if(button.disabled||!serverWorkspace)return;if(!confirm('保存全部方案到服务；若当前为用户照片，会上传原照片到私有数据目录。不会生成或收费。继续？'))return;button.disabled=true;try{if(file&&!input.sampleId){const photo=await api('/api/photos/'+input.id,{method:'POST',headers:{'Content-Type':file.type,'X-LightTry-Token':inference.csrfToken,'X-LightTry-Photo':btoa(unescape(encodeURIComponent(JSON.stringify({name:input.name}))))},body:file});serverPhotos=serverPhotos.filter(p=>p.id!==photo.id).concat(photo);}serverWorkspace=await api('/api/workspace',{method:'POST',headers:{'Content-Type':'application/json','X-LightTry-Token':inference.csrfToken},body:JSON.stringify({schemaVersion:1,schemes:archive(schemes).schemes})});serverPhotos=serverWorkspace.photos;persist();$('storage-note').textContent='已保存到服务私有目录；换浏览器登录同一服务可找回方案与已上传照片。';}catch(e){error(e.message+'；可能已保存照片，方案未全部保存，请核对后重试。');}finally{button.disabled=false;}};
 $('export-server').onclick=()=>{location.href='/api/workspace/export';};
 async function init(){try{try{const me=await api('/api/me');accountNamespace=me.localWorkspace===true?'':'lighttry.user.'+me.username+'.';$('logout').hidden=false;}catch(e){if(e.status!==404)throw e;}[catalog,lighting,inference]=await Promise.all([api('/api/catalog'),api('/api/lighting'),api('/api/inference')]);if(lighting.language.developmentTestMode)document.querySelector('.boundary').textContent+=' · 演示模式（不调用真实模型）';await lightConsole.load();try{serverWorkspace=await api('/api/workspace');serverPhotos=serverWorkspace.photos||[];$('save-server').hidden=false;$('export-server').hidden=false;}catch(e){if(e.status!==404)throw e;}deletedFamilies=(storageGet(deletedKey)||[]);if(!Array.isArray(deletedFamilies))deletedFamilies=[];deletedFamilies=deletedFamilies.filter(d=>d&&/^[a-f0-9]{32}$/.test(d.planId)&&Array.isArray(d.versions)).slice(-200).map(d=>({...d,versions:validateLibrary(d.versions,catalog.presets.map(p=>p.id)).filter(s=>s.planId===d.planId)}));schemeOrigins=storageGet(originsKey)||{};schemes=visibleFamilies(validateLibrary(storageGet(libraryKey),catalog.presets.map(p=>p.id)));if(serverWorkspace)schemes=mergeLibraries(schemes,visibleFamilies(validateLibrary(serverWorkspace.schemes,catalog.presets.map(p=>p.id))));schemes=mergeAcceptedLibrary(schemes,visibleFamilies(validateLibrary(lighting.importedSchemes||[],catalog.presets.map(p=>p.id))));schemes=visibleFamilies(schemes);$('photo-select').innerHTML=catalog.samples.map(s=>`<option value="${s.id}">${esc(photoTitle(s,null))}${s.unstable?' · 材质不稳定':''}</option>`).join('');$('environments').innerHTML=catalog.presets.map(p=>`<button type="button" data-environment="${p.id}" aria-pressed="false">${esc(p.name)}</button>`).join('');document.querySelectorAll('[data-environment]').forEach(b=>{b.onclick=()=>selectEnvironment(b.dataset.environment);b.onkeydown=e=>{const buttons=[...document.querySelectorAll('[data-environment]')];let i=buttons.indexOf(b);if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();i=e.key==='Home'?0:e.key==='End'?buttons.length-1:(i+(e.key==='ArrowLeft'?-1:1)+buttons.length)%buttons.length;buttons[i].focus();}};});$('environment').innerHTML=catalog.presets.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');for(const id of [...new Set([...(serverWorkspace?.taskIds||[]),...(storageGet(tasksKey)||[])])].slice(0,200)){if(/^[0-9a-f]{32}$/.test(id)){try{tasks.push(await api('/api/tasks/'+id))}catch{}}}const cursor=storageGet(cursorKey),unfinished=storageGet(submissionKey);if(unfinished?.meta?.requestId){try{const recovered=await api('/api/requests/'+unfinished.meta.requestId);if(!tasks.some(t=>t.taskId===recovered.taskId))tasks.push(recovered);rememberSubmission(null)}catch{error('上次提交未得到确认；请求身份保留，重新载入同一照片才可手动重试。')}}for(const photo of serverPhotos){$('photo-select').add(new Option(photo.name,'__saved_'+photo.id));}
-input={id:uid(),name:'待上传照片',width:1280,height:704,unbound:true};file=null;current=createScheme(catalog.presets[0].id,'未命名草稿',input.id);mode='result';compareKey=null;zoom=1;pan={x:0,y:0};await render();refreshGpuMonitor();
-// Keep saved libraries and unsettled request evidence, but never auto-select their photos.
+const savedSelection=savedSampleSelection(cursor,schemes,catalog.samples);
+if(savedSelection){
+ await chooseSample(savedSelection.sample.id);
+ current=savedSelection.scheme;persist();
+}else{
+ input={id:uid(),name:'待上传照片',width:1280,height:704,unbound:true};file=null;
+ current=createScheme(catalog.presets[0].id,'未命名草稿',input.id);
+}
+mode='result';compareKey=null;zoom=1;pan={x:0,y:0};await render();refreshGpuMonitor();
+// Keep unsettled request evidence; restoring a selection never submits work.
 for(const task of tasks.filter(t=>['queued','running'].includes(t.status)||t.executionUncertain))poll(task.taskId).catch(e=>error('恢复任务失败：'+e.message));
 }catch(e){error(e.message)}}
 init();
@@ -351,3 +359,15 @@ $('gpu-monitor-confirm').onclick=async()=>{
 };
 document.addEventListener('visibilitychange',()=>{clearTimeout(gpuMonitorTimer);if(!document.hidden)refreshGpuMonitor();});
 window.addEventListener('pagehide',()=>clearTimeout(gpuMonitorTimer));
+
+// Presence continues while the workbench is open, including background tabs.
+let presenceBusy=false;
+async function reportWorkbenchPresence(){
+ if(presenceBusy||!inference?.csrfToken)return;
+ presenceBusy=true;
+ try{await api('/api/gpu/presence',{method:'POST',headers:{'X-LightTry-Token':inference.csrfToken}});}catch(e){}
+ finally{presenceBusy=false;}
+}
+setInterval(reportWorkbenchPresence,15000);
+reportWorkbenchPresence();
+window.addEventListener('pageshow',reportWorkbenchPresence);
