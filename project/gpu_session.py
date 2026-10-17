@@ -57,6 +57,7 @@ class Sessions:
         if heartbeat:value['cpuHeartbeatAt']=max(value['cpuHeartbeatAt'],heartbeat[0])
         if value.get('presenceVersion') and value.get('runningAt') is not None:
             with self.db() as db:presence=db.execute('SELECT at FROM client_presence WHERE session=?',(identity,)).fetchone()
+            value['clientLastSeenAt']=presence[0] if presence else None
             value['idleDeadline']=min(max(value['runningAt'],presence[0] if presence else value['runningAt'])+300,value['workDeadline'])
         return value
 
@@ -213,11 +214,22 @@ class Sessions:
             # Remote deadman never receives a later absolute deadline.
             self.fallback.heartbeat(identity,value['resourceId'],now)
 
+    @staticmethod
+    def stop_reason(value, now):
+        if now>=value['absoluteDeadline']:return 'SESSION_ABSOLUTE_DEADLINE'
+        if now-value['cpuHeartbeatAt']>=value['cpuLeaseSeconds']:return 'CPU_HEARTBEAT_LOST'
+        if value['runningAt'] is None and now>=value['startupDeadline']:return 'STARTUP_TIMEOUT'
+        if value['workDeadline'] is not None and now>=value['workDeadline']:return 'RUNNING_WINDOW_EXPIRED'
+        if ((value.get('presenceVersion') or not value.get('recoveryMode')) and value['idleDeadline'] is not None and
+            (value.get('presenceVersion') or value['state'] in ('READY','LOADING')) and now>=value['idleDeadline']):
+            return 'NO_CLIENT_CONNECTION_5_MIN'
+        return None
+
     def request_stop(self, identity, reason='OPERATOR_STOP'):
         with self.lock:
             def latch(value):
                 if value['state']=='STOPPED' or value['stopSent']:return False
-                now=self.clock();value['state']='STOPPING';value['error']=reason
+                now=self.clock();value['state']='STOPPING';value['error']=reason;value['stopReason']=reason
                 upper=value['verifyDeadline'] or min(value['startupDeadline']+120,value['absoluteDeadline'])
                 value['stopWaitDeadline']=min(now+120,upper,value['absoluteDeadline']);value['stopSent']=True
             value,send=self.change(identity,'STOP_ATTEMPT_LATCHED',latch)
@@ -239,12 +251,9 @@ class Sessions:
                 value['state']='UNKNOWN';value['error']='CLOCK_REGRESSED';self.save(value,'CLOCK_REGRESSED');return value
             value['lastObservedAt']=now
             stopping=value['stopSent'];ready=False
-            due=(now>=value['absoluteDeadline'] or now-value['cpuHeartbeatAt']>=value['cpuLeaseSeconds'] or
-                 (value['runningAt'] is None and now>=value['startupDeadline']) or
-                 (value['workDeadline'] is not None and now>=value['workDeadline']) or
-                 ((value.get('presenceVersion') or not value.get('recoveryMode')) and value['idleDeadline'] is not None and (value.get('presenceVersion') or value['state'] in ('READY','LOADING')) and now>=value['idleDeadline']))
-            if due and not stopping:
-                self.save(value,'DEADLINE_DUE');return self.request_stop(identity,'DEADLINE_OR_CPU_LEASE')
+            reason=self.stop_reason(value,now)
+            if reason and not stopping:
+                self.save(value,'DEADLINE_DUE');return self.request_stop(identity,reason)
             stop_bound_exceeded=stopping and now>=value['stopWaitDeadline']
             if stop_bound_exceeded:
                 value['state']='UNKNOWN';value['error']='STOPPING_BOUND_EXCEEDED';self.save(value,'STOPPING_BOUND_EXCEEDED')
@@ -257,11 +266,9 @@ class Sessions:
                 fresh=self.get(identity)
                 value['cpuHeartbeatAt']=max(value['cpuHeartbeatAt'],fresh['cpuHeartbeatAt'])
                 if value.get('presenceVersion'):value['idleDeadline']=fresh['idleDeadline']
-                if not stopping and (now>=value['absoluteDeadline'] or now-value['cpuHeartbeatAt']>=value['cpuLeaseSeconds'] or
-                    value['runningAt'] is None and now>=value['startupDeadline'] or
-                    value['workDeadline'] is not None and now>=value['workDeadline'] or
-                    (value.get('presenceVersion') or not value.get('recoveryMode')) and value['idleDeadline'] is not None and (value.get('presenceVersion') or value['state'] in ('READY','LOADING')) and now>=value['idleDeadline']):
-                    self.save(value,'DEADLINE_DURING_OBSERVATION');return self.request_stop(identity,'DEADLINE_DURING_OBSERVATION')
+                reason=self.stop_reason(value,now)
+                if not stopping and reason:
+                    self.save(value,'DEADLINE_DURING_OBSERVATION');return self.request_stop(identity,reason)
                 stop_bound_exceeded=bool(stopping and now>=value['stopWaitDeadline'])
                 if stop_bound_exceeded:value['error']='STOPPING_BOUND_EXCEEDED'
                 if not self.proof(observed,value):raise ValueError('PROVIDER_IDENTITY_MISMATCH')

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "enabled": false,
+  "dataRoot": "/home/jovyan/lighttry-first-connect",
+  "resourceId": "RESOURCE",
+  "bind": "0.0.0.0",
+  "port": 8443,
+  "relayPort": 443,
+  "serverCertificate": "/run/lighttry/host.crt",
+  "serverKey": "/run/lighttry/host.key",
+  "clientCa": "/run/lighttry/cpu-ca.crt",
+  "workerRuntime": {
+    "python": "/home/jovyan/nebius-cosmos/env-py310-cu124/bin/python3.10",
+    "repo": "/home/jovyan/nebius-cosmos/source",
+    "checkpointDir": "/home/jovyan/nebius-cosmos/source/checkpoints",
+    "cudaHome": "/home/jovyan/nebius-cosmos/env-py310-cu124"
+  }
+}

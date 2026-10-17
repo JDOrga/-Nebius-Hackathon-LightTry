@@ -159,6 +159,60 @@ def worker_telemetry(health,observed):
             'loadingProgress':clean_loading(health.get('loadingProgress'))}
 
 
+def public_failure(snapshot,enrollment,fresh):
+    """Closed display schema: never return raw stderr, exception text or secrets."""
+    released=fresh and snapshot.get('verifiedStopped') is True and snapshot.get('instancesEmpty') is True
+    stage=enrollment.get('stage')
+    failure=snapshot.get('startFailure') or {}
+    title=None;detail=None;code=None
+    reasons={
+        'NO_CLIENT_CONNECTION_5_MIN':'连续5分钟未确认任何工作台连接',
+        'CPU_HEARTBEAT_LOST':'后端CPU服务心跳中断，触发停机保护',
+        'RUNNING_WINDOW_EXPIRED':'首次确认RUNNING后的一小时窗口到期',
+        'STARTUP_TIMEOUT':'GPU启动等待超时',
+        'SESSION_ABSOLUTE_DEADLINE':'本次授权或绝对保护窗口到期',
+        'USER_REQUESTED_STOP':'用户请求停机',
+        'USER_STOP_BEFORE_BOOTSTRAP_REPAIR':'用户要求修复前先停机',
+        'USER_STOP_BEFORE_ERROR_CLASSIFICATION':'用户要求补全错误分类前先停机',
+        'OPERATOR_STOP':'操作者请求停机',
+        'DEADLINE_OR_CPU_LEASE':'触发旧版时间或心跳保护；旧记录未细分原因',
+        'DEADLINE_DURING_OBSERVATION':'状态查询期间触发旧版时间或心跳保护；旧记录未细分原因'}
+    reason=snapshot.get('stopReason') or snapshot.get('error')
+    if snapshot.get('stopSent') and reason in reasons:
+        return {'code':reason,'severity':'info' if released else 'warning','title':'GPU已停止' if released else 'GPU停机保护已触发',
+            'stage':'stop_guard','detail':'停机原因：'+reasons[reason]+'。',
+            'cost':'已确认STOPPED且实例已释放。' if released else '停机请求已提交，但尚未确认实例释放，可能仍在计费。',
+            'action':'恢复连接不会自动开机；如需使用，请手动重新启动。' if released else '等待释放确认，不要重复启动。','active':not released}
+    if stage in ('uncertain','failed'):
+        code='GPU_CONNECTION_FAILED';title='GPU连接准备失败'
+        detail='服务器连接或部署未完成，模型尚不可用；不会自动重试。'
+        if enrollment.get('error')=='BOOTSTRAP_REMOTE_UNCERTAIN':
+            detail='读取主机指纹或远程连接失败；具体网络原因尚未确认，不是仍在正常加载。'
+        from bootstrap_errors import public_error
+        info=public_error(enrollment.get('failure'))
+        if info:
+            code=info['code'];title='GPU引导失败 · '+info['stageLabel']
+            detail=info['message']+' 错误码：'+code+'；不会自动重试。'
+            stage=info['stage']
+        elif enrollment.get('error')=='BOOTSTRAP_UNCERTAIN':
+            detail='旧版引导异常未记录具体类型，不能追溯判定为超时或解析失败；未继续正常加载。'
+    elif snapshot.get('error') in ('START_OR_PREFLIGHT_UNCERTAIN','START_OR_PREFLIGHT_FAILED') or (failure and not released):
+        code='GPU_START_FAILED';title='GPU启动或预检失败'
+        stage=failure.get('stage') if failure.get('stage') in ('preflight','bootstrap_preflight','supervisor_arm','provider_start') else 'unknown'
+        detail='启动流程已中断；不要重复点击启动，需要先核实和处理故障。'
+    elif snapshot.get('state')=='UNKNOWN' or not fresh:
+        code='GPU_STATUS_UNCERTAIN';title='GPU状态无法确认'
+        detail='后端状态查询失败或快照已过期；旧状态不能证明服务器已停止。'
+    elif isinstance(snapshot.get('workerTelemetry'),dict) and snapshot['workerTelemetry'].get('modelState')=='failed':
+        code='GPU_MODEL_FAILED';title='模型加载失败';detail='模型进程报告加载失败，不能生成。'
+    if not title:return None
+    if released:
+        return {'code':code,'severity':'warning','title':'上次故障 · '+title,'stage':stage if isinstance(stage,str) and stage in ('uncertain','failed','preflight','bootstrap_preflight','supervisor_arm','provider_start','state_check','capture','authorize','prepare','upload','install','tunnel','direct_https') else 'unknown',
+                'detail':detail,'cost':'已确认GPU停止且实例已释放。','action':'故障处理后再手动启动，不会自动重试。','active':False}
+    return {'code':code,'severity':'error','title':title,'stage':stage if isinstance(stage,str) and stage in ('uncertain','failed','preflight','bootstrap_preflight','supervisor_arm','provider_start','state_check','capture','authorize','prepare','upload','install','tunnel','direct_https') else 'unknown',
+            'detail':detail,'cost':'尚未确认停机释放，GPU可能继续计费。','action':'不再使用时请点击“停止”；等待显示“已停止且实例已释放”，不要重复启动。','active':True}
+
+
 def public_monitor(snapshot,fresh,now):
     telemetry=snapshot.get('workerTelemetry')
     telemetry=worker_telemetry(telemetry,number(telemetry.get('observedAt'))) if isinstance(telemetry,dict) else None
@@ -170,6 +224,7 @@ def public_monitor(snapshot,fresh,now):
     return {'providerState':snapshot.get('providerState') if snapshot.get('providerState') in
             ('STOPPED','RUNNING','STARTING','STOPPING','PROVISIONING','IMAGE_PULLING') else 'UNKNOWN',
             'host':safe_host,'hostConfirmed':snapshot.get('hostConfirmed') is True,'deadlines':deadlines,
+            'clientLastSeenAt':number(snapshot.get('clientLastSeenAt')),'clientIdleDeadline':number(snapshot.get('idleDeadline')),
             'stopRequested':snapshot.get('stopSent') is True,'verifiedStopped':snapshot.get('verifiedStopped') is True,
             'instancesEmpty':snapshot.get('instancesEmpty') is True,'worker':telemetry,
             'historicalLoadTiming':clean_loading(snapshot.get('loadTiming')),

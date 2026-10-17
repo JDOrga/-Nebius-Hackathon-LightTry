@@ -34,7 +34,7 @@ def create_relay(cfg,code_root):
  target=private_bind(cfg['workerIp'])
  if cfg['workerName'] not in ('localhost','127.0.0.1'):raise ValueError('PRIVATE_WORKER_TLS_NAME_REQUIRED')
  if any(type(cfg[k]) is not int or not 0<=cfg[k]<=65535 for k in ('port','workerPort')) or cfg['workerPort']==0:raise ValueError('PORT_INVALID')
- if not time.time()<cfg['deadline']<=time.time()+2400:raise ValueError('FIXED_RELAY_WINDOW_REQUIRED')
+ if not time.time()<cfg['deadline']<=time.time()+3600:raise ValueError('FIXED_RELAY_WINDOW_REQUIRED')
  for k in ('serverCertificate','serverKey','clientCa','workerCa'):runtime_file(cfg[k],code_root)
  server_context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);server_context.minimum_version=ssl.TLSVersion.TLSv1_2;server_context.load_cert_chain(cfg['serverCertificate'],cfg['serverKey']);server_context.load_verify_locations(cfg['clientCa']);server_context.verify_mode=ssl.CERT_REQUIRED;server_context.options|=ssl.OP_NO_TICKET
  upstream=ssl.create_default_context(cafile=cfg['workerCa'])

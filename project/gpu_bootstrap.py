@@ -104,7 +104,7 @@ def load_control(path, code_root, clock=time.time, *, observer=False):
         return None
     value = json.loads(runtime_file(path, code_root).decode('utf-8'))
     if (not isinstance(value, dict) or
-            set(value)-{'schemaVersion','enabled','factory','guardRoot','scopeFile','binding','protection','bootstrap','scopePolicyFile','modelPolicyFile','recoveryPolicy','directTLS'} or
+            set(value)-{'schemaVersion','enabled','factory','guardRoot','scopeFile','binding','protection','bootstrap','scopePolicyFile','modelPolicyFile','recoveryPolicy','directTLS','firstConnect'} or
             not {'schemaVersion','enabled','factory','guardRoot','scopeFile','binding'}<=set(value) or
             value['schemaVersion'] != 1 or type(value['enabled']) is not bool or (not observer and not value['enabled']) or
             not isinstance(value['factory'], str) or
@@ -176,4 +176,10 @@ def load_control(path, code_root, clock=time.time, *, observer=False):
         model_policy=json.loads(runtime_file(value['modelPolicyFile'],code_root).decode())
         control.model_grant_issuer=SessionGrantIssuer(control,value['bootstrap']['binding']['modelGrantFile'],model_policy,clock=clock)
 
+    if value.get('firstConnect') is not None:
+        if not control.bootstrap or not control.model_grant_issuer or not hasattr(sessions.worker,'direct_file'):
+            raise ValueError('FIRST_CONNECT_REQUIRES_SESSION_GRANTS_AND_DIRECT_WORKER')
+        from first_connect import FirstConnect
+        control.bootstrap=FirstConnect(control,control.bootstrap,value['firstConnect'])
+        sessions.bootstrap=control.bootstrap
     return control

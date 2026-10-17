@@ -17,6 +17,7 @@ from inference.jobs import atomic,read,ID,JobError
 from security import runtime_file
 from model_contract import grant_file
 from gpu_bootstrap_package import helper_sha,archive,ROOT
+from bootstrap_errors import classify,public_error,stderr_code,CommandFailure,STAGES
 
 
 def build(control,binding):return SSHBootstrap(control,binding)
@@ -82,6 +83,17 @@ class SSHBootstrap:
     def status(self,sid,stage,**extra):
         self.write(self.directory(sid)/'status.json',{'sessionId':sid,'stage':stage,'at':self.clock(),**extra})
 
+    def record_failure(self,sid,error,duration_ms=None):
+        cached=getattr(self,'_last_diagnostic',None)
+        if cached and cached[0]==sid and cached[1] is error:
+            info=cached[2]
+        else:
+            info=classify(error,getattr(self,'current_stage','unknown'),duration_ms)
+            info['at']=self.clock()
+            self._last_diagnostic=(sid,error,info)
+        self.write(self.directory(sid)/'failure-info.json',info)
+        return info
+
     def check(self,sid,*,confirmed=False):
         if self.stopped.is_set():raise ValueError('BOOTSTRAP_CLOSED')
         value=self.control.sessions.get(sid);now=self.clock()
@@ -112,6 +124,10 @@ class SSHBootstrap:
             state=read(self.directory(sid)/'status.json')
         except (OSError,ValueError,KeyError):return {'stage':'pending','canConfirm':False}
         result={'stage':state.get('stage','uncertain'),'canConfirm':False}
+        info=public_error(state.get('failure'))
+        if info:result['failure']=info
+        if state.get('error') in ('BOOTSTRAP_REMOTE_UNCERTAIN','BOOTSTRAP_UNCERTAIN','SSH_TUNNEL_NOT_LIVE_NO_RECONNECT','FIRST_CONNECT_UNCERTAIN_NO_RETRY'):
+            result['error']=state['error']
         try:
             self.check(sid)
             candidate=read(self.directory(sid)/'candidate.json')
@@ -137,6 +153,7 @@ class SSHBootstrap:
                 if path.read_bytes()!=raw:raise ValueError('SSH_PIN_CHANGED')
 
     def attempt(self,sid,stage):
+        self.current_stage='install' if stage=='launch' else 'direct_https' if stage=='direct' else stage if stage in STAGES else 'unknown'
         path=self.directory(sid)/(stage+'-attempt')
         try:
             with path.open('x'):pass
@@ -167,7 +184,11 @@ class SSHBootstrap:
                   deployment_deadline-self.clock(),self.control.scope['expiresAt']-self.clock())
         if bound<=0:raise ValueError('BOOTSTRAP_DEADLINE')
         kw={'input':input} if input is not None else {'stdin':subprocess.DEVNULL}
-        result=self.runner(command,capture_output=True,timeout=bound,shell=False,**kw)
+        started=self.clock()
+        try:result=self.runner(command,capture_output=True,timeout=bound,shell=False,**kw)
+        except Exception as error:
+            self.record_failure(sid,error,(self.clock()-started)*1000)
+            raise
         if result.returncode or len(result.stdout)>1024*1024:
             # Accept only one exact reviewed helper label. Never persist raw SSH
             # stderr/stdout, command argv, token, key paths or remote environment.
@@ -182,9 +203,12 @@ class SSHBootstrap:
             stderr=result.stderr
             label=stderr.decode('ascii',errors='replace').strip() if isinstance(stderr,bytes) and len(stderr)<=256 else ''
             if label not in allowed:label='UNRECOGNIZED_REMOTE_ERROR'
+            code='REMOTE_OUTPUT_TOO_LARGE' if len(result.stdout)>1024*1024 else 'REMOTE_HELPER_FAILED' if label!='UNRECOGNIZED_REMOTE_ERROR' else stderr_code(result.stderr)
+            error=CommandFailure(code,'BOOTSTRAP_REMOTE_'+label if label!='UNRECOGNIZED_REMOTE_ERROR' else 'BOOTSTRAP_REMOTE_UNCERTAIN',result.returncode)
+            info=self.record_failure(sid,error,(self.clock()-started)*1000)
             self.write(self.directory(sid)/'remote-error.json',{'sessionId':sid,'exitCode':result.returncode,
                 'safeLabel':label,'stdoutBytes':len(result.stdout),'stderrRecorded':False,'at':self.clock()})
-            raise OSError('BOOTSTRAP_REMOTE_'+label if label!='UNRECOGNIZED_REMOTE_ERROR' else 'BOOTSTRAP_REMOTE_UNCERTAIN')
+            raise error
         return result.stdout
 
     def capture(self,sid):
@@ -202,17 +226,19 @@ class SSHBootstrap:
 
     def vm(self,sid,q):
         value=self.check(sid,confirmed=True)
-        probe=(ROOT/'cloud/remote_probe.py').read_text();probe=probe[:probe.index("\nif __name__")]
-        program=(probe+'\n'+(ROOT/'project/gpu_bootstrap_vm.py').read_text()).encode()
+        probe=(ROOT/'cloud/remote_probe.py').read_text(encoding='utf-8');probe=probe[:probe.index("\nif __name__")]
+        program=(probe+'\n'+(ROOT/'project/gpu_bootstrap_vm.py').read_text(encoding='utf-8')).encode('utf-8')
         data=base64.b64encode(json.dumps(q,separators=(',',':')).encode()).decode()
         host=value['hostIdentity'];target=host['sshUser']+'@'+host['ip']
         raw=self.run(sid,[self.settings['sshExecutable'],*self.ssh_args(sid),target,'python3 -B - '+data],input=program)
         result=json.loads(raw)
+        if not isinstance(result,dict):raise CommandFailure('REMOTE_JSON_INVALID','BOOTSTRAP_RESPONSE_INVALID')
         if result.get('sessionId')!=sid:raise ValueError('BOOTSTRAP_ACK_MISMATCH')
         return result
 
     def deploy(self,sid):
         value=self.check(sid,confirmed=True)
+        self.current_stage='preflight'
         metadata,code,cfg=self.preflight({'image':value['image']})
         grant=grant_file(self.settings['modelGrantFile'],sid,value['resourceId'],clock=self.clock)
         deadline=min(value['workDeadline'],value['absoluteDeadline'],self.control.scope['expiresAt'])
@@ -256,6 +282,7 @@ class SSHBootstrap:
         self.write(self.directory(sid)/'deployed.json',receipt)
         direct=getattr(self.control,'direct_bootstrap',None)
         if direct:
+            self.current_stage='direct_https'
             self.status(sid,'deploying_direct_https')
             direct.deploy(self,sid,metadata,receipt,deadline)
         self.status(sid,'deployed')  # This is NOT model READY; only authenticated health can prove that.
@@ -280,17 +307,21 @@ class SSHBootstrap:
             if (directory/'failed.json').exists():return
             def run():
                 try:
+                    self.current_stage='state_check'
                     if not (directory/'candidate.json').exists():self.capture(sid);return
                     if not value.get('hostConfirmed'):return
                     issuer=getattr(self.control,'model_grant_issuer',None)
                     if issuer:
+                        self.current_stage='authorize'
                         self.check(sid,confirmed=True)
                         issuer.ensure(sid)
                     if not Path(self.settings['modelGrantFile']).is_file():self.status(sid,'waiting_authorization');return
                     self.status(sid,'deploying');self.deploy(sid)
                 except Exception as error:
-                    label=str(error) if re.fullmatch('[A-Z0-9_]{1,100}',str(error)) else 'BOOTSTRAP_UNCERTAIN'
-                    self.write(directory/'failed.json',{'error':label});self.status(sid,'uncertain',error=label)
+                    info=self.record_failure(sid,error)
+                    legacy={'FROZEN_BOOTSTRAP_BINDING_CHANGED','FROZEN_BOOTSTRAP_CODE_CHANGED','BOOTSTRAP_DEADLINE','CURRENT_RUNNING_HOST_REQUIRED','BOOTSTRAP_ACK_MISMATCH','SSH_HOST_KEY_INVALID','SSH_HOST_KEY_NOT_UNIQUE'}
+                    label=str(error) if str(error) in legacy else info['code']
+                    self.write(directory/'failed.json',{'error':label,'failure':info});self.status(sid,'uncertain',error=label,failure=info)
             self.thread=threading.Thread(target=run,name='gpu-ssh-bootstrap',daemon=True);self.thread.start()
 
     def close_tunnel(self):

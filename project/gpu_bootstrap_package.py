@@ -12,10 +12,11 @@ from inference.jobs import atomic
 ROOT=Path(__file__).resolve().parent.parent
 FILES=sorted(set(BUNDLE_FILES+['start.py','project/guard_runtime.py','project/gpu_session.py','project/worker_link.py',
     'project/gpu_model.py','project/resident_executor.py','project/resident_model.py','project/gpu_monitoring.py','project/model_contract.py',
-    'project/security.py','project/mtls_relay.py','project/worker_tls.py','project/inference/driver.py','project/runtime/driver.py']))
+    'project/security.py','project/mtls_relay.py','project/worker_tls.py','project/inference/driver.py','project/runtime/driver.py',
+    'project/first_connect_agent.py','project/first_connect.py','project/gpu_bootstrap_container.py','project/gpu_bootstrap_vm.py','project/bootstrap_errors.py']))
 HELPERS=['cloud/remote_probe.py','project/gpu_bootstrap_vm.py','project/gpu_bootstrap_container.py',
          'project/gpu_bootstrap_ssh.py','project/gpu_bootstrap_package.py','project/gpu_bootstrap.py',
-         'project/gpu_session.py','project/worker_link.py','project/direct_bootstrap.py']
+         'project/gpu_session.py','project/worker_link.py','project/direct_bootstrap.py','project/first_connect.py','project/first_connect_agent.py','project/bootstrap_errors.py']
 
 
 def helper_sha():

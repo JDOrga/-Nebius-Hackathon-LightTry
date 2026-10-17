@@ -44,8 +44,8 @@ class LocalApplication(Application):
                 from studio import measured_context
                 cfg=json.loads(runtime_file(text_config,ROOT).decode('utf-8'))
                 if (set(cfg)!={'schemaVersion','ledgerFile','maxCalls','budgetUsd'} or cfg['schemaVersion']!=1
-                        or type(cfg['maxCalls']) is not int or not 1<=cfg['maxCalls']<=3
-                        or type(cfg['budgetUsd']) not in (int,float) or not 0<cfg['budgetUsd']<=.066):
+                        or type(cfg['maxCalls']) is not int or not 1<=cfg['maxCalls']<=100
+                        or type(cfg['budgetUsd']) not in (int,float) or not 0<cfg['budgetUsd']<=2.20):
                     raise ValueError('BOUNDED_LOCAL_TEXT_SCOPE_REQUIRED')
                 ledger=Path(cfg['ledgerFile'])
                 if (not ledger.is_absolute() or ledger.resolve().is_relative_to(ROOT.resolve())
@@ -85,6 +85,7 @@ class LocalApplication(Application):
         info=super().gpu_entry_info(owner)
         if self.observer and not self.gpu_control:info.update(self.observer.snapshot())
         if self.start_policy:info.update(budgetUsdIncludingTax=self.start_policy['budgetUsdIncludingTax'],budgetHardCap=False)
+        if not self.gpu_control:info['message']='GPU控制当前未启用（维护中），不能从网页启动；这不代表已确认GPU停机。文字对话与本地编辑仍可使用。'
         return {**info,'mode':'local-authenticated'}
 
     def private_route(self,h):
@@ -130,7 +131,7 @@ def main(paths):
         signal.signal(signal.SIGTERM,stop)
         app.start_background()
         print('LightTry authenticated local CPU: '+app.origin+'; GPU mutations require explicit current control scope.',flush=True)
-        serve(app,listen='127.0.0.1:'+str(urlsplit(app.origin).port),threads=4,connection_limit=64,
+        serve(app,listen='127.0.0.1:'+str(urlsplit(app.origin).port),threads=16,connection_limit=64,
             max_request_header_size=16384,max_request_body_size=32*1024*1024,channel_timeout=30,
-            channel_request_lookahead=0,expose_tracebacks=False,clear_untrusted_proxy_headers=True)
+            channel_request_lookahead=1,expose_tracebacks=False,clear_untrusted_proxy_headers=True)
     finally:app.close()

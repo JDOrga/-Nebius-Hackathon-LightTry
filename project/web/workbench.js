@@ -1,8 +1,9 @@
+import {WorkbenchPresence} from './workbench-presence.js';
 import {resetClientStorage} from './workspace-portability.js';
 import {archive,readArchive,mergeLibraries} from './workspace-portability.js';
 import {createConsole} from './console.js';
 import {createChat} from './chat.js';
-import {paintGenerationButton,paintGpuConsole} from './gpu-monitor.js';
+import {paintGenerationButton,paintGpuConsole,gpuNotice} from './gpu-monitor.js';
 import {savedSampleSelection,allowed,removeFamily,createScheme,revise as reviseBase,variant,sameParameters,matchingTask,validateLibrary,referenceKey,uid,restoreInputStub,photoTitle,schemePresentation,environmentEdit,comparisonCursor,schemeCaption,mergeAcceptedLibrary,schemeWire} from './scheme-state.js';
 const $=id=>document.getElementById(id), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let catalog,lighting,inference,schemes=[],current,input,file=null,tasks=[],mode='result',compareKey=null,pending=false,requestId=null,region=false,zoom=1,pan={x:0,y:0};
@@ -268,7 +269,21 @@ function applyGpuGenerationGate(){
   if(!draftDirty)$('stage').textContent=wait?'等待服务器和模型准备完成后即可生成。':'生成可能需要几分钟，请耐心等待。';
   button.title=wait?gpuMonitorInfo?.message||'请等待模型就绪':'提交当前方案';}
 }
+let clientConnectionState='connecting';
 function paintGpuMonitor(info){
+ info={...info,clientConnection:clientConnectionState};
+ const notice=gpuNotice(info);
+ let banner=$('gpu-error-banner');
+ if(!banner){
+  banner=document.createElement('section');banner.id='gpu-error-banner';banner.setAttribute('role','alert');
+  banner.style.cssText='margin:12px 22px;padding:14px 18px;border:1px solid #c36b38;border-radius:12px;background:#fff4e8;color:#713b18;line-height:1.6';
+  const title=document.createElement('strong'),detail=document.createElement('p'),button=document.createElement('button');
+  title.id='gpu-error-title';detail.id='gpu-error-detail';button.type='button';button.textContent='查看GPU错误详情';
+  button.onclick=()=>{$('gpu-console-dialog').showModal();};banner.append(title,detail,button);
+  (document.querySelector('main')||document.body.firstElementChild).before(banner);
+ }
+ banner.hidden=!notice;
+ if(notice){$('gpu-error-title').textContent=notice.title;$('gpu-error-detail').textContent=notice.text;}
  gpuMonitorInfo=info;
  const budget=info.budgetUsdIncludingTax;
  $('gpu-monitor-budget').textContent=Number.isFinite(budget)&&budget>0?`本次预算 ${budget.toFixed(2)} 美元（含税）。自动停机不保证账单硬封顶。请求提交后可继续编辑方案。`:'启动后可能产生费用。请求会在后台处理，无需等待，你可以继续编辑方案。';
@@ -276,6 +291,7 @@ function paintGpuMonitor(info){
  let label=info.providerConnected?labels[info.state]||'状态未知':info.configured===false?'未连接':info.stale?'状态已过期':labels[info.state]||'状态未知';
  if(info.startStatus==='requested'&&!info.active)label='启动请求已提交';
  if(info.startStatus==='failed'&&!info.active)label='启动未成功';
+ if(info.diagnostic?.active)label='发生故障 · 查看详情';
  $('gpu-monitor').dataset.state=info.configured===false&&!info.providerConnected?'DISCONNECTED':info.state||'UNKNOWN';
  $('gpu-monitor').title=info.message||'GPU 服务器状态';
  $('gpu-monitor-state').textContent=label;
@@ -294,9 +310,10 @@ function paintGpuMonitor(info){
 async function refreshGpuMonitor(){
  if(gpuMonitorBusy)return;
  gpuMonitorBusy=true;$('gpu-monitor-refresh').disabled=true;
- try{paintGpuMonitor(await api('/api/gpu/entry-status'));}
+ const statusController=new AbortController(),statusTimeout=setTimeout(()=>statusController.abort(),10000);
+ try{paintGpuMonitor(await api('/api/gpu/entry-status',{signal:statusController.signal}));}
  catch(e){paintGpuMonitor({...gpuMonitorInfo,state:'UNKNOWN',stale:true,canGenerate:false,hostConfirmation:{canConfirm:false},configured:e.status===404?false:undefined,canStart:false,message:e.status===404?'本地预览未连接 GPU 服务。':'暂时无法读取 GPU 状态；下列旧快照不代表当前状态。'});}
- finally{gpuMonitorBusy=false;$('gpu-monitor-refresh').disabled=false;clearTimeout(gpuMonitorTimer);if(!document.hidden)gpuMonitorTimer=setTimeout(refreshGpuMonitor,$('gpu-console-dialog').open?5000:15000);}
+ finally{clearTimeout(statusTimeout);gpuMonitorBusy=false;$('gpu-monitor-refresh').disabled=false;clearTimeout(gpuMonitorTimer);if(!document.hidden)gpuMonitorTimer=setTimeout(refreshGpuMonitor,$('gpu-console-dialog').open?5000:15000);}
 }
 $('gpu-monitor-refresh').onclick=refreshGpuMonitor;
 function openGpuConsole(){paintGpuConsole(document,gpuMonitorInfo||{});if(!$('gpu-console-dialog').open)$('gpu-console-dialog').showModal();refreshGpuMonitor();}
@@ -360,14 +377,14 @@ $('gpu-monitor-confirm').onclick=async()=>{
 document.addEventListener('visibilitychange',()=>{clearTimeout(gpuMonitorTimer);if(!document.hidden)refreshGpuMonitor();});
 window.addEventListener('pagehide',()=>clearTimeout(gpuMonitorTimer));
 
-// Presence continues while the workbench is open, including background tabs.
-let presenceBusy=false;
-async function reportWorkbenchPresence(){
- if(presenceBusy||!inference?.csrfToken)return;
- presenceBusy=true;
- try{await api('/api/gpu/presence',{method:'POST',headers:{'X-LightTry-Token':inference.csrfToken}});}catch(e){}
- finally{presenceBusy=false;}
-}
-setInterval(reportWorkbenchPresence,15000);
-reportWorkbenchPresence();
-window.addEventListener('pageshow',reportWorkbenchPresence);
+// Keep the socket open in background; closing/freezing JS timers is not logout.
+const workbenchPresence=new WorkbenchPresence({token:()=>inference?.csrfToken,onState:state=>{
+ clientConnectionState=state;
+ if(gpuMonitorInfo)paintGpuMonitor(gpuMonitorInfo);
+}});
+workbenchPresence.start();
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)workbenchPresence.resume();});
+window.addEventListener('focus',()=>workbenchPresence.resume());
+window.addEventListener('online',()=>workbenchPresence.resume());
+window.addEventListener('pageshow',()=>workbenchPresence.resume());
+window.addEventListener('pagehide',()=>workbenchPresence.stop());

@@ -1,0 +1,9 @@
+{
+  "firstConnect": {
+    "enabled": true,
+    "caFile": "HOST_CA_FILE",
+    "certificateSha256": "HOST_CERT_SHA256",
+    "clientCertificateFile": "CPU_CERT_FILE",
+    "clientKeyFile": "CPU_KEY_FILE"
+  }
+}

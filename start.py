@@ -36,6 +36,11 @@ def local_options(argv):
     return options, effective, remaining
 
 def main():
+    if '--first-connect-agent' in sys.argv[1:]:
+        sys.path.insert(0,str(ROOT/'project'))
+        from first_connect_agent import main as serve_first_connect
+        sys.argv.remove('--first-connect-agent')
+        return serve_first_connect()
     if '--model-phase' in sys.argv[1:]:
         sys.path.insert(0,str(ROOT/'project'))
         from resident_model import main as serve_phase

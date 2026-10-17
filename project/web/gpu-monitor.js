@@ -6,6 +6,15 @@ const stageNames={environment_setup:'设置运行环境',module_import:'导入�
  tokenizer_setup:'构造编码器 / 解码器',tokenizer_checkpoint_read:'读取编码器 / 解码器权重'};
 const stateNames={STOPPED:'已停止',STARTING:'正在启动',LOADING:'正在准备模型',READY:'模型已就绪',
  EXECUTING:'正在生成',STOPPING:'正在停止',UNKNOWN:'状态未知'};
+export function gpuNotice(info={}){
+ const d=info.diagnostic;
+ const lost=info.clientConnection==='lost'?'工作台在线连接已断开，正在重连。连续5分钟没有任何工作台连接会自动停机；恢复连接不会自动开机。':'';
+ if(d)return {title:d.title,text:[d.detail,d.cost,d.action,info.stale?'当前快照已过期。':'',lost].filter(Boolean).join(' '),severity:d.severity,active:d.active};
+ if(lost)return {title:'工作台连接已断开',text:lost,severity:'warning',active:false};
+ if(info.configured===false)return {title:'GPU启动暂不可用',text:info.message||'GPU控制未接入或已禁用；不会自动启动。文字对话与本地编辑不受影响。',severity:'warning',active:false};
+ if(info.stale||info.state==='UNKNOWN')return {title:'GPU状态无法确认',text:'无法获取可靠状态；服务器可能仍在计费。不要重复启动，不使用时请停止并核实释放。',severity:'error',active:true};
+ return null;
+}
 const taskStages=['inverse','forward','validating','transferring'];
 const taskNames={inverse:'分析照片',forward:'生成光照效果',validating:'校验生成结果',transferring:'取回生成结果'};
 export function inferenceProgress(task){
@@ -40,18 +49,24 @@ const size=value=>finite(value)?`${(value/1024**3).toFixed(2)} GiB`:'未采集';
 const phaseNames={inverse:'Inverse · 照片分析模型',forward:'Forward · 光照生成模型'};
 const phaseStates={loading:'加载中',ready:'已就绪',busy:'推理中',failed:'失败 / 已退出',unknown:'等待状态'};
 export function consoleView(info={},now=Date.now()/1000){
+ const notice=gpuNotice(info);
  const monitor=info.monitor||{},worker=monitor.worker,host=monitor.host||{},deadlines=monitor.deadlines||{};
  const stale=info.stale===true||info.state==='UNKNOWN'||!finite(info.observedAt)||now-info.observedAt>60||now-info.observedAt< -5;
  const workerStale=stale||monitor.workerStale!==false;
- return {title:stale?'状态未知':stateNames[info.state]||'状态未知',stale,workerStale,
-  message:info.message||'监控只读取当前快照；不会启动服务器或重新提交任务。',
+ return {title:notice?.active?notice.title:stale?'状态未知':stateNames[info.state]||'状态未知',stale,workerStale,
+  message:notice?notice.title+'：'+notice.text:info.message||'监控只读取当前快照；不会启动服务器或重新提交任务。',
   observed:info.observedAt?`最近观测 ${time(info.observedAt)}${finite(now-info.observedAt)?` · ${Math.max(0,Math.floor(now-info.observedAt))} 秒前`:''}`:'尚无可靠观测',
   model:workerStale?'未确认 / 快照过期':worker?.modelLoaded?'实际加载完成':worker?.modelState==='failed'?'加载失败':worker?.modelState==='loading'?'正在加载':'尚未就绪',
   budget:finite(info.budgetUsdIncludingTax)?`$${info.budgetUsdIncludingTax.toFixed(2)} 含税`:'未配置',
   details:[['会话',info.sessionId||'无活动会话'],['供应商状态',monitor.providerState||'UNKNOWN'],
+   ['工作台连接',info.clientConnection==='connected'?'保持连接（后台也计在线）':info.clientConnection==='lost'?'失联，正在重连':'正在建立连接'],
    ['部署 / 连接',info.hostConfirmation?.stage||'未配置'],['本轮主机',host.vmId||'尚未取得'],['地址',host.ip||'尚未取得'],
+   ['最近引导失败阶段',info.hostConfirmation?.failure?.stageLabel||'未记录'],
+   ['最近引导错误码',info.hostConfirmation?.failure?.code||(info.hostConfirmation?.stage==='uncertain'?'旧记录未细分':'无已记录错误')],
+   ['最近引导错误说明',info.hostConfirmation?.failure?.message||'未保留具体分类时不猜测原因'],
    ['身份确认',monitor.hostConfirmed?'本轮已确认':'未确认，不继承旧信任'],
    ['可靠 RUNNING',time(deadlines.runningAt)],['启动等待截止',time(deadlines.startupDeadline)],
+   ['工作台最后在线',time(monitor.clientLastSeenAt)],['无客户端连接停机截止',time(monitor.clientIdleDeadline)],
    ['工作截止',time(deadlines.workDeadline)],['停机目标',time(deadlines.stopDeadline)],
    ['核验目标',time(deadlines.verifyDeadline)],['绝对截止',time(deadlines.absoluteDeadline)],
    ['停止请求',monitor.stopRequested?'已提交（不等于释放）':'未提交'],

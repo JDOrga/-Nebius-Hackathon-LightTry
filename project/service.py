@@ -60,6 +60,8 @@ class Application:
         self.provider_secrets = ProviderSecrets(ROOT)
         self.upload_slots = threading.BoundedSemaphore(2)
         self.gpu_sessions=None
+        self.presence_stop=threading.Event()
+        self.presence_slots=threading.BoundedSemaphore(8)
         self.entry_lock=threading.Lock()
         self.entry_start=None
         self.entry_thread=None
@@ -151,6 +153,7 @@ class Application:
         LOG.info('service initialized; GPU control binding=%s; model adapter=%s',bool(self.gpu_control),bool(self.model_executor))
 
     def close(self):
+        self.presence_stop.set()
         if self.gpu_control:self.gpu_control.close()
         self.queue.close()
         if self.model_executor:self.model_executor.close()
@@ -265,19 +268,25 @@ class Application:
             reason=('启动请求已提交，请等待状态更新。' if pending['status']=='requested' else '上次启动未成功，请联系管理员核实。')
         bootstrap=getattr(getattr(self,'gpu_control',None),'bootstrap',None)
         enrollment=bootstrap.public(snapshot) if bootstrap else {'stage':'not_configured','canConfirm':False}
+        from gpu_monitoring import public_failure
+        diagnostic=public_failure(snapshot,enrollment,fresh) if self.gpu_sessions else None
+        if diagnostic:
+            reason=diagnostic['title']+'：'+diagnostic['detail']+' '+diagnostic['cost']+' '+diagnostic['action']
+            enrollment['canConfirm']=False if diagnostic['active'] else enrollment.get('canConfirm',False)
+            if diagnostic['active']:allowed=False
         operator=bool(owner and self.accounts.users[owner]['role']=='operator')
         if not operator:enrollment['canConfirm']=False
-        if state=='LOADING' and bootstrap:
+        if state=='LOADING' and bootstrap and not diagnostic:
             reason={'awaiting_host_confirmation':'请先核对并确认本次服务器连接。','waiting_authorization':'正在等待本次模型授权。',
                     'deploying':'正在连接模型服务。','deployed':'服务器已连接，正在加载模型。',
                     'uncertain':'服务器连接未确认，请先停止并核查。'}.get(enrollment['stage'],'正在准备服务器连接。')
         can_stop=bool(operator and scope and snapshot.get('sessionId') and snapshot.get('scopeId')==scope.get('scopeId') and
                       snapshot.get('resourceId')==scope.get('resourceId') and not snapshot.get('verifiedStopped') and not snapshot.get('stopSent'))
         from gpu_monitoring import public_monitor
-        return {'active':active,'state':state,'canStart':allowed,'canStop':can_stop,'hostConfirmation':enrollment,
+        return {'active':active,'state':state,'canStart':allowed,'canStop':can_stop,'hostConfirmation':enrollment,'diagnostic':diagnostic,
                 'monitor':public_monitor(snapshot,fresh,time.time()),
                 'sessionId':snapshot.get('sessionId'),'message':reason,'simulation':snapshot.get('simulation') is True,
-                'configured':self.gpu_sessions is not None,'canGenerate':bool(fresh and state=='READY'),
+                'configured':self.gpu_sessions is not None,'canGenerate':bool(fresh and state=='READY' and not (diagnostic and diagnostic['active'])),
                 'observedAt':observed if isinstance(observed,(int,float)) and not isinstance(observed,bool) else None,'stale':bool(observed is not None and not fresh),
                 'startStatus':pending.get('status') if pending else None,
                 'protectionMode':getattr(self.gpu_sessions,'protection_mode',None),
@@ -398,6 +407,19 @@ class Application:
                         slot=self.upload_slots.acquire(blocking=False)
                         if not slot:raise JobError('UPLOAD_BUSY','解码通道繁忙，请稍后重试。',429)
                 self.check_ownership(h,path)
+                if path=='/api/gpu/presence-stream' and h.command=='GET':
+                    if h.headers.get('X-LightTry-Token')!=h.csrf_token:
+                        raise JobError('INVALID_TOKEN','在线连接需要同源认证。',403)
+                    disconnected=environ.get('waitress.client_disconnected')
+                    if not callable(disconnected):
+                        raise JobError('PRESENCE_STREAM_UNAVAILABLE','服务器未启用连接断开检测。',503)
+                    if not self.presence_slots.acquire(blocking=False):
+                        raise JobError('PRESENCE_STREAM_BUSY','在线连接数达到上限。',503)
+                    from client_presence import PresenceStream
+                    stream=PresenceStream(lambda:self.gpu_sessions,disconnected,
+                        lambda:self.authorized(environ)==h.user,self.presence_stop,self.presence_slots.release)
+                    start_response('200 OK',[('Content-Type','text/event-stream'),('Cache-Control','no-store'),('X-Accel-Buffering','no')])
+                    return stream
                 if path == '/auth/logout' and h.command == 'POST':
                     self.login_sessions.revoke(self.session_token(environ))
                     h.json_response({'status':'signed_out'})
@@ -632,8 +654,8 @@ def main(argv=None):
         if app.gpu_control:app.gpu_control.start_heartbeat()
         if app.model_executor:app.model_executor.start()
         print('LightTry CPU service: 0.0.0.0:8080; data=' + str(app.workspace.root), flush=True)
-        serve(app, listen='0.0.0.0:8080', threads=4, connection_limit=64,
+        serve(app, listen='0.0.0.0:8080', threads=16, connection_limit=64,
               max_request_header_size=16384, max_request_body_size=32 * 1024 * 1024,
-              channel_timeout=30, channel_request_lookahead=0, expose_tracebacks=False, clear_untrusted_proxy_headers=True)
+              channel_timeout=30, channel_request_lookahead=1, expose_tracebacks=False, clear_untrusted_proxy_headers=True)
     finally:
         app.close()

@@ -81,8 +81,10 @@ test('card click opens a dedicated large responsive dialog with keyboard-native 
 });
 test('console reuses the single status refresh with no additional cloud loop or mutations',()=>{
  const body=source.slice(source.indexOf('async function refreshGpuMonitor'),source.indexOf("$('gpu-monitor-refresh').onclick"));
- assert(body.includes("api('/api/gpu/entry-status')"));assert(body.includes('if(gpuMonitorBusy)return'));
+ assert(body.includes("api('/api/gpu/entry-status',"));assert(body.includes('if(gpuMonitorBusy)return'));
  assert(body.includes('open?5000:15000'));assert(!body.includes("method:'POST'"));
  const open=source.slice(source.indexOf('function openGpuConsole()'),source.indexOf('let pendingGpuHost'));
  assert(!open.includes('entry-start'));assert(!open.includes('confirm-host'));assert(!open.includes('submitGeneration'));
 });
+
+test('connection failure is visible rather than normal loading and warns ongoing cost',()=>{const v=consoleView({state:'LOADING',observedAt:Date.now()/1000,diagnostic:{active:true,severity:'error',title:'GPU连接准备失败',detail:'读取主机指纹失败',cost:'GPU可能继续计费',action:'请停止并核实释放'}});assert.equal(v.title,'GPU连接准备失败');assert.match(v.message,/计费/);assert.match(v.message,/停止/);});

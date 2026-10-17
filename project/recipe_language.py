@@ -121,7 +121,7 @@ class RecipeLanguage:
     def __init__(self,presets,policy,key,ledger_path,*,max_calls=12,budget=.20,transport=None,repair_limit=1,acceptance_validator=None,full_procedural_recipe=False,thinking_mode='on',max_tokens=40960,measured_cases=None):
         self.environments={p['id']:p for p in presets};self.policy=copy.deepcopy(policy)
         self.ledger_path=Path(ledger_path);self.max_calls=max_calls;self.budget=budget
-        if not 1<=max_calls<=20 or not 0<budget<=.20 or type(repair_limit) is not int or repair_limit not in (0,1):raise ValueError('BOUNDED_NEW_LANGUAGE_BUDGET_REQUIRED')
+        if type(max_calls) is not int or not 1<=max_calls<=100 or type(budget) not in (int,float) or not 0<budget<=2.20 or type(repair_limit) is not int or repair_limit not in (0,1):raise ValueError('BOUNDED_NEW_LANGUAGE_BUDGET_REQUIRED')
         self.measured_cases=copy.deepcopy(measured_cases or [])
         self.repair_limit=repair_limit
         if acceptance_validator is not None and not callable(acceptance_validator):raise ValueError('TRUSTED_ACCEPTANCE_VALIDATOR_REQUIRED')
