@@ -217,6 +217,7 @@ class LanguageAdapter:
                 'message': '文字服务已配置，点击才发送文字。' if self.enabled else '文字服务未配置；仍可手动选择灯光。'}
 
     def _request(self, payload, timeout):
+        allow_chat_text=getattr(self,'allow_chat_text',False)
         self.last_response_audit = {}
         request = urllib.request.Request(self.endpoint, data=json.dumps(payload, ensure_ascii=False, separators=(',',':')).encode(),
                                          headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + self._key})
@@ -249,12 +250,18 @@ class LanguageAdapter:
                 raise ValueError()
             if self.output_mode == 'tool':
                 content=choice['message'].get('content')
+                if (allow_chat_text and choice.get('finish_reason')=='stop' and
+                        not choice['message'].get('tool_calls') and type(content) is str and content.strip()):
+                    # Plain conversational text has no executable parameters.
+                    # RecipeLanguage still validates size, secrets and display data.
+                    return json.dumps({'status':'explanation','action':'revise','parameters':None,
+                        'name':'','reason':content,'question':''},ensure_ascii=False)
                 if content not in (None, ''):
                     # Opt-in joint acceptance discards bounded supplementary text
                     # as UNTRUSTED DATA. It is never parsed, rendered, executed or
                     # substituted for the SINGLE expected tool's real arguments.
                     # The same call/name/finish/schema/semantic guards below hold.
-                    if not getattr(self,'allow_tool_preamble',False) or type(content) is not str or len(content)>1024 or (self._key and self._key in content):
+                    if not (allow_chat_text or getattr(self,'allow_tool_preamble',False)) or type(content) is not str or len(content)>(1600 if allow_chat_text else 1024) or (self._key and self._key in content):
                         raise ValueError()
                     self.last_response_audit['ignoredSupplementalContentChars']=len(content)
                 calls = choice['message']['tool_calls']

@@ -16,6 +16,31 @@ import diagnose_language_protocol as diagnostic
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_plain_conversation_is_opt_in_and_cannot_create_tool_parameters(self):
+        from types import SimpleNamespace
+        presets=json.loads((PRODUCT/'data/catalog.json').read_text(encoding='utf-8'))['presets']
+        adapter=LanguageAdapter(presets,enabled=True,model='nvidia/Nemotron-3_5-Lightning',key='SYNTHETIC_SECRET',output_mode='tool')
+        def invoke(message,finish='stop',enabled=True):
+            body=json.dumps({'choices':[{'finish_reason':finish,'message':message}]}).encode()
+            class Response:
+                fp=SimpleNamespace(raw=SimpleNamespace(_sock=SimpleNamespace(settimeout=lambda _:None)))
+                def __enter__(self):return self
+                def __exit__(self,*args):pass
+                def read1(self,n):return body
+                def isclosed(self):return True
+            adapter.allow_chat_text=enabled
+            with patch('language.urllib.request.build_opener',return_value=SimpleNamespace(open=lambda *a,**k:Response())):
+                return adapter._request({'model':adapter.model},5)
+        text='当然可以聊聊。\n今天有什么想法？'
+        reply=json.loads(invoke({'content':text}))
+        self.assertEqual(reply['reason'],text);self.assertIsNone(reply['parameters']);self.assertEqual(reply['status'],'explanation')
+        # Text that resembles a control payload is still inert conversation.
+        reply=json.loads(invoke({'content':'{"status":"ready","parameters":{"strength":4}}'}))
+        self.assertEqual(reply['status'],'explanation');self.assertIsNone(reply['parameters'])
+        for message,finish,enabled in [({'content':text},'stop',False),({'content':text},'length',True),
+            ({'content':text,'tool_calls':[{'type':'function','function':{'name':'execute','arguments':'{}'}}]},'tool_calls',True)]:
+            with self.assertRaises(LanguageError):invoke(message,finish,enabled)
+
     def test_opt_in_plain_preamble_never_replaces_actual_single_tool(self):
         from types import SimpleNamespace
         presets=json.loads((PRODUCT/'data/catalog.json').read_text(encoding='utf-8'))['presets']

@@ -149,4 +149,60 @@ class RecipeLanguageTests(unittest.TestCase):
    validate({**self.good,'reason':reason},self.env,self.policy)
   for reason in ['不能提供精确 EV，但可以保证颜色不变。','无法提供精确 EV；我看到照片中有反光。','不能提供精确 EV，保证颜色不变。']:
    with self.assertRaises(LanguageError):validate({**self.good,'reason':reason},self.env,self.policy)
+ def party_recipe(self):
+  from light_console import initial
+  return {**initial(self.presets[0]),'mode':'procedural','environmentId':None,'environmentSha256':None,
+    'ambient':{'strength':.08,'color':'#361054'},
+    'zones':[{'id':'party','name':'派对彩光','enabled':True,'azimuthDeg':45,'elevationDeg':20,'strength':3,'color':'#ff2080','sizeDeg':45}]}
+ def test_party_mood_accepts_recipe_without_server_metadata(self):
+  recipe=self.party_recipe()
+  for field in ('synthesizerVersion','preprocessingVersion','colorConvention'):recipe.pop(field)
+  a=self.adapter([{**self.good,'parameters':recipe,'reason':'用粉色彩光和紫色环境光尝试派对氛围，效果需试光确认。'}]);a.policy['parameterized']=True
+  self.body['text']='调成开party的感觉';result=a.recommend(self.body)
+  self.assertEqual(result['parameters'],self.party_recipe());self.assertEqual(len(self.sent),1)
+  self.assertIn('party',self.sent[0]['messages'][0]['content'])
+  self.assertEqual(self.body['currentScheme']['parameters']['strength'],1)
+ def test_party_operations_switch_mode_and_preserve_other_values(self):
+  operations=[{'op':'set','field':'mode','value':'procedural'},
+    {'op':'set','field':'environmentId','value':None},{'op':'set','field':'environmentSha256','value':None},
+    {'op':'add_zone','zone':self.party_recipe()['zones'][0]}]
+  a=self.adapter([{**self.good,'parameters':{'operations':operations}}]);a.policy['parameterized']=True
+  result=a.recommend(self.body)['parameters']
+  self.assertEqual(result['mode'],'procedural');self.assertEqual(result['zones'],self.party_recipe()['zones'])
+  self.assertEqual(result['strength'],1);self.assertEqual(result['offsetDeg'],0)
+ def test_metadata_completion_does_not_fill_lighting_or_hide_wrong_versions(self):
+  for field in ('ambient','zones','strength','mode'):
+   recipe=self.party_recipe();recipe.pop(field)
+   a=self.adapter([{**self.good,'parameters':recipe}]);a.policy['parameterized']=True;a.repair_limit=0
+   with self.assertRaises(LanguageError) as caught:a.recommend(self.body)
+   self.assertEqual(caught.exception.validation_detail,'UNKNOWN_OR_MISSING_FIELDS')
+  recipe=self.party_recipe();recipe['synthesizerVersion']='wrong'
+  a=self.adapter([{**self.good,'parameters':recipe}]);a.policy['parameterized']=True;a.repair_limit=0
+  with self.assertRaises(LanguageError) as caught:a.recommend(self.body)
+  self.assertEqual(caught.exception.validation_detail,'PROCESSING_VERSION_MISMATCH')
+ def test_full_acceptance_still_requires_all_metadata(self):
+  recipe=self.party_recipe();recipe.pop('colorConvention')
+  a=self.adapter([{**self.good,'parameters':recipe}]);a.policy['parameterized']=True;a.full_procedural_recipe=True;a.repair_limit=0
+  with self.assertRaises(LanguageError) as caught:a.recommend(self.body)
+  self.assertEqual(caught.exception.validation_detail,'UNKNOWN_OR_MISSING_FIELDS')
+ def test_operation_range_error_has_diagnosis_and_specific_repair_feedback(self):
+  bad={**self.good,'parameters':{'operations':[{'op':'exposure','delta':4}]}}
+  a=self.adapter([bad,{**self.good,'parameters':self.party_recipe()}]);a.policy['parameterized']=True
+  self.assertEqual(a.recommend(self.body)['status'],'ready')
+  record=json.loads(a.ledger_path.read_text())['records'][0]
+  self.assertEqual(record['outcome'],'PARAMETER_RANGE_INVALID')
+  self.assertEqual(record['parameterValidationDetail'],'FINITE_BOUNDED_NUMBER_REQUIRED')
+  self.assertIn('FINITE_BOUNDED_NUMBER_REQUIRED',self.sent[1]['messages'][-1]['content'])
+ def test_invalid_operations_never_clamp_or_add_calls_in_zero_repair_mode(self):
+  for operations,detail in [([{'op':'exposure','delta':4}],'FINITE_BOUNDED_NUMBER_REQUIRED'),
+      ([{'op':'remove_zone','id':'missing'}],'UNKNOWN_ZONE')]:
+   a=self.adapter([{**self.good,'parameters':{'operations':operations}}]);a.policy['parameterized']=True;a.repair_limit=0
+   with self.assertRaises(LanguageError) as caught:a.recommend(self.body)
+   self.assertEqual(caught.exception.code,'PARAMETER_RANGE_INVALID');self.assertEqual(caught.exception.validation_detail,detail)
+   self.assertNotIn('有界参数校验',str(caught.exception));self.assertEqual(len(self.sent),1)
+ def test_production_schema_owns_processing_metadata_but_keeps_light_fields_required(self):
+  from recipe_language import schema
+  recipe=schema(self.env,{**self.policy,'parameterized':True})['properties']['parameters']['anyOf'][1]['oneOf'][0]
+  self.assertNotIn('colorConvention',recipe['required'])
+  self.assertTrue({'schemaVersion','mode','ambient','zones','strength'}<=set(recipe['required']))
 if __name__=='__main__':unittest.main()
