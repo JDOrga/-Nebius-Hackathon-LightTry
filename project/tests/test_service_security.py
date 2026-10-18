@@ -59,6 +59,32 @@ class ServiceSecurityTests(unittest.TestCase):
     def tearDown(self):
         self.app.close();tempfile.tempdir=self.old_tmp;self.env.stop();self.tmp.cleanup()
 
+    def test_browser_language_and_manual_cookie_localize_entry_without_auth_change(self):
+        status,body,_=request(self.app,'/login',user=None,extra={'HTTP_ACCEPT_LANGUAGE':'en-US,en;q=0.8'})
+        self.assertEqual(status,200)
+        self.assertIn(b'<html lang="en">',body)
+        self.assertIn(b'Enter your access key',body)
+        status,body,_=request(self.app,'/login',user=None,extra={'HTTP_ACCEPT_LANGUAGE':'en-US','HTTP_COOKIE':'lighttry_lang=zh'})
+        self.assertEqual(status,200)
+        self.assertIn(b'<html lang="zh-CN">',body)
+        status,_,headers=request(self.app,'/lang/en',user=None,extra={'HTTP_ACCEPT_LANGUAGE':'zh-CN'})
+        self.assertEqual(status,303)
+        self.assertIn('lighttry_lang=en',headers['Set-Cookie'])
+        status,body,_=request(self.app,'/gpu-entry',extra={'HTTP_ACCEPT_LANGUAGE':'en-US'})
+        self.assertEqual(status,200)
+        self.assertIn(b'<html lang="en">',body)
+        self.assertIn(b'Enter without starting',body)
+        self.app.handler.task_store.executor=ApprovedOfflineExecutor()
+        metadata={'inputId':'a'*32,'requestId':'c'*32,'presetId':'sunny','name':'test'}
+        headers={'CONTENT_TYPE':'image/jpeg','HTTP_ACCEPT_LANGUAGE':'en-US',
+                 'HTTP_X_LIGHTTRY_REQUEST':base64.b64encode(json.dumps(metadata).encode()).decode()}
+        status,body,_=request(self.app,'/api/tasks','POST',image_bytes(),extra=headers)
+        self.assertEqual(status,422)
+        self.assertEqual(json.loads(body)['error']['code'],'INVALID_IMAGE')
+        self.assertIn('JPG',json.loads(body)['error']['message'])
+        self.assertEqual(request(self.app,'/i18n.js')[0],200)
+        self.assertEqual(request(self.app,'/i18n-en.js')[0],200)
+
     def submit(self,request_id,input_id='a'*32):
         metadata={'inputId':input_id,'requestId':request_id,'presetId':'sunny','name':'离线测试'}
         headers={'CONTENT_TYPE':'image/png','HTTP_X_LIGHTTRY_REQUEST':base64.b64encode(json.dumps(metadata).encode()).decode()}
@@ -67,7 +93,7 @@ class ServiceSecurityTests(unittest.TestCase):
     def test_unauthenticated_every_surface_and_paid_routes_are_blocked(self):
         executor=ApprovedOfflineExecutor();self.app.handler.task_store.executor=executor
         photo=self.app.workspace.save_photo('a'*32,'私有照片',image_bytes(),'image/png')
-        routes=['/','/index.html','/workbench.js','/api/catalog','/api/inference','/api/workspace',
+        routes=['/','/index.html','/workbench.js','/i18n.js','/i18n-en.js','/api/catalog','/api/inference','/api/workspace',
                 '/api/photos/'+'a'*32,'/api/tasks/'+'b'*32+'/download']
         for route in routes:
             self.assertEqual(request(self.app,route,user=None)[0],401)

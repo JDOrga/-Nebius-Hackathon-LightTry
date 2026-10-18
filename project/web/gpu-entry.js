@@ -1,3 +1,5 @@
+import {installI18n,translateString} from './i18n.js';
+installI18n();
 // Submit once, then navigate. Server preflight/guard/start runs off the HTTP thread.
 const button=document.getElementById('start-gpu');
 button.addEventListener('click',async()=>{
@@ -10,5 +12,5 @@ button.addEventListener('click',async()=>{
   if(response.ok){const value=await response.json();message=value.status==='already_active'?'GPU 已处于活动状态。':value.status==='failed'?'GPU 启动未成功，仍可编辑方案。':'GPU 启动请求已提交，准备完成前可先编辑方案。';}
   else message='GPU 启动请求未被接受，你仍可以编辑方案。';
  }catch{ /* Unknown outcome is never retried automatically. */ }
- finally{clearTimeout(timer);try{sessionStorage.setItem('lighttry.gpuEntryNotice',message);}catch{}location.replace('/');}
+ finally{clearTimeout(timer);try{sessionStorage.setItem('lighttry.gpuEntryNotice',translateString(message));}catch{}location.replace('/');}
 });

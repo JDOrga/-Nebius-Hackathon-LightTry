@@ -90,7 +90,9 @@ class Handler(BaseHTTPRequestHandler):
         return self.send_bytes(json.dumps(value, ensure_ascii=False).encode(), 'application/json; charset=utf-8', status=status)
 
     def job_error(self, error):
-        return self.json_response({'error': {'code': error.code, 'message': error.message}}, error.http)
+        from ui_locale import error_message
+        message=error_message(getattr(self,'ui_locale','zh'),error.code,error.message)
+        return self.json_response({'error': {'code': error.code, 'message': message}}, error.http)
 
     def do_POST(self):
         if not self.valid_host():

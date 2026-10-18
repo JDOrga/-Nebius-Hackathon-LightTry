@@ -33,7 +33,8 @@ class ProfileTests(unittest.TestCase):
     def tearDown(self):self.app.close();self.tmp.cleanup()
     def request(self,path,method='GET',body=b'',cookie='',extra=None):
         env={'REQUEST_METHOD':method,'PATH_INFO':path,'wsgi.input':io.BytesIO(body),'HTTP_HOST':'127.0.0.1:8785',
-             'REMOTE_ADDR':'127.0.0.1','CONTENT_LENGTH':str(len(body)),'CONTENT_TYPE':'application/json','HTTP_COOKIE':cookie}
+             'REMOTE_ADDR':'127.0.0.1','CONTENT_LENGTH':str(len(body)),'CONTENT_TYPE':'application/json','HTTP_COOKIE':cookie,
+             'HTTP_ACCEPT_LANGUAGE':'zh-CN'}
         if method!='GET':env.update(HTTP_ORIGIN=self.app.origin,HTTP_X_LIGHTTRY_TOKEN=self.app.handler.csrf_token)
         if path=='/auth/login':env['CONTENT_TYPE']='application/x-www-form-urlencoded'
         env.update(extra or {});response=[]

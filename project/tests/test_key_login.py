@@ -26,7 +26,7 @@ class KeyLoginTests(unittest.TestCase):
  def tearDown(self):
   self.app.close();tempfile.tempdir=self.oldtmp;self.env.stop();self.tmp.cleanup()
  def req(self,path,method='GET',body=b'',cookie='',origin='http://localhost:8080',extra=None):
-  env={'REQUEST_METHOD':method,'PATH_INFO':path,'wsgi.input':io.BytesIO(body),'CONTENT_LENGTH':str(len(body)),'CONTENT_TYPE':'application/x-www-form-urlencoded','HTTP_HOST':'localhost:8080','REMOTE_ADDR':'127.0.0.1','HTTP_ORIGIN':origin,'HTTP_COOKIE':cookie};env.update(extra or {});got=[]
+  env={'REQUEST_METHOD':method,'PATH_INFO':path,'wsgi.input':io.BytesIO(body),'CONTENT_LENGTH':str(len(body)),'CONTENT_TYPE':'application/x-www-form-urlencoded','HTTP_HOST':'localhost:8080','REMOTE_ADDR':'127.0.0.1','HTTP_ORIGIN':origin,'HTTP_COOKIE':cookie,'HTTP_ACCEPT_LANGUAGE':'zh-CN'};env.update(extra or {});got=[]
   out=b''.join(self.app(env,lambda status,headers:got.append((int(status.split()[0]),dict(headers)))))
   return got[0][0],got[0][1],out
  def login(self,key=KEY):

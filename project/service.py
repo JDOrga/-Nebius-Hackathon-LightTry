@@ -18,6 +18,7 @@ import threading
 from types import SimpleNamespace
 from urllib.parse import urlsplit, parse_qs
 from http.cookies import SimpleCookie
+from ui_locale import resolve_locale,error_message,gpu_info
 
 import studio
 from inference.jobs import ID, JobError
@@ -270,13 +271,30 @@ class Application:
         return 'lighttry_space='+token+'; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict'+secure
 
     def login_page(self, h, status=200, failed=False):
-        message = '访问密钥无效或已过期，请重新输入。' if failed else '输入访问密钥，继续你的光照创作。'
+        message = ('Invalid or expired access key. Please try again.' if failed else
+                   'Enter your access key to continue creating with light.') if h.ui_locale=='en' else (
+                   '访问密钥无效或已过期，请重新输入。' if failed else '输入访问密钥，继续你的光照创作。')
         html = '''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>登录 · LightTry</title><style>
 :root{font:14px/1.6 "Segoe UI","Microsoft YaHei",sans-serif;color:#294738;background:#f2f6f3}*{box-sizing:border-box}body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;background:radial-gradient(ellipse at top right,#dcebe1,transparent 65%)}main{width:min(420px,100%);background:white;border:1px solid #dce7df;border-radius:22px;padding:38px;box-shadow:0 15px 60px #294d3210}.brand{font-size:26px;font-weight:750;letter-spacing:-1px}h1{font-size:21px;margin:28px 0 8px}p{font-size:13px;color:#75897b;margin:0 0 26px}label{display:block;font-size:12px;font-weight:650;margin:0 0 8px}input,button{font:inherit;width:100%;border-radius:10px;padding:12px 14px}input{border:1px solid #c9d9ce;background:#f8fbf9;color:#294738}input:focus-visible,button:focus-visible{outline:3px solid #67a48080;outline-offset:3px}button{border:0;background:#286d4e;color:white;font-weight:650;margin-top:18px;cursor:pointer}button:hover{background:#20573f}.privacy{font-size:11px;margin:20px 0 0;color:#8d9d92}</style><main><div class="brand">LightTry</div><h1>访问工作室</h1><p role="status">MESSAGE</p><form action="/auth/login" method="post"><label for="access-key">访问密钥</label><input id="access-key" name="accessKey" type="password" autocomplete="current-password" minlength="24" maxlength="256" required placeholder="输入你的访问密钥"><button type="submit">进入工作室</button></form><p class="privacy">请妥善保管密钥，不要分享给他人。</p></main></html>'''
+        html=html.replace('</style><main>','.languages{display:flex;justify-content:flex-end;gap:12px;font-size:12px}.languages a{color:#286d4e}</style><main>')
+        html=html.replace('<div class="brand">LightTry</div>','<nav class="languages" aria-label="Language"><a href="/lang/zh">中文</a><a href="/lang/en">English</a></nav><div class="brand">LightTry</div>')
+        if h.ui_locale=='en':
+            for source,target in (('lang="zh-CN"','lang="en"'),('登录 · LightTry','Sign in · LightTry'),
+                    ('访问工作室','Enter the studio'),('输入你的访问密钥','Enter your access key'),
+                    ('访问密钥','Access key'),('进入工作室','Enter studio'),
+                    ('请妥善保管密钥，不要分享给他人。','Keep this key private. Do not share it.')):
+                html=html.replace(source,target)
         h.send_bytes(html.replace('MESSAGE', message).encode('utf-8'), 'text/html; charset=utf-8', status=status)
 
     def login_route(self, h, environ):
         path = urlsplit(h.path).path
+        if path in ('/lang/zh','/lang/en') and h.command=='GET':
+            language=path.rsplit('/',1)[-1]
+            secure='; Secure' if self.origin.startswith('https://') else ''
+            h.ui_locale=language
+            h.send_response(303);h.send_header('Location','/' if h.user else '/login')
+            h.send_header('Set-Cookie','lighttry_lang='+language+'; Path=/; Max-Age=31536000; SameSite=Lax'+secure)
+            h.end_headers();return True
         if path == '/login' and h.command == 'GET':
             self.login_page(h)
             return True
@@ -397,15 +415,36 @@ class Application:
             h.send_response(303);h.send_header('Location','/');h.end_headers();return
         title='GPU 尚未启动' if info['state']=='STOPPED' else '进入工作台前'
         intro='现在启动 GPU，为接下来的图片生成做准备？' if info['state']=='STOPPED' else '暂时无法确认 GPU 可用状态，你仍可以进入工作台编辑方案。'
+        if h.ui_locale=='en':
+            title='GPU not started' if info['state']=='STOPPED' else 'Before entering the workbench'
+            intro=('Start the GPU now to prepare for image generation?' if info['state']=='STOPPED' else
+                   'GPU availability cannot be confirmed yet. You can still edit plans in the workbench.')
         disabled='' if info['canStart'] else ' disabled'
         html='''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>准备工作台 · LightTry</title><style>
-:root{font:14px/1.7 "Segoe UI","Microsoft YaHei",sans-serif;color:#294738;background:#f2f6f3}*{box-sizing:border-box}body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;background:radial-gradient(ellipse at top right,#dcebe1,transparent 65%)}main{width:min(470px,100%);background:white;border:1px solid #dce7df;border-radius:22px;padding:38px;box-shadow:0 15px 60px #294d3210}.brand{font-size:26px;font-weight:750;letter-spacing:-1px}h1{font-size:23px;margin:26px 0 10px}p{font-size:13px;color:#75897b;margin:0 0 22px}.actions{display:grid;gap:10px}button,a{font:inherit;border-radius:10px;padding:12px 14px;text-align:center;font-weight:650}button{border:1px solid #286d4e;background:#286d4e;color:white;cursor:pointer}button:hover:not(:disabled){background:#20573f}button:disabled{background:#e7eee9;border-color:#d9e3dc;color:#91a194;cursor:not-allowed}a{border:1px solid #cdded2;text-decoration:none;color:#426c51;background:#f8fbf9}a:hover{background:#edf4ef}:focus-visible{outline:3px solid #67a48080;outline-offset:3px}.note{font-size:11px;margin:20px 0 0;color:#879a8c}</style><main id="gpu-entry" data-token="TOKEN"><div class="brand">LightTry</div><h1>TITLE</h1><p>INTRO</p><div class="actions"><button id="start-gpu"DISABLED>启动 GPU 并进入工作台</button><a href="/">暂不启动，直接进入</a></div><p class="note">启动 GPU 可能产生费用。提交后立即进入工作台，无需等待启动完成。</p><p class="note" role="status">REASON</p></main><script src="/gpu-entry.js" defer></script></html>'''
+:root{font:14px/1.7 "Segoe UI","Microsoft YaHei",sans-serif;color:#294738;background:#f2f6f3}*{box-sizing:border-box}body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;background:radial-gradient(ellipse at top right,#dcebe1,transparent 65%)}main{width:min(470px,100%);background:white;border:1px solid #dce7df;border-radius:22px;padding:38px;box-shadow:0 15px 60px #294d3210}.brand{font-size:26px;font-weight:750;letter-spacing:-1px}h1{font-size:23px;margin:26px 0 10px}p{font-size:13px;color:#75897b;margin:0 0 22px}.actions{display:grid;gap:10px}button,a{font:inherit;border-radius:10px;padding:12px 14px;text-align:center;font-weight:650}button{border:1px solid #286d4e;background:#286d4e;color:white;cursor:pointer}button:hover:not(:disabled){background:#20573f}button:disabled{background:#e7eee9;border-color:#d9e3dc;color:#91a194;cursor:not-allowed}a{border:1px solid #cdded2;text-decoration:none;color:#426c51;background:#f8fbf9}a:hover{background:#edf4ef}:focus-visible{outline:3px solid #67a48080;outline-offset:3px}.note{font-size:11px;margin:20px 0 0;color:#879a8c}</style><main id="gpu-entry" data-token="TOKEN"><div class="brand">LightTry</div><h1>TITLE</h1><p>INTRO</p><div class="actions"><button id="start-gpu"DISABLED>启动 GPU 并进入工作台</button><a href="/">暂不启动，直接进入</a></div><p class="note">启动 GPU 可能产生费用。提交后立即进入工作台，无需等待启动完成。</p><p class="note" role="status">REASON</p></main><script type="module" src="/gpu-entry.js"></script></html>'''
         if info['simulation']:
             html=html.replace('<div class="brand">LightTry</div>','<div class="brand">LightTry</div><p class="note">离线演示 · 不会启动真实 GPU</p>')
         budget=info.get('budgetUsdIncludingTax')
         if type(budget) in (int,float) and 0<budget<=1000:
-            html=html.replace('启动 GPU 可能产生费用。','本次预算 '+format(budget,'.2f')+' 美元（含税）。自动停机不保证账单硬封顶。')
-        html=html.replace('TOKEN',h.csrf_token).replace('TITLE',title).replace('INTRO',intro).replace('DISABLED',disabled).replace('REASON',info['message'])
+            budget_note=('Session budget $'+format(budget,'.2f')+' (including tax). Automatic stop is not a hard billing cap.'
+                         if h.ui_locale=='en' else '本次预算 '+format(budget,'.2f')+' 美元（含税）。自动停机不保证账单硬封顶。')
+            html=html.replace('启动 GPU 可能产生费用。',budget_note)
+        reason=info['message']
+        if h.ui_locale=='en':
+            if info.get('diagnostic'):
+                reason=error_message('en',info['diagnostic'].get('code'),reason)+' Do not restart until release is confirmed.'
+            elif info['state']=='STOPPING':reason='Stop is in progress. Wait for STOPPED and an empty instance list.'
+            elif info['state']=='STOPPED':reason='Ready for a single start request.' if info['canStart'] else 'Start is unavailable until safety checks pass.'
+            else:reason='Status is not confirmed. You can edit plans without starting another GPU request.'
+            for source,target in (('lang="zh-CN"','lang="en"'),('准备工作台 · LightTry','Prepare workbench · LightTry'),
+                    ('启动 GPU 并进入工作台','Start GPU and enter workbench'),('暂不启动，直接进入','Enter without starting'),
+                    ('启动 GPU 可能产生费用。','Starting the GPU may incur charges.'),
+                    ('提交后立即进入工作台，无需等待启动完成。',' You can enter the workbench immediately without waiting for startup.'),
+                    ('离线演示 · 不会启动真实 GPU','Offline demo · no real GPU will start')):
+                html=html.replace(source,target)
+        html=html.replace('</style><main id="gpu-entry"','.languages{display:flex;justify-content:flex-end;gap:12px;font-size:12px}.languages a{color:#286d4e}</style><main id="gpu-entry"')
+        html=html.replace('<div class="brand">LightTry</div>','<nav class="languages" aria-label="Language"><a href="/lang/zh">中文</a><a href="/lang/en">English</a></nav><div class="brand">LightTry</div>')
+        html=html.replace('TOKEN',h.csrf_token).replace('TITLE',title).replace('INTRO',intro).replace('DISABLED',disabled).replace('REASON',reason)
         h.send_bytes(html.encode('utf-8'),'text/html; charset=utf-8')
 
     def start_gpu_from_entry(self, h):
@@ -468,6 +507,7 @@ class Application:
         for name in ('CONTENT_TYPE', 'CONTENT_LENGTH'):
             if environ.get(name):
                 h.headers[name.replace('_', '-')] = str(environ[name])
+        h.ui_locale=resolve_locale(environ.get('HTTP_COOKIE',''),environ.get('HTTP_ACCEPT_LANGUAGE',''))
         slot=False
         try:
             h.user=self.authorized(environ)
@@ -547,6 +587,7 @@ class Application:
         # Same-origin forms need an Origin; never send referrers cross-origin.
         h.send_header('Referrer-Policy', 'same-origin')
         h.send_header('X-Content-Type-Options', 'nosniff')
+        h.send_header('Content-Language', 'en' if h.ui_locale=='en' else 'zh-CN')
         if h.response_status==429:h.send_header('Retry-After','60')
         LOG.info('request status=%s',h.response_status)
         start_response(f'{h.response_status} {HTTPStatus(h.response_status).phrase}', wsgi_response_headers(h.response_headers))
@@ -590,7 +631,7 @@ class Application:
                 if current.get('sessionId'):self.gpu_sessions.client_presence(current['sessionId'])
             h.json_response({'ok':True})
         elif path=='/api/gpu/entry-status' and h.command=='GET':
-            h.json_response(self.gpu_entry_info(h.user,h.owner_scope))
+            h.json_response(gpu_info(h.ui_locale,self.gpu_entry_info(h.user,h.owner_scope)))
         elif path=='/api/gpu/entry-start' and h.command=='POST':
             self.start_gpu_from_entry(h)
         elif path=='/api/gpu/status' and h.command=='GET':

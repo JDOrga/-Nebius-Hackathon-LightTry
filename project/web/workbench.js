@@ -4,7 +4,9 @@ import {archive,readArchive,mergeLibraries} from './workspace-portability.js';
 import {createConsole} from './console.js';
 import {createChat} from './chat.js';
 import {paintGenerationButton,paintGpuConsole,gpuNotice,gpuStopCountdown} from './gpu-monitor.js';
+import {installI18n,currentLanguage} from './i18n.js';
 import {savedSampleSelection,allowed,removeFamily,createScheme,revise as reviseBase,variant,sameParameters,matchingTask,validateLibrary,referenceKey,uid,restoreInputStub,photoTitle,schemePresentation,environmentEdit,comparisonCursor,schemeCaption,mergeAcceptedLibrary,schemeWire} from './scheme-state.js';
+installI18n();
 const $=id=>document.getElementById(id), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let catalog,lighting,inference,schemes=[],current,input,file=null,tasks=[],mode='result',compareKey=null,pending=false,requestId=null,region=false,zoom=1,pan={x:0,y:0};
 const libraryKey='lighttry.schemeLibrary.v1',cursorKey='lighttry.schemeCursor.v1',tasksKey='lighttry.schemeTasks.v1',submissionKey='lighttry.schemeSubmission.v1',originsKey='lighttry.schemeOrigins.v1';
@@ -19,8 +21,8 @@ async function chooseUploadDraft(){
  if(input?.unbound){workspaceView('preview');return;}
  if(current&&input)persist();
  pendingPhotoAssociation=null;file=null;$('file').value='';requestId=null;
- input={id:uid(),name:'待上传照片',width:1280,height:704,unbound:true};
- current=createScheme(catalog.presets[0].id,'未命名草稿',input.id);
+ input={id:uid(),name:currentLanguage()==='en'?'Photo pending upload':'待上传照片',width:1280,height:704,unbound:true};
+ current=createScheme(catalog.presets[0].id,currentLanguage()==='en'?'Untitled draft':'未命名草稿',input.id);
  mode='result';compareKey=null;region=false;zoom=1;pan={x:0,y:0};
  invalidateAI();error(null);await render();workspaceView('preview');
 }
@@ -222,8 +224,8 @@ if(savedSelection){
  await chooseSample(savedSelection.sample.id);
  current=savedSelection.scheme;persist();
 }else{
- input={id:uid(),name:'待上传照片',width:1280,height:704,unbound:true};file=null;
- current=createScheme(catalog.presets[0].id,'未命名草稿',input.id);
+ input={id:uid(),name:currentLanguage()==='en'?'Photo pending upload':'待上传照片',width:1280,height:704,unbound:true};file=null;
+ current=createScheme(catalog.presets[0].id,currentLanguage()==='en'?'Untitled draft':'未命名草稿',input.id);
 }
 mode='result';compareKey=null;zoom=1;pan={x:0,y:0};await render();refreshGpuMonitor();
 // Keep unsettled request evidence; restoring a selection never submits work.

@@ -1,8 +1,9 @@
 import {schemeWire} from './scheme-state.js';
+import {currentLanguage} from './i18n.js';
 // Lighting-condition draft only. No photograph filters, no task submission.
 export const versions={synthesizerVersion:'sphere-gaussian-rgbe-v1',preprocessingVersion:'flip180-pixel-roll-log10000-v1',colorConvention:'linear-srgb-rgbe;picker-srgb-decoded-v1'};
 export function upgrade(p,envs){return p.schemaVersion===2?structuredClone(p):{schemaVersion:2,mode:'environment',environmentId:p.environmentId,environmentSha256:envs.find(e=>e.id===p.environmentId)?.sha256,offsetDeg:p.offsetDeg,strength:p.strength,ambient:{strength:.03,color:'#ffffff'},zones:[],...versions};}
-export function zone(id='key',name='主光'){return {id,name,enabled:true,azimuthDeg:45,elevationDeg:30,strength:3,color:'#ffffff',sizeDeg:25};}
+export function zone(id='key',name=currentLanguage()==='en'?'Key light':'主光'){return {id,name,enabled:true,azimuthDeg:45,elevationDeg:30,strength:3,color:'#ffffff',sizeDeg:25};}
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export function differences(a,b,path=''){const lines=[];for(const k of new Set([...Object.keys(a||{}),...Object.keys(b||{})])){const x=a?.[k],y=b?.[k],p=path?path+'.'+k:k;if(x&&y&&typeof x==='object'&&typeof y==='object')lines.push(...differences(x,y,p));else if(JSON.stringify(x)!==JSON.stringify(y))lines.push(p+'：'+JSON.stringify(x??null)+' → '+JSON.stringify(y??null));}return lines;}
 export function userDifferences(a,b){
