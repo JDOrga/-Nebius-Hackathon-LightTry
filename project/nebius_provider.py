@@ -48,7 +48,7 @@ class NebiusProvider:
 
     def _command(self,args,json_result):
         cmd=[str(self.cli),*args,'--config',self.settings['configFile'],'--profile',self.settings['profile'],
-             '--no-browser','--no-check-update','--no-progress','--color=false','--auth-timeout=2s',
+             '--no-browser','--no-check-update','--no-progress','--color=false','--auth-timeout=5s',
              '--timeout=5s','--per-retry-timeout=5s','--retries=1']
         if json_result:cmd+=['--format','json']
         return cmd

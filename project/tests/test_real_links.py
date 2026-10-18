@@ -63,6 +63,14 @@ class NebiusTests(unittest.TestCase):
 
     def test_constructor_is_offline(self):self.provider.runner.assert_not_called()
 
+    def test_authentication_has_five_seconds_within_unchanged_process_deadline(self):
+        args=self.provider._command(['iam','v2','project','get'],True)
+        self.assertIn('--auth-timeout=5s',args)
+        self.provider.observe('devlab-fixture')
+        self.assertTrue(all(call.kwargs['timeout']<=6 for call in self.provider.runner.call_args_list))
+        self.provider._call(['ai','devlab','get'],deadline=102)
+        self.assertLessEqual(self.provider.runner.call_args.kwargs['timeout'],2)
+
     def test_stopped_requires_project_key_and_explicit_empty_instances(self):
         value=self.provider.observe('devlab-fixture');self.assertEqual(value['state'],'STOPPED');self.assertTrue(value['independent'])
         self.raw['status']['instances']=None
