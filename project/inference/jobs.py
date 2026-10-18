@@ -17,6 +17,8 @@ DISPATCH_CODES={'SESSION_CHANGED','GPU_NOT_READY','GPU_BUSY','JOB_CONFLICT',
                 'CURRENT_CONFIRMED_READY_GPU_REQUIRED','MODEL_GRANT_HOST_OR_DEADLINE_MISMATCH',
                 'HTTPS_WORKER_CURRENT_HOST_MISMATCH','RESIDENT_MODEL_NOT_READY',
                 'HTTPS_UPLOAD_RECEIPT_MISMATCH','WORKER_RESPONSE_UNCERTAIN',
+                'WORKER_TIMEOUT','WORKER_TLS_FAILURE','WORKER_TLS_PIN_MISMATCH',
+                'WORKER_CONNECTION_FAILURE','WORKER_HTTP_ERROR','WORKER_INVALID_RESPONSE',
                 'ALL_WORKER_TRANSPORTS_UNAVAILABLE','CURRENT_SESSION_NOT_ACTIVE'}
 
 def dispatch_diagnostic(exc,task_id,stage='adapter_submit'):
@@ -29,11 +31,20 @@ def dispatch_diagnostic(exc,task_id,stage='adapter_submit'):
     code=raw if isinstance(raw,str) and raw in DISPATCH_CODES else 'UNCLASSIFIED_DISPATCH_FAILURE'
     kind=('timeout' if isinstance(exc,TimeoutError) else 'io' if isinstance(exc,OSError) else
           'validation' if isinstance(exc,ValueError) else 'other')
+    safe_kind=getattr(exc,'category',None)
+    if safe_kind in {'timeout','tls','network','http','protocol','other'} and code.startswith('WORKER_'):kind=safe_kind
     code=code if isinstance(code,str) and code in DISPATCH_CODES else 'UNCLASSIFIED_DISPATCH_FAILURE'
-    kind=kind if isinstance(kind,str) and kind in {'timeout','io','validation','other'} else 'other'
-    return {'taskId':task_id if isinstance(task_id,str) and ID.fullmatch(task_id) else None,
+    kind=kind if isinstance(kind,str) and kind in {'timeout','io','validation','tls','network','http','protocol','other'} else 'other'
+    result={'taskId':task_id if isinstance(task_id,str) and ID.fullmatch(task_id) else None,
             'stage':stage if isinstance(stage,str) and stage in DISPATCH_STAGES else 'adapter_submit',
             'code':code,'category':kind,'retryPermitted':False}
+    phase=getattr(exc,'phase',None)
+    if code.startswith('WORKER_') and phase in {'connect','request','response_headers','response_body','decode'}:
+        result['transportPhase']=phase
+    status=getattr(exc,'http_status',None)
+    if code=='WORKER_HTTP_ERROR' and type(status) is int and 300<=status<=599:
+        result['httpStatus']=status
+    return result
 
 ACTIVE = {'queued', 'running'}
 STAGES = {'preflight', 'weights', 'inverse', 'forward', 'validating', 'transferring'}
@@ -102,7 +113,7 @@ class TaskStore:
     def public(self, task):
         fields = ('taskId', 'input', 'preset', 'status', 'stage', 'result', 'error',
                   'createdAt', 'updatedAt', 'expiresAt', 'executionUncertain', 'runConfig',
-                    'presets', 'presetResults', 'registeredAt', 'registration','executionDiagnostic')
+                    'presets', 'presetResults', 'registeredAt', 'registration','executionDiagnostic','dispatchDiagnostic')
         return copy.deepcopy({key: task[key] for key in fields if key in task})
 
     def submit(self, data, metadata, mime, *, reserved_task_id=None):

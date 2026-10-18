@@ -19,6 +19,9 @@ function manualLanguage(){
  return value==='zh'||value==='en'?value:null;
 }
 const patterns=[
+ [/^生成失败：(.+)；执行状态仍待核实，禁止重复提交。请查看 GPU 状态并核实停止释放。(?: 任务编号：([a-f0-9]{32})\.)?$/u,(_,reason,id)=>`Generation failed: ${translateString(reason,'en')}; execution status remains unconfirmed. Do not resubmit. Check GPU status and verify resource release.${id?' Task ID: '+id+'.':''}`],
+ [/^生成失败：(.+)；本次无结果，状态已核实。不会自动重试；如需再次生成，请重新明确确认。(?: 任务编号：([a-f0-9]{32})\.)?$/u,(_,reason,id)=>`Generation failed: ${translateString(reason,'en')}; there is no result and the status is verified. No automatic retry; explicitly confirm any new generation.${id?' Task ID: '+id+'.':''}`],
+ [/^暂时无法取得任务状态；不会重复提交，正在仅查询原任务：(.+)$/u,(_,detail)=>`Task status is temporarily unavailable. The request will not be resubmitted; only the original task is being queried: ${detail}`],
  [/^更新于 (.+)$/u,(_,at)=>`Updated at ${at}`],
  [/^最晚自动停机 (\d\d:\d\d:\d\d)$/u,(_,left)=>`Latest automatic stop ${left}`],
  [/^本次预算 ([\d.]+) 美元（含税）。自动停机不保证账单硬封顶。请求提交后可继续编辑方案。$/u,(_,sum)=>`Session budget $${sum} (including tax). Automatic stop is not a hard billing cap. You may keep editing after submitting.`],

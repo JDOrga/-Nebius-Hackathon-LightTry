@@ -22,12 +22,26 @@ export function inferenceProgress(task){
  const ordinal=taskStages.indexOf(task.stage)+1;
  return {stage:task.stage,ordinal,total:4,label:taskNames[task.stage],percent:null};
 }
+export function shouldPollTask(task){return !!task&&(['queued','running'].includes(task.status)||task.executionUncertain===true);}
+export function taskFailureMessage(task){
+ if(task?.status!=='failed')return null;
+ const code=task.dispatchDiagnostic?.code;
+ const reasons={WORKER_TIMEOUT:'上传到 GPU 服务器超时',WORKER_CONNECTION_FAILURE:'上传时连接中断',
+  WORKER_TLS_FAILURE:'上传时 TLS 连接失败',WORKER_TLS_PIN_MISMATCH:'GPU 服务器证书校验失败',
+  WORKER_HTTP_ERROR:'GPU 服务器拒绝或未完成上传',WORKER_INVALID_RESPONSE:'GPU 服务器上传回执无效',
+  WORKER_RESPONSE_UNCERTAIN:'上传回执未确认'};
+ const reason=task.error?.code==='DISPATCH_FAILED'?(reasons[code]||'派发未确认'):'执行失败';
+ const id=/^[a-f0-9]{32}$/.test(task.taskId||'')?' 任务编号：'+task.taskId+'.':'';
+ return task.executionUncertain===true
+  ?`生成失败：${reason}；执行状态仍待核实，禁止重复提交。请查看 GPU 状态并核实停止释放。${id}`
+  :`生成失败：${reason}；本次无结果，状态已核实。不会自动重试；如需再次生成，请重新明确确认。${id}`;
+}
 export function paintGenerationButton(button,task,{simulation=false}={}){
  const progress=inferenceProgress(task);
  for(const attr of ['role','aria-valuemin','aria-valuemax','aria-valuenow','aria-valuetext','aria-label'])button.removeAttribute(attr);
  button.classList.toggle('generation-progress',!!progress);button.removeAttribute('aria-busy');
  if(!progress){delete button.dataset.progressActive;
-  if(task?.executionUncertain||task?.progressStale){button.textContent=task.progressStale?'进度暂不可用 · 待核实':'执行状态待核实';button.disabled=true;}
+  if(task?.executionUncertain||task?.progressStale){button.textContent=task.status==='failed'?'生成失败 · 待核实':task.progressStale?'进度暂不可用 · 待核实':'执行状态待核实';button.disabled=true;}
   else if(task&&['queued','running'].includes(task.status)){button.textContent=task.status==='queued'?'等待推理接收':'正在准备推理';button.disabled=true;}
   return;}
  button.dataset.progressActive='true';button.disabled=true;

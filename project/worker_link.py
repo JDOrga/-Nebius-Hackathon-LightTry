@@ -8,6 +8,7 @@ import io
 import json
 from pathlib import Path
 import re
+import socket
 import sqlite3
 import ssl
 import threading
@@ -21,6 +22,12 @@ MAX_BODY = 32 * 1024 * 1024
 
 class LinkUncertain(Exception):
     """Opaque network/protocol failure; never expose runtime credentials."""
+    def __init__(self, code='WORKER_RESPONSE_UNCERTAIN', *, category='other', phase=None, http_status=None):
+        self.code=code
+        self.category=category
+        self.phase=phase
+        self.http_status=http_status
+        super().__init__(code)
 
 
 class HTTPSWorker:
@@ -51,29 +58,52 @@ class HTTPSWorker:
             raise ValueError('WORKER_ROUTE_NOT_ALLOWED')
         payload=canonical(body).encode() if isinstance(body,dict) else body
         if payload is not None and len(payload)>MAX_BODY:raise ValueError('WORKER_BODY_TOO_LARGE')
-        connection=self.factory(self.endpoint.hostname,self.endpoint.port or 443,
-                                timeout=self.timeout,context=self.context)
+        connection=None
+        phase='connect'
         try:
+            connection=self.factory(self.endpoint.hostname,self.endpoint.port or 443,
+                                    timeout=self.timeout,context=self.context)
             if self.certificate_sha256:
                 connection.connect()
                 if not hmac.compare_digest(hashlib.sha256(connection.sock.getpeercert(binary_form=True)).hexdigest(),self.certificate_sha256):
-                    raise LinkUncertain()
+                    raise LinkUncertain('WORKER_TLS_PIN_MISMATCH',category='tls',phase=phase)
+            phase='request'
             connection.request(method,path,body=payload,headers={'Authorization':'Bearer '+self.token,
                 'Content-Type':'application/json' if isinstance(body,dict) else 'application/octet-stream'})
+            phase='response_headers'
             response=connection.getresponse()
+            if response.status==404 and method=='GET' and not path.startswith('/v1/blobs/'):
+                return {'status':'not_found'}
+            expected=(200,) if method=='GET' and path.startswith('/v1/blobs/') else (200,201,202)
+            if response.status not in expected:
+                raise LinkUncertain('WORKER_HTTP_ERROR',category='http',phase=phase,http_status=response.status)
+            phase='response_body'
             if method=='GET' and path.startswith('/v1/blobs/'):
                 raw=response.read(MAX_BODY+1)
-                if response.status!=200 or len(raw)>MAX_BODY or hashlib.sha256(raw).hexdigest()!=path.rsplit('/',1)[1]:raise LinkUncertain()
+                if len(raw)>MAX_BODY or hashlib.sha256(raw).hexdigest()!=path.rsplit('/',1)[1]:raise LinkUncertain('WORKER_INVALID_RESPONSE',category='protocol',phase=phase)
                 return raw
             raw=response.read(1024*1024+1)
-            if len(raw)>1024*1024 or response.status not in (200,201,202,404):raise LinkUncertain()
+            if len(raw)>1024*1024:raise LinkUncertain('WORKER_INVALID_RESPONSE',category='protocol',phase=phase)
+            phase='decode'
             value=json.loads(raw)
-            if not isinstance(value,dict):raise LinkUncertain()
-            if response.status==404:return {'status':'not_found'}
+            if not isinstance(value,dict):raise LinkUncertain('WORKER_INVALID_RESPONSE',category='protocol',phase=phase)
             return value
+        except LinkUncertain:
+            raise
+        except (TimeoutError,socket.timeout):
+            raise LinkUncertain('WORKER_TIMEOUT',category='timeout',phase=phase) from None
+        except ssl.SSLError:
+            raise LinkUncertain('WORKER_TLS_FAILURE',category='tls',phase=phase) from None
+        except (ConnectionError,OSError):
+            raise LinkUncertain('WORKER_CONNECTION_FAILURE',category='network',phase=phase) from None
+        except (json.JSONDecodeError,UnicodeError,http.client.HTTPException,ValueError):
+            raise LinkUncertain('WORKER_INVALID_RESPONSE',category='protocol',phase=phase) from None
         except Exception:
-            raise LinkUncertain('WORKER_RESPONSE_UNCERTAIN') from None
-        finally:connection.close()
+            raise LinkUncertain('WORKER_RESPONSE_UNCERTAIN',category='other',phase=phase) from None
+        finally:
+            if connection is not None:
+                try:connection.close()
+                except OSError:pass
 
     def health(self):return self.request('GET','/v1/health')
     def query(self, job_id):

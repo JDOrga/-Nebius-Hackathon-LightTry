@@ -3,7 +3,7 @@ import {resetClientStorage} from './workspace-portability.js';
 import {archive,readArchive,mergeLibraries} from './workspace-portability.js';
 import {createConsole} from './console.js';
 import {createChat} from './chat.js';
-import {paintGenerationButton,paintGpuConsole,gpuNotice,gpuStopCountdown} from './gpu-monitor.js';
+import {paintGenerationButton,paintGpuConsole,gpuNotice,gpuStopCountdown,shouldPollTask,taskFailureMessage} from './gpu-monitor.js';
 import {installI18n,currentLanguage} from './i18n.js';
 import {savedSampleSelection,allowed,removeFamily,createScheme,revise as reviseBase,variant,sameParameters,matchingTask,validateLibrary,referenceKey,uid,restoreInputStub,photoTitle,schemePresentation,environmentEdit,comparisonCursor,schemeCaption,mergeAcceptedLibrary,schemeWire} from './scheme-state.js';
 installI18n();
@@ -61,6 +61,7 @@ function resultFor(s){
 }
 function transferFailure(t){return t.status==='failed'&&t.stage==='transferring'&&!t.executionUncertain;}
 function activeTask(){return tasks.find(t=>t.input?.id===input?.id&&(['queued','running'].includes(t.status)||t.executionUncertain))}
+function currentTask(){return tasks.filter(t=>t.input?.id===input?.id&&t.lightingScheme?.planId===current?.planId&&t.lightingScheme?.version===current?.version).sort((a,b)=>b.createdAt-a.createdAt)[0]}
 function statusFor(s){if(input?.unbound&&s.inputId===input.id)return '草稿 / 待上传';const r=resultFor(s);if(r)return r.simulation?'模拟完成':'已生成';const t=tasks.filter(t=>t.input?.id===input?.id&&t.lightingScheme?.planId===s.planId&&t.lightingScheme?.version===s.version).sort((a,b)=>b.createdAt-a.createdAt)[0];if(t&&transferFailure(t))return '取回失败 · 可恢复';return t?({queued:'待生成',running:'运行中',failed:'失败',expired:'已过期',partial:'部分完成'}[t.status]||t.status):'草稿 / 待生成';}
 function invalidateAI(){} // Chat checks live snapshot; no fake upstream cancellation.
 function put(s,force=false){if(!s.name.trim()||/[\x00-\x1f\x7f]/.test(s.name)){error('名称需为1–60字且不含控制字符。');return;}if(!force&&current&&s.parentVersion===current.version&&s.planId===current.planId&&s.name===current.name&&sameParameters(s.parameters,current.parameters))return;if(s.version>1000||s.name.length>60||schemes.length>=200){error('方案版本/名称或本地库已到有限上限；未更改。');return;}error(null);invalidateAI();current=s;if(!schemes.some(x=>key(x)===key(s)))schemes.push(s);requestId=null;persist();render();}
@@ -114,7 +115,8 @@ async function render(){
   const display=schemePresentation(current);$('view-title').textContent=photoTitle(selectedSample(),input);$('preview-context').textContent='当前方案：'+schemeCaption(current,schemes)+' · v'+current.version;$('rename').textContent=schemeCaption(current,schemes);$('rename').title='编辑完整名称：'+current.name;$('full-name-text').textContent=current.name;$('full-scheme-name').hidden=!display.summary;
   $('view-state').textContent=statusFor(current)+(current.parameters.offsetDeg===45?' · 实验性':'');
   $('identity').textContent='方案编号 '+current.planId.slice(0,8)+' / v'+current.version;
-  $('source-note').textContent=r?.sourceNote||'当前方案尚未生成。';
+  const selectedTask=currentTask(),failureMessage=taskFailureMessage(selectedTask);
+  $('source-note').textContent=r?.sourceNote|| (failureMessage?'当前方案生成失败，没有可展示的结果。':'当前方案尚未生成。');
   $('generation-summary').textContent=r?'结果已就绪，无需重新生成':`新方案待生成：${schemeCaption(current,schemes)} · v${current.version}（仅此方案）。`;
   const generationBlocked=busy||tasks.some(t=>t.input?.id===input.id&&t.lightingScheme?.planId===current.planId&&t.lightingScheme?.version===current.version&&transferFailure(t))||!inference.enabled||!file||!!r||!allowed(current.parameters,lighting.capabilities);
   $('generate').dataset.baseDisabled=String(generationBlocked);$('generate').disabled=draftDirty||generationBlocked;
@@ -122,7 +124,7 @@ async function render(){
   const failed=tasks.find(t=>t.input?.id===input.id&&t.lightingScheme?.planId===current.planId&&t.lightingScheme?.version===current.version&&t.status==='failed'&&!t.executionUncertain);$('generate').textContent=draftDirty?'先应用参数':r?'结果已就绪':failed?'确认重试此方案':inference.developmentTestMode?'确认模拟生成':'确认生成';
   const transfer=tasks.find(t=>t.input?.id===input.id&&t.lightingScheme?.planId===current.planId&&t.lightingScheme?.version===current.version&&transferFailure(t));$('recover').hidden=!transfer;$('recover').dataset.task=transfer?.taskId||'';if(transfer){$('generation-summary').textContent='执行已结束，结果取回失败；恢复取回，不重新生成。';$('generate').textContent='取回失败，请使用恢复';}
   const t=activeTask();const stages={preflight:'准备生成',weights:'准备模型',inverse:'分析照片',forward:'生成效果',validating:'检查结果',transferring:'下载结果'};
-  $('stage').textContent=transfer?'结果下载失败，请使用“恢复取回”，无需重新生成。':pending?'正在提交；尚未确认执行…':t?'正在'+(stages[t.stage]||t.status)+(t.executionUncertain?'；执行状态不确定，禁止重复提交':''):inference.enabled?!file?'恢复后需重新载入同一原始文件才能提交。':'生成可能需要几分钟，请耐心等待。':'暂不支持生成，可继续编辑方案和查看已有结果。';
+  $('stage').textContent=transfer?'结果下载失败，请使用“恢复取回”，无需重新生成。':failureMessage|| (pending?'正在提交；尚未确认执行…':t?'正在'+(stages[t.stage]||t.status)+(t.executionUncertain?'；执行状态不确定，禁止重复提交':''):inference.enabled?!file?'恢复后需重新载入同一原始文件才能提交。':'生成可能需要几分钟，请耐心等待。':'暂不支持生成，可继续编辑方案和查看已有结果。');
   if(inference.developmentTestMode)$('stage').textContent=busy?'演示图生成中':'离线模拟 · 仅生成带水印的演示图，不代表实际重布光效果。';
   ['environment','offset','strength','rename','clone','reuse'].forEach(id=>$(id).disabled=busy||(['offset','strength'].includes(id)&&$(id).options.length<2));
   $('download').disabled=!r;$('download').title=r?'下载当前来源的实际字节':'请先生成此方案，再下载结果';$('generate').title=!inference.enabled?'生成服务暂不可用':r?'已有有效结果':!file?'需载入原始照片':'提交当前方案';
@@ -174,7 +176,7 @@ let drag=null;$('preview-panels').onpointerdown=e=>{if(zoom>1){drag={x:e.clientX
 document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{mode=b.dataset.mode;zoom=1;pan={x:0,y:0};render();});
 $('compare-plan').onchange=()=>{compareKey=$('compare-plan').value;zoom=1;pan={x:0,y:0};render();};
 $('file').onchange=async()=>{const f=$('file').files[0];if(!f)return;if(!['image/jpeg','image/png','image/webp'].includes(f.type)||f.size>20*1024*1024){error('请选择不超过20MB的 JPG、PNG、WebP。');return}try{const url=URL.createObjectURL(f),image=new Image();image.src=url;await image.decode();if(Math.min(image.naturalWidth,image.naturalHeight)<32||Math.max(image.naturalWidth,image.naturalHeight)>16384||image.naturalWidth*image.naturalHeight>40000000)throw Error('照片尺寸不在允许范围。');const unfinished=storageGet(submissionKey);if(unfinished){const bytes=await f.arrayBuffer(),sha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');if(sha!==unfinished.originalSha)throw Error('上次提交状态待恢复；请重新载入同一文件，避免重复费用。');file=f;input={id:unfinished.meta.inputId,name:f.name,width:image.naturalWidth,height:image.naturalHeight,url,originalUrl:url};current=unfinished.meta.lightingScheme;requestId=unfinished.meta.requestId;persist();render();error('原请求身份已恢复；再次提交将沿用同一身份，不自动执行。');return;}const sourceBytes=await f.arrayBuffer(),originalSha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',sourceBytes))).map(x=>x.toString(16).padStart(2,'0')).join('');if(pendingPhotoAssociation){if(pendingPhotoAssociation.originalSha&&originalSha!==pendingPhotoAssociation.originalSha)throw Error('所选文件不是此方案的原照片，请重新选择。');file=f;input={id:pendingPhotoAssociation.inputId,name:f.name,width:image.naturalWidth,height:image.naturalHeight,originalSha,url,originalUrl:url,needsFile:false};pendingPhotoAssociation=null;persist();render();error(null);return;}if(input.needsFile&&originalSha===input.originalSha){file=f;input={...input,needsFile:false,url:input.canvas?input.url:url,originalUrl:url};persist();render();error(null);return;}file=f;mode='result';zoom=1;pan={x:0,y:0};input={id:uid(),originalSha,name:f.name,width:image.naturalWidth,height:image.naturalHeight,url,originalUrl:url};put({...variant(current,f.name+' · '+current.name),inputId:input.id});error(null)}catch(e){error(e.message)}};
-async function poll(taskId){try{for(;;){const t=await api('/api/tasks/'+taskId);tasks=tasks.filter(x=>x.taskId!==taskId).concat(t);if(t.input.id===input?.id&&['queued','running','succeeded'].includes(t.status))input={...input,...t.input};persist();render();if(!['queued','running'].includes(t.status))return;await new Promise(r=>setTimeout(r,2500));}}catch(e){const task=tasks.find(t=>t.taskId===taskId);if(task)task.progressStale=true;render();throw e;}}
+async function poll(taskId){let shownFailure=null;for(;;){try{const t=await api('/api/tasks/'+taskId);tasks=tasks.filter(x=>x.taskId!==taskId).concat(t);if(t.input.id===input?.id&&['queued','running','succeeded'].includes(t.status))input={...input,...t.input};persist();render();const notice=taskFailureMessage(t);if(notice&&notice!==shownFailure){error(notice);shownFailure=notice;}if(!shouldPollTask(t))return;await new Promise(r=>setTimeout(r,2500));}catch(e){const task=tasks.find(t=>t.taskId===taskId);if(task)task.progressStale=true;render();if([401,403,404].includes(e.status)){error('无法取得原任务状态，请重新登录并核对任务归属；不会重复提交。');return;}error('暂时无法取得任务状态；不会重复提交，正在仅查询原任务：'+e.message);await new Promise(r=>setTimeout(r,5000));}}}
 async function submitGeneration(){if(pending||activeTask()||!file||resultFor(current))return;if(gpuGenerationBlocked()){error('模型尚未就绪，请等待服务器准备完成。');return;}pending=true;requestId=requestId||uid();render();try{const submittedFile=file,snapshot=schemeWire(structuredClone(current)),meta={inputId:input.id,requestId,name:input.name,lightingScheme:snapshot,...(schemeOrigins[key(snapshot)]?{languageProposalId:schemeOrigins[key(snapshot)]}: {})};const bytes=await submittedFile.arrayBuffer(),originalSha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');rememberSubmission({meta,originalSha});const encoded=btoa(unescape(encodeURIComponent(JSON.stringify(meta))));const task=await api('/api/tasks',{method:'POST',headers:{'Content-Type':submittedFile.type,'X-LightTry-Token':inference.csrfToken,'X-LightTry-Request':encoded},body:submittedFile});tasks.push(task);rememberSubmission(null);requestId=null;pending=false;persist();await poll(task.taskId)}catch(e){pending=false;if(e.status===422&&e.code==='INVALID_IMAGE'){rememberSubmission(null);requestId=null;error(e.message+'；照片未进入生成队列，可更换照片后重新确认。');}else error(e.message+'；请求身份保留，不自动重试。');render();}};
 $('generate').onclick=()=>{if(inference.developmentTestMode){$('generate-dialog').querySelector('h2').textContent='确认离线模拟';$('generate-dialog').querySelectorAll('p')[1].textContent='仅生成带水印的演示图，不调用真实模型，不收费。';$('confirm-generate').textContent='提交模拟生成';}$('confirm-summary').textContent=$('generation-summary').textContent;$('generate-dialog').dataset.ref=referenceKey(current,input.id);$('generate-dialog').showModal();};
 $('cancel-generate').onclick=()=>$('generate-dialog').close();
@@ -229,7 +231,7 @@ if(savedSelection){
 }
 mode='result';compareKey=null;zoom=1;pan={x:0,y:0};await render();refreshGpuMonitor();
 // Keep unsettled request evidence; restoring a selection never submits work.
-for(const task of tasks.filter(t=>['queued','running'].includes(t.status)||t.executionUncertain))poll(task.taskId).catch(e=>error('恢复任务失败：'+e.message));
+for(const task of tasks.filter(shouldPollTask))poll(task.taskId).catch(e=>error('恢复任务失败：'+e.message));
 }catch(e){error(e.message)}}
 init();
 
@@ -293,7 +295,7 @@ function applyGpuGenerationGate(){
  const wait=gpuGenerationBlocked(),base=button.dataset.nonGpuDisabled==='true';
  button.dataset.baseDisabled=String(base||wait);button.disabled=draftDirty||base||wait;
  if(!base){button.textContent=draftDirty?'先应用参数':wait?gpuGenerationLabel():button.dataset.readyText||'确认生成';
-  if(!draftDirty)$('stage').textContent=wait?'等待服务器和模型准备完成后即可生成。':'生成可能需要几分钟，请耐心等待。';
+  if(!draftDirty&&!taskFailureMessage(currentTask()))$('stage').textContent=wait?'等待服务器和模型准备完成后即可生成。':'生成可能需要几分钟，请耐心等待。';
   button.title=wait?gpuMonitorInfo?.message||'请等待模型就绪':'提交当前方案';}
 }
 let clientConnectionState='connecting';

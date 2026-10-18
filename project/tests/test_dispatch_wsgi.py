@@ -6,11 +6,41 @@ from unittest.mock import Mock,patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from inference.jobs import dispatch_diagnostic,JobError
 from https_executor import HTTPSCosmosExecutor
+from worker_link import HTTPSWorker,LinkUncertain
 from service import wsgi_response_headers
 import test_inference as jobs_fixture
 import test_service_security as service_fixture
 
 class DispatchDiagnosticTests(unittest.TestCase):
+ def test_worker_transport_classifies_without_leaking_or_retrying(self):
+  calls=[]
+  class TimeoutConnection:
+   def __init__(self,*args,**kwargs):pass
+   def request(self,*args,**kwargs):calls.append('request');raise TimeoutError('SECRET_BEARER_TOKEN')
+   def close(self):pass
+  worker=HTTPSWorker('https://worker-fixture','X'*40,connection_factory=TimeoutConnection)
+  with self.assertRaises(LinkUncertain) as raised:worker.upload(b'fixture')
+  d=dispatch_diagnostic(raised.exception,'a'*32,'artifact_upload')
+  self.assertEqual((d['code'],d['category'],d['transportPhase']),('WORKER_TIMEOUT','timeout','request'))
+  self.assertEqual(calls,['request']);self.assertNotIn('SECRET',json.dumps(d));self.assertFalse(d['retryPermitted'])
+  class StatusConnection:
+   def __init__(self,*args,**kwargs):pass
+   def request(self,*args,**kwargs):calls.append('status-request')
+   def getresponse(self):return SimpleNamespace(status=503,read=lambda n:b'SECRET_RESPONSE')
+   def close(self):pass
+  worker=HTTPSWorker('https://worker-fixture','X'*40,connection_factory=StatusConnection)
+  with self.assertRaises(LinkUncertain) as raised:worker.upload(b'fixture')
+  d=dispatch_diagnostic(raised.exception,'a'*32,'artifact_upload')
+  self.assertEqual((d['code'],d['category'],d['httpStatus']),('WORKER_HTTP_ERROR','http',503))
+  self.assertNotIn('SECRET',json.dumps(d));self.assertEqual(calls.count('status-request'),1)
+ def test_dispatch_diagnostic_is_public_but_uses_only_closed_fields(self):
+  f=jobs_fixture.JobTests();f.setUp();self.addCleanup(f.tearDown)
+  error=LinkUncertain('WORKER_CONNECTION_FAILURE',category='network',phase='response_body')
+  f.executor.submit=Mock(side_effect=error)
+  result=f.submit();d=result['dispatchDiagnostic']
+  self.assertEqual((d['code'],d['category'],d['transportPhase']),('WORKER_CONNECTION_FAILURE','network','response_body'))
+  self.assertEqual(result['status'],'failed');self.assertTrue(result['executionUncertain'])
+  f.submit();self.assertEqual(f.executor.submit.call_count,1)
  def test_unknown_exception_never_leaks_credentials(self):
   e=RuntimeError('https://secret-host/?token=SECRET_PASSWORD Bearer SECRET_TOKEN')
   e.code={'token':'SECRET'};e.diagnostic={'raw':'SECRET'}

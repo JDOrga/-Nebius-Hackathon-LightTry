@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {inferenceProgress,paintGenerationButton,consoleView,paintGpuConsole} from '../web/gpu-monitor.js';
+import {inferenceProgress,paintGenerationButton,consoleView,paintGpuConsole,shouldPollTask,taskFailureMessage} from '../web/gpu-monitor.js';
 const source=readFileSync(new URL('../web/workbench.js',import.meta.url),'utf8');
 const html=readFileSync(new URL('../web/index.html',import.meta.url),'utf8');
 const css=readFileSync(new URL('../web/workbench.css',import.meta.url),'utf8');
@@ -37,6 +37,20 @@ test('uncertain stale and terminal tasks cannot keep an active progressbar',()=>
  paintGenerationButton(button,{...task('forward'),progressStale:true});assert.match(button.textContent,/暂不可用/);
  for(const status of ['succeeded','failed','expired','partial'])assert.equal(inferenceProgress({...task('inverse'),status}),null);
  button.textContent='结果已就绪';paintGenerationButton(button,null);assert.equal(button.textContent,'结果已就绪');assert.equal(button.classes.has('generation-progress'),false);
+});
+test('failed uncertain task alerts immediately, keeps read-only polling, and resets after confirmed stop',()=>{
+ const id='a'.repeat(32),failed={taskId:id,status:'failed',executionUncertain:true,error:{code:'DISPATCH_FAILED'},dispatchDiagnostic:{code:'WORKER_TIMEOUT'}};
+ assert.equal(shouldPollTask(failed),true);
+ assert.match(taskFailureMessage(failed),/上传到 GPU 服务器超时/);
+ assert.match(taskFailureMessage(failed),/禁止重复提交/);
+ const d=dom(),button=d.getElementById('generate');paintGenerationButton(button,failed);
+ assert.equal(button.textContent,'生成失败 · 待核实');assert.equal(button.disabled,true);
+ const closed={...failed,executionUncertain:false};
+ assert.equal(shouldPollTask(closed),false);
+ assert.match(taskFailureMessage(closed),/状态已核实/);
+ assert.match(taskFailureMessage(closed),/不会自动重试/);
+ assert(source.includes('tasks.filter(shouldPollTask)'));
+ assert(source.includes('if(!shouldPollTask(t))return'));
 });
 test('simulation has an explicit label and no generation call in the view module',()=>{
  const d=dom(),button=d.getElementById('generate');paintGenerationButton(button,task('forward'),{simulation:true});assert.match(button.attrs['aria-label'],/^模拟/);
