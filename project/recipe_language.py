@@ -163,7 +163,7 @@ def validate(value,environments,policy,language='zh',chat=False):
             if normalized.get('schemaVersion')==2:value['parameters']=normalized
         except (ValueError,KeyError,TypeError) as error:
             raise parameter_failure(error) from None
-        if not value['reason'] or value['question']:raise LanguageError('INVALID_SCHEME_PROPOSAL','可执行建议需要理由且不带澄清问题。')
+        if not value['reason'] or (value['question'] and not chat):raise LanguageError('INVALID_SCHEME_PROPOSAL','可执行建议需要理由且不带澄清问题。')
     elif value['parameters'] is not None or (value['status']=='clarification' and not value['question']) or (value['status'] in ('unsupported','explanation') and not value['reason']):
         raise LanguageError('INVALID_SCHEME_PROPOSAL','不可执行建议不能携带参数。')
     if not chat and value['status']=='explanation' and value['question']:raise LanguageError('INVALID_SCHEME_PROPOSAL','普通解释不携带修改或澄清问题。')

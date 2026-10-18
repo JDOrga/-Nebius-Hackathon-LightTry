@@ -54,6 +54,11 @@ class ChatTests(unittest.TestCase):
   with self.assertRaises(LanguageError) as caught:validate({**self.good,'reason':mixed['reason']},self.env,self.policy,'zh',False)
   self.assertEqual(caught.exception.code,'LANGUAGE_MISMATCH')
   self.assertEqual(validate({**mixed,'reason':'I can explain the lighting plan'},self.env,self.policy,'zh',True)['status'],'explanation')
+ def test_ready_chat_proposal_may_include_followup_but_still_needs_reason(self):
+  answer={**self.good,'question':'你想先试这个亮度吗？'}
+  self.assertEqual(validate(answer,self.env,self.policy,'zh',True)['question'],answer['question'])
+  with self.assertRaises(LanguageError):validate(answer,self.env,self.policy,'zh',False)
+  with self.assertRaises(LanguageError):validate({**answer,'reason':''},self.env,self.policy,'zh',True)
  def test_capability_question_is_prompted_as_direct_conversation_not_edit(self):
   a=self.adapter([{**self.good,'status':'explanation','parameters':None}])
   b=copy.deepcopy(self.body);b['text']='what can you do'
