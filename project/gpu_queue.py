@@ -10,7 +10,7 @@ import time
 import uuid
 
 from inference.images import decode, digest, InputError
-from inference.jobs import ID, JobError, ACTIVE
+from inference.jobs import ID, JobError, ACTIVE, read
 from lighting import canonical, normalize_scheme
 
 
@@ -38,6 +38,30 @@ class GPUQueue:
     def contains(self, identity, owner):
         try:self.row(identity,owner);return True
         except JobError:return False
+
+    def foreign_in_flight(self, owner):
+        """Fail closed on any other account's running, uncertain, or waiting work."""
+        with self.mutex,self.workspace.connect() as db:
+            rows=db.execute('SELECT id,owner,state FROM gpu_queue').fetchall()
+            owners={identity:account for identity,account,_ in rows}
+            if any(account!=owner and state in ('waiting','dispatching','active','blocked')
+                   for _,account,state in rows):return True
+            for folder in self.store.root.iterdir():
+                if not ID.fullmatch(folder.name):continue
+                if folder.is_symlink():return True
+                path=folder/'task.json'
+                if path.is_symlink():return True
+                if not path.is_file():continue
+                try:task=read(path)
+                except (OSError,ValueError,TypeError,KeyError):return True
+                if not isinstance(task,dict):return True
+                if task.get('status') not in ACTIVE and not task.get('executionUncertain'):continue
+                account=owners.get(folder.name)
+                if account is None:
+                    row=db.execute("SELECT owner FROM ownership WHERE kind='task' AND id=?",(folder.name,)).fetchone()
+                    account=row[0] if row else None
+                if account!=owner:return True
+            return False
 
     def submit(self, payload, metadata, mime, owner):
         executor=self.store.executor

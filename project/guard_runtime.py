@@ -29,7 +29,31 @@ def cpu_guard_step(control):
     observation=None
     if state.get('sessionId') and not state.get('verifiedStopped'):
         current=guard.poll(state['sessionId'])
-        if getattr(control,'bootstrap',None):control.bootstrap.step(current)
+        bootstrap=getattr(control,'bootstrap',None)
+        if (bootstrap and getattr(control,'auto_host_trust',False) and current.get('state')=='LOADING' and
+                not current.get('hostConfirmed') and not current.get('stopSent')):
+            candidate=bootstrap.public(current)  # Guard-owned, cached first-contact key; no new scan or provider poll.
+            if candidate.get('canConfirm'):
+                sid=current['sessionId'];host=current['hostIdentity']
+                try:
+                    if candidate.get('sessionId')!=sid or candidate.get('hostIdentity')!=host:
+                        raise ValueError('AUTO_HOST_IDENTITY_MISMATCH')
+                    bootstrap.confirm(sid,host,candidate['fingerprint'])  # Pins this session; SSH stays strict.
+                    current=guard.confirm_host(sid,host,trust_method='guard-tofu')
+                except (JobError,ValueError,OSError,KeyError):
+                    bootstrap.status(sid,'uncertain',error='AUTO_HOST_TRUST_FAILED')
+                    guard.request_stop(sid,'AUTO_HOST_TRUST_FAILED')
+                    guard.fallback.publish(None)
+                    return
+            elif candidate.get('stage')=='awaiting_host_confirmation':
+                # A captured key that cannot be bound to the current host is not
+                # a reason to wait indefinitely or silently accept another key.
+                sid=current['sessionId']
+                bootstrap.status(sid,'uncertain',error='AUTO_HOST_TRUST_FAILED')
+                guard.request_stop(sid,'AUTO_HOST_TRUST_FAILED')
+                guard.fallback.publish(None)
+                return
+        if bootstrap:bootstrap.step(current)
     else:
         try:
             observation=guard.provider.preflight(control.scope['resourceId'])

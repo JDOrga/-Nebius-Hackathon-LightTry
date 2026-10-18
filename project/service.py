@@ -176,6 +176,12 @@ class Application:
         # Basic authentication is deliberately no longer accepted.
         return self.login_sessions.authenticate(self.session_token(environ))
 
+    def is_operator(self, owner):
+        return bool(owner and self.accounts.users[owner]['role']=='operator')
+
+    def language_for(self, owner):
+        return self.handler.recipe_language
+
     def session_cookie(self, token, seconds):
         secure = '; Secure' if self.origin.startswith('https://') else ''
         return ('lighttry_session=' + token + '; Path=/; Max-Age=' + str(seconds) +
@@ -243,14 +249,12 @@ class Application:
         if issuer:
             try:issuer.limits();current_scope_ok=True
             except ValueError:current_scope_ok=False
-        allowed = bool(owner and self.accounts.users[owner]['role']=='operator' and
+        allowed = bool(owner and
                        self.gpu_sessions and scope and current_scope_ok and state=='STOPPED' and
                        snapshot.get('verifiedStopped') is True)
         reason = ''
         if not self.gpu_sessions or not scope:
             reason = 'GPU 启动服务暂不可用，可以先进入工作台。'
-        elif owner and self.accounts.users[owner]['role']!='operator':
-            reason = '当前密钥没有启动权限，可以先进入工作台。'
         elif state=='UNKNOWN':
             reason = '暂时无法确认 GPU 状态，可以先进入工作台。'
         elif state=='STOPPING':
@@ -268,6 +272,9 @@ class Application:
             reason=('启动请求已提交，请等待状态更新。' if pending['status']=='requested' else '上次启动未成功，请联系管理员核实。')
         bootstrap=getattr(getattr(self,'gpu_control',None),'bootstrap',None)
         enrollment=bootstrap.public(snapshot) if bootstrap else {'stage':'not_configured','canConfirm':False}
+        auto_trust=bool(getattr(getattr(self,'gpu_control',None),'auto_host_trust',False))
+        if auto_trust:
+            enrollment={**enrollment,'canConfirm':False,'automatic':True}
         from gpu_monitoring import public_failure
         diagnostic=public_failure(snapshot,enrollment,fresh) if self.gpu_sessions else None
         if diagnostic:
@@ -277,13 +284,16 @@ class Application:
         operator=bool(owner and self.accounts.users[owner]['role']=='operator')
         if not operator:enrollment['canConfirm']=False
         if state=='LOADING' and bootstrap and not diagnostic:
-            reason={'awaiting_host_confirmation':'请先核对并确认本次服务器连接。','waiting_authorization':'正在等待本次模型授权。',
+            reason={'awaiting_host_confirmation':'正在自动绑定本次服务器连接。' if auto_trust else '请先核对并确认本次服务器连接。','waiting_authorization':'正在等待本次模型授权。',
                     'deploying':'正在连接模型服务。','deployed':'服务器已连接，正在加载模型。',
                     'uncertain':'服务器连接未确认，请先停止并核查。'}.get(enrollment['stage'],'正在准备服务器连接。')
-        can_stop=bool(operator and scope and snapshot.get('sessionId') and snapshot.get('scopeId')==scope.get('scopeId') and
+        stop_base=bool(owner and scope and snapshot.get('sessionId') and snapshot.get('scopeId')==scope.get('scopeId') and
                       snapshot.get('resourceId')==scope.get('resourceId') and not snapshot.get('verifiedStopped') and not snapshot.get('stopSent'))
+        stop_blocked=bool(stop_base and not operator and self.queue.foreign_in_flight(owner))
+        can_stop=bool(stop_base and not stop_blocked)
         from gpu_monitoring import public_monitor
-        return {'active':active,'state':state,'canStart':allowed,'canStop':can_stop,'hostConfirmation':enrollment,'diagnostic':diagnostic,
+        return {'active':active,'state':state,'canStart':allowed,'canStop':can_stop,
+                'stopBlockedByOtherTasks':stop_blocked,'hostConfirmation':enrollment,'diagnostic':diagnostic,
                 'monitor':public_monitor(snapshot,fresh,time.time()),
                 'sessionId':snapshot.get('sessionId'),'message':reason,'simulation':snapshot.get('simulation') is True,
                 'configured':self.gpu_sessions is not None,'canGenerate':bool(fresh and state=='READY' and not (diagnostic and diagnostic['active'])),
@@ -313,8 +323,6 @@ class Application:
         h.send_bytes(html.encode('utf-8'),'text/html; charset=utf-8')
 
     def start_gpu_from_entry(self, h):
-        if self.accounts.users[h.user]['role']!='operator':
-            raise JobError('OPERATOR_REQUIRED','当前密钥没有启动权限。',403)
         if h.headers.get('Content-Type')!='application/json':
             raise JobError('INVALID_BODY','请求格式不正确。',400)
         body=studio.shared.strict_json(self.body(h,1024).decode('utf-8'))
@@ -376,15 +384,15 @@ class Application:
                 h.headers[name.replace('_', '-')] = str(environ[name])
         slot=False
         try:
-            self.limiter.consume('ip',environ.get('REMOTE_ADDR','unknown'))
-            self.limiter.check('login',environ.get('REMOTE_ADDR','unknown'))
             h.user=self.authorized(environ)
+            operator=self.is_operator(h.user)
+            if not operator:self.limiter.consume('ip',environ.get('REMOTE_ADDR','unknown'))
+            if h.user:h.recipe_language=self.language_for(h.user)
             if not h.valid_host():
                 h.job_error(JobError('INVALID_HOST', '访问地址未配置。', 403))
             elif self.login_route(h, environ):
                 pass
             elif not h.user:
-                self.limiter.consume('login',environ.get('REMOTE_ADDR','unknown'))
                 if h.command == 'GET' and urlsplit(h.path).path in ('/', '/index.html'):
                     self.login_page(h, 401)
                 else:
@@ -394,16 +402,18 @@ class Application:
             elif h.command in ('POST', 'PUT', 'DELETE') and h.headers.get('X-LightTry-Token') != h.csrf_token:
                 h.job_error(JobError('INVALID_TOKEN', '请刷新页面后重试。', 403))
             else:
-                self.limiter.consume('user',h.user)
+                if not operator:self.limiter.consume('user',h.user)
                 path=urlsplit(h.path).path
                 if any(part in ('.','..') for part in path.split('/')) or '%' in path or '\\' in path or any(ord(c)<32 for c in path):
                     raise JobError('UNSAFE_PATH','路径无效。',404)
                 if h.command=='POST':
-                    self.limiter.consume('write',h.user)
-                    if path=='/api/tasks' or path.endswith('/recommend'):
-                        self.limiter.consume('generate',h.user)
+                    if not operator:
+                        self.limiter.consume('write',h.user)
+                        if path=='/api/tasks':self.limiter.consume('generate',h.user)
+                        if path in ('/api/lighting/recommend','/api/language/recommend'):
+                            self.limiter.consume_language(h.user)
                     if path.startswith('/api/photos/') or path in ('/api/tasks','/api/environments/import'):
-                        self.limiter.consume('upload',h.user)
+                        if not operator:self.limiter.consume('upload',h.user)
                         slot=self.upload_slots.acquire(blocking=False)
                         if not slot:raise JobError('UPLOAD_BUSY','解码通道繁忙，请稍后重试。',429)
                 self.check_ownership(h,path)
@@ -497,7 +507,8 @@ class Application:
             h.json_response(self.gpu_sessions.latest() if self.gpu_sessions else {'state':'STOPPED','label':'停止','configured':False,'providerState':None,'verifiedStopped':False,'simulation':False})
         elif path in ('/api/gpu/start','/api/gpu/stop','/api/gpu/confirm-host','/api/generate','/api/tasks/start','/api/tasks/stop'):
             if h.command=='GET':raise JobError('METHOD_NOT_ALLOWED','生成、启动或停止不得由 GET 触发。',405)
-            if self.accounts.users[h.user]['role']!='operator':raise JobError('OPERATOR_REQUIRED','云控制仅限服务端操作者授权。',403)
+            if path not in ('/api/gpu/start','/api/gpu/stop') and not self.is_operator(h.user):
+                raise JobError('OPERATOR_REQUIRED','此云控制操作仅限管理员。',403)
             if not self.gpu_sessions or not self.gpu_scope:raise JobError('CONTROL_NOT_CONFIGURED','受守护云控制未配置；没有启动或停止。',503)
             if h.headers.get('Content-Type')!='application/json':raise JobError('INVALID_BODY','需要 JSON。',400)
             body=studio.shared.strict_json(self.body(h,8192).decode('utf-8'))
@@ -505,6 +516,8 @@ class Application:
                 if set(body)!={'requestId'} or not ID.fullmatch(body['requestId']):raise JobError('INVALID_BODY','只接受本次点击身份，不接受客户端预算或主机参数。',422)
                 self.start_gpu_from_entry(h)
             elif path=='/api/gpu/confirm-host':
+                if getattr(self.gpu_control,'auto_host_trust',False):
+                    raise JobError('AUTOMATIC_HOST_TRUST_ACTIVE','本次服务器由守护自动绑定，浏览器不能代表运维方确认。',409)
                 bootstrap=getattr(self.gpu_control,'bootstrap',None)
                 expected={'sessionId','hostIdentity','fingerprint'} if bootstrap else {'sessionId','hostIdentity'}
                 if set(body)!=expected:raise JobError('INVALID_BODY','需要本会话的当前主机确认。',422)
@@ -512,9 +525,12 @@ class Application:
                 h.json_response(self.gpu_sessions.confirm_host(body['sessionId'],body['hostIdentity']))
             elif path=='/api/gpu/stop':
                 if set(body)!={'sessionId'}:raise JobError('INVALID_BODY','需要会话身份。',422)
-                current=self.gpu_sessions.latest()
-                if body['sessionId']!=current.get('sessionId'):raise JobError('SESSION_NOT_FOUND','会话不匹配。',404)
-                h.json_response(self.gpu_sessions.request_stop(body['sessionId']),202)
+                with self.queue.mutex:
+                    current=self.gpu_sessions.latest()
+                    if body['sessionId']!=current.get('sessionId'):raise JobError('SESSION_NOT_FOUND','会话不匹配。',404)
+                    if not self.is_operator(h.user) and self.queue.foreign_in_flight(h.user):
+                        raise JobError('FOREIGN_GPU_TASK','有其他用户的生成任务正在运行或排队，普通用户无权关闭 GPU。',403)
+                    h.json_response(self.gpu_sessions.request_stop(body['sessionId']),202)
             else:raise JobError('CONTROL_NOT_CONFIGURED','此控制接口未配置。',503)
         elif h.command=='GET' and path=='/api/me':
             h.json_response({'username':h.user,'role':self.accounts.users[h.user]['role']})

@@ -2,6 +2,7 @@
 import argparse
 import copy
 import json
+import os
 import sys
 import tempfile
 import types
@@ -71,6 +72,12 @@ class SyntheticBackend:
 
 class ReuseTests(unittest.TestCase):
     def setUp(self):
+        # This synthetic workspace must not inherit a service test's private
+        # persistent cache binding from the same unittest process.
+        environment = mock_patch.dict(os.environ, {})
+        environment.start(); self.addCleanup(environment.stop)
+        os.environ.pop('LIGHTTRY_DATA_ROOT', None)
+        os.environ.pop('LIGHTTRY_INVERSE_CACHE', None)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)

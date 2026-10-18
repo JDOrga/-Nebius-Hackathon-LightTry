@@ -104,7 +104,9 @@ class RepositoryLayoutTests(unittest.TestCase):
 
     def test_cache_environment_override_remains_workspace_bounded(self):
         from inference.driver import cache_directory
-        with tempfile.TemporaryDirectory() as t:
+        # Other service tests legitimately configure a process-wide persistent
+        # data root; this fixture exercises the repository-local branch only.
+        with tempfile.TemporaryDirectory() as t, patch.dict('os.environ', {'LIGHTTRY_DATA_ROOT': ''}):
             root=Path(t)
             with patch.dict('os.environ',{'LIGHTTRY_INVERSE_CACHE':str(root/'explicit-cache')}):
                 self.assertEqual(cache_directory(root),(root/'explicit-cache').resolve())

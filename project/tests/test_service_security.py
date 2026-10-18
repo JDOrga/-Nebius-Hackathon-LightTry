@@ -77,12 +77,12 @@ class ServiceSecurityTests(unittest.TestCase):
         self.assertEqual(executor.calls,[])
         with self.app.workspace.connect() as db:self.assertEqual(db.execute('SELECT count(*) FROM gpu_queue').fetchone()[0],0)
 
-    def test_get_never_dispatches_or_controls_gpu_and_user_cannot_start_stop(self):
+    def test_get_never_dispatches_and_both_roles_require_configured_gpu_control(self):
         executor=ApprovedOfflineExecutor();self.app.handler.task_store.executor=executor
         for route in ('/api/generate','/api/gpu/start','/api/gpu/stop','/api/tasks/start','/api/tasks/stop'):
             self.assertIn(request(self.app,route)[0],(404,405))
         for route in ('/api/gpu/start','/api/gpu/stop'):
-            self.assertEqual(request(self.app,route,'POST',b'{}')[0],403)
+            self.assertEqual(request(self.app,route,'POST',b'{}')[0],503)
             self.assertEqual(request(self.app,route,'POST',b'{}',user='operator',password=OTHER)[0],503)
         self.assertEqual(executor.calls,[])
 

@@ -136,7 +136,7 @@ sudo systemctl restart lighttry
 
 本地 `start.py` 的开发工作台仍为127.0.0.1预览，不充当认证验收；新登录流程在 `start.py --service` 生效。本轮仅本地合成密钥测试，未改动服务器账号或部署文件。
 
-账号角色由受保护运行时文件提供，不接受网页修改/注册。临时账号角色为 user；operator 也不能绕过未配置的守护、预算或当前主机确认。`GET /api/me` 只返回用户名/角色，不返回密码、哈希或云凭据。
+账号角色由受保护运行时文件提供，不接受网页修改/注册。临时账号角色为 user；operator 也不能绕过未配置的守护、预算或本轮主机绑定。`GET /api/me` 只返回用户名/角色，不返回密码、哈希或云凭据。
 
 ### 归属、限额与路径
 
@@ -144,7 +144,7 @@ SQLite ownership 表绑定照片、方案、导入 HDR 和任务。任务/结果
 
 照片最大20MiB，只接受与声明 MIME 一致的单帧 JPG/PNG/WebP，宽高32..16384、最多4000万像素；HDR最大32MiB，限Radiance RGBE、指定2:1布局和解码维度/扫描行；方案 JSON 最大1MiB，文字/条件 JSON 最大8KiB。至多两个并行解码通道，忙时429。每账号最多200个私有照片身份，照片字节总配额512MiB。文件名不作为磁盘路径：照片用SHA，任务用服务生成UUID；禁止路径遍历、编码绕过、任意文件下载及符号链接，并核验原图/结果哈希。HTTP缓冲仍受Waitress 32MiB上限控制；在代理侧也应限制请求体、连接数和超时，应用认证不能阻止HTTP服务器先接收请求体。
 
-限流存入SQLite，CPU服务重启不重置窗口；按真实网络REMOTE_ADDR而非客户端X-Forwarded-For计数。每分钟上限：IP240、账号120、登录失败10、写请求30、上传8、生成/文字建议3；限流失败不继续解码或派发。反向代理下IP预算会共享，需由部署入口补充可信代理/WAF策略，不能为了绕限流直接信任客户端转发头。
+限流存入SQLite，CPU服务重启不重置窗口；按真实网络REMOTE_ADDR而非客户端X-Forwarded-For计数。普通用户每分钟上限：IP240、账号120、登录失败10、写请求30、上传8、生成3；Nemotron 另按滚动60秒每账号最多10条计数。管理员登录后免应用层访问及Nemotron频率限制；登录入口仍保留防暴力破解限流，解码并发和服务端安全校验也不绕过。限流失败不继续解码或派发。反向代理下IP预算会共享，需由部署入口补充可信代理/WAF策略，不能为了绕限流直接信任客户端转发头。
 
 ### 单 GPU 串行队列与收费边界
 
@@ -152,9 +152,12 @@ SQLite ownership 表绑定照片、方案、导入 HDR 和任务。任务/结果
 
 原任务库单进程OS锁和串行检查继续生效。派发前提交dispatching闩锁；异常、进程退出或执行状态未知会阻塞通道，不自动重发launch；已有旧执行/未知执行也会占住通道。只有执行端真实结束且结果通过原校验，才推进下一项。等待项授权撤销/过期则不派发，不继承旧实验的预算或时限。队列验证用离线替身，不能当成GPU实机验收。
 
-生成、启动、停止没有普通页面GET控制路径；GET控制请求为404/405。普通账号POST云start/stop为403，operator仍因未接入受审计控制器而503，绝不隐式调用CLI。任何后续真实云控制都必须重新走 `docs/EXECUTION_FLOW.md`，本轮不登录、不收费、不启停GPU。
+生成、启动、停止没有普通页面GET控制路径；GET控制请求为404/405。管理员和普通用户均可在当前预算、守护与独立STOPPED预检通过后请求启动。管理员可在任务运行或排队期间请求停止；普通用户只有在所有运行、派发中、不确定及排队任务均属于自己时才能停止，任一其他账号或归属未知的任务都会在服务端拒绝，界面以弹窗提示。未接入控制器时两组均为503，绝不隐式调用CLI。任何后续真实云控制都必须重新走 `docs/EXECUTION_FLOW.md`，本轮不登录、不收费、不启停GPU。
 
 ### Nemotron / Nebius 凭据
+
+权限组由受保护账号文件中的 `operator`（管理员）与 `user`（普通用户）决定，网页不能自提权。当前服务端仍不生成或分配新密钥。普通用户的 Nemotron 请求除滚动60秒10条外，还受正常访问限流和独立的有界文字账本约束；管理员免应用层次数/费用上限，但每次请求仍计费并写入独立账本，传输超时、并发互斥、参数安全校验及上游故障仍有效。此管理员无限额仅在私有 schemaVersion=2 文字配置同时写明 `unbounded=true` 与 `operatorAcceptsUnboundedCost=true`、并指定独立新账本时启用；旧 schemaVersion=1 配置继续有界，不把已关闭额度换名续用。私有 v2 的 `user` 可暂设为 `null`，此时普通用户文字服务关闭；日后分配普通用户密钥时须明确配置新的独立有界账本和预算，不能复用旧额度。
+
 
 只支持受保护的服务端运行时文件 `LIGHTTRY_NEMOTRON_KEY_FILE`、`LIGHTTRY_NEBIUS_CREDENTIAL_FILE`，或服务端环境 `NEMOTRON_API_KEY`、`NEBIUS_IAM_TOKEN`。文件必须在代码树外、普通文件、无符号链接、0600；建议只读挂载到 `/run/secrets/`，而非复制进镜像。代码只保存变量名与接口，不保存实际值，不从网页提供/返回凭据，也不记录请求正文、Authorization、URL查询或异常原文。账号文件、交付文件和service.env不入Git；镜像允许清单不含这些文件。环境/文件读取入口已离线验证，实际服务仍未开启两家收费适配器。
 
@@ -175,11 +178,11 @@ SQLite ownership 表绑定照片、方案、导入 HDR 和任务。任务/结果
 | POST /v1/jobs | 精确 jobId/sessionId/resourceId/artifactSha256/requestSha256 绑定 |
 | GET /v1/jobs/{jobId} | 查询原任务，恢复响应丢失；不产生执行 |
 | GET /api/gpu/status | CPU 登录后读SQLite快照，不轮询云、不续租、不启动 |
-| POST /api/gpu/start | operator + 同源/CSRF；仅接受requestId；范围/预算来自服务端 |
-| POST /api/gpu/confirm-host | operator 确认本会话首次可靠RUNNING的当前主机身份 |
-| POST /api/gpu/stop | operator 指定当前sessionId；持久化单次stop闩锁 |
+| POST /api/gpu/start | 管理员/普通用户 + 同源/CSRF；仅接受requestId；范围/预算来自服务端 |
+| POST /api/gpu/confirm-host | 遗留运维兼容接口；启用私有自动绑定时浏览器确认被拒绝 |
+| POST /api/gpu/stop | 管理员可中断任意任务；普通用户仅在无其他账号运行或排队任务时可停；指定当前sessionId并持久化单次stop闩锁 |
 
-未配置控制器时POST控制仍503；普通账号仍403，未登录仍401，控制GET仍404/405。离线HTTPS协议测试使用明确的连接替身，不宣称已部署真实TLS入口。`start.py --worker --data-root /var/lib/lighttry-worker --session-id SESSION --resource-id RESOURCE --worker-token-file /run/secrets/worker-token` 可运行受保护协议壳；默认模型适配器未设置，不会加载/执行GPU模型。制品内的模型请求/结果收据导入需要后续正式适配器遵守现有哈希、原图、配方和实际结果验证，不能用worker成功状态替代产品视觉验收。
+未配置控制器时POST控制仍503；未登录仍401，控制GET仍404/405。普通用户不能调用遗留运维专用控制接口。离线HTTPS协议测试使用明确的连接替身，不宣称已部署真实TLS入口。`start.py --worker --data-root /var/lib/lighttry-worker --session-id SESSION --resource-id RESOURCE --worker-token-file /run/secrets/worker-token` 可运行受保护协议壳；默认模型适配器未设置，不会加载/执行GPU模型。制品内的模型请求/结果收据导入需要后续正式适配器遵守现有哈希、原图、配方和实际结果验证，不能用worker成功状态替代产品视觉验收。
 
 ### 持久化会话与单次副作用
 
@@ -211,7 +214,7 @@ CPU进程由服务端每5秒为当前会话续30秒短租约；它只表示当�
 
 ### 本轮验证
 
-`test_worker_guard.py` 覆盖七状态、24次并发/多标签启动只有一次模拟start、启动ACK丢失、断线、重启固定截止、任务ACK丢失先查询、404/不确定不重跑、worker执行闩锁、STOPPING有界等待后停机核实、CPU整机失联的异机兜底逻辑、时钟回退和未ready截断。独立进程用真实本机Linux CPU HTTP服务及守护进程，provider/模型仍是离线替身；不把这项本机进程通过写成真实云验收。后续真实接线必须重新完成当前授权、独立预检、守护ready、单次启动、当前主机确认与四项释放，不能使用旧已关闭预算。
+`test_worker_guard.py` 覆盖七状态、24次并发/多标签启动只有一次模拟start、启动ACK丢失、断线、重启固定截止、任务ACK丢失先查询、404/不确定不重跑、worker执行闩锁、STOPPING有界等待后停机核实、CPU整机失联的异机兜底逻辑、时钟回退和未ready截断。独立进程用真实本机Linux CPU HTTP服务及守护进程，provider/模型仍是离线替身；不把这项本机进程通过写成真实云验收。后续真实接线必须重新完成当前授权、独立预检、守护ready、单次启动、本轮主机绑定与四项释放，不能使用旧已关闭预算。
 # CPU 镜像构建与本地容器验证（2026-10-14）
 
 镜像版本 `lighttry-cpu:2026.10.14-cpu.1`。入口仍为根 `start.py --service`，容器内监听 `0.0.0.0:8080`。
@@ -262,7 +265,7 @@ sudo env PYTHON=/path/to/validated/python RUN=/var/tmp/lighttry-fresh-acceptance
 
 登录后只读取独立守护维护的本地状态快照，不新增供应商轮询。60秒内的 STARTING/LOADING/READY/EXECUTING 状态直接进入工作台；已停止时进入 `/gpu-entry` 选择页。未配置、过期快照、停机中或未知状态分别阻止启动，不把未知显示为已停机；都可直接进入工作台。
 
-“启动 GPU 并进入工作台”以同源 CSRF 保护的 POST `/api/gpu/entry-start` 提交单次请求，接受后立刻进入工作台，不等待开机/模型加载。后台仅调用已有 `Sessions.start`，保留原预检、独立守护、授权期限、主机确认、一次启动及安全收尾约束；没有注册真实适配器或扩大预算。请求超时不自动重试；相同授权 scope 重复点击不重复派发，失败也不自动再次启动。启动权限仍限 operator，必须由服务端提供未过期、预算已批准的新 scope，且快照确认已安全停止。不会继承已关闭实验的授权。
+“启动 GPU 并进入工作台”以同源 CSRF 保护的 POST `/api/gpu/entry-start` 提交单次请求，接受后立刻进入工作台，不等待开机/模型加载。后台仅调用已有 `Sessions.start`，保留原预检、独立守护、授权期限、本轮主机绑定、一次启动及安全收尾约束；没有注册真实适配器或扩大预算。请求超时不自动重试；相同授权 scope 重复点击不重复派发，失败也不自动再次启动。启动权限仍限 operator，必须由服务端提供未过期、预算已批准的新 scope，且快照确认已安全停止。不会继承已关闭实验的授权。
 
 本轮只用合成快照/启动替身验收跳转、后台非阻塞和重复点击；未读取真实云状态、未发真实启动请求、未推送 CPU 服务器。当前部署若未接入云控制，启动按钮禁用，但进入工作台始终可用。
 
@@ -311,7 +314,7 @@ scopeFile 为单独的新授权，精确包含 scopeId、resourceId、expiresAt�
 
 ### 真实 Nebius / HTTPS / Cosmos 对接代码（2026-10-16，未启动GPU）
 
-- `project/nebius_provider.py` 实现现有资源类型 **Nebius AI Devlab** 的 preflight/observe/restart/stop，不创建或删除资源。复用已审阅的租户→项目→Devlab→当前VM/IP/授权公钥校验；STOPPED必须有显式空instances。RUNNING才查询当前VM并复核资源指针，产生待人工确认的API主机身份。它不是SSH服务端指纹证明；HTTPS还必须通过当前证书SHA256 pin、CA和主机名校验。
+- `project/nebius_provider.py` 实现现有资源类型 **Nebius AI Devlab** 的 preflight/observe/restart/stop，不创建或删除资源。复用已审阅的租户→项目→Devlab→当前VM/IP/授权公钥校验；STOPPED必须有显式空instances。RUNNING才查询当前VM并复核资源指针，产生本轮 API 主机身份。它不是 SSH 服务端指纹证明；显式私有风险许可下守护对首次 SSH 指纹采用自动绑定，承担首次连接中间人风险；HTTPS还必须通过当前证书SHA256 pin、CA和主机名校验。
 - CLI只接受服务端固定的绝对路径、私有config文件、profile和资源绑定，固定命令，无shell、无浏览器登录、无自动重试。每条子进程最多6秒，操作链最多20秒且启动受原startup/absolute截止约束；`--retries=1`按当前官方文档禁用CLI内部重试。provider_attempts SQLite闩锁在命令前提交，ACK丢失或重启都不再发第二次相同副作用。真实调用前还需验证所安装CLI版本/参数与服务账号权限，本轮未运行真实CLI。
 - `project/https_executor.py` 为CPU SchemeStore/GPUQueue的显式适配器。使用私有model grant约束owner+队列fingerprint、原图SHA、recipeKey、当前确认主机和不晚于工作期限的授权。`--model-grant-file`/LIGHTTRY_MODEL_GRANT_FILE缺省不注册模型适配器；状态GET只读本地记录。后台协调器只查询原jobId并按hash下载结果，不恢复POST、不自动重launch。
 - `project/gpu_model.py` 为GPU进程的真实Cosmos桥。只有显式 `start.py --worker ... --worker-config /etc/lighttry/worker.json` 才注册；没有该参数仍是未配置协议壳。构造/health/GET不加载CUDA、权重或模型；配置执行器时`modelLoaded=null`表示未测量模型驻留状态，executionMode=per-job表示按job启动现有Linux Python3.10参数化worker，不冒充已经加载模型。入队后由专用后台执行线程调度，先持久化dispatching，进程崩溃留下uncertain并阻塞重跑。
@@ -352,12 +355,14 @@ CosmosWorkerExecutor 保留为旧的逐任务冷加载适配器，不报告 read
 
 
 ### 2026-10-16：网页启动链衔接（尚未实机验收）
-已实现守护收到 RUNNING 后捕获当前 SSH 指纹、由操作者确认后单次上传冻结源码包、严格主机校验 SSH 隧道、私网 HTTPS worker 与常驻模型启动衔接。健康查询不加载模型；只有当前会话隧道及两阶段模型实际 ready 才允许生成。慢云查询与 CPU 心跳并发已用独立 liveness 表修复，原截止时间不延长。
+首次主机信任取舍：仅私有 `autoHostTrust` 同时声明启用与运维方接受首次连接中间人风险时，守护在供应商已确认 RUNNING/VM/IP 后自动绑定本轮候选 SSH 指纹；不要求浏览器用户核对。SSH 仍使用本轮独立 known_hosts 与严格校验，绑定失败截断部署并请求停机，不继承旧信任。`ssh-keyscan` 不能自行证明首次密钥真伪；该改变尚未经过新一轮 GPU 实机验收。
+
+已实现守护收到 RUNNING 后捕获当前 SSH 指纹；显式私有风险许可下自动绑定本轮 pin，再单次上传冻结源码包，后续仍严格校验 SSH 隧道、私网 HTTPS worker 与常驻模型启动衔接。健康查询不加载模型；只有当前会话隧道及两阶段模型实际 ready 才允许生成。慢云查询与 CPU 心跳并发已用独立 liveness 表修复，原截止时间不延长。
 验证仅包含离线替身、并发回归与真实本机 TLS；未启动 GPU、未远程部署、未加载实际模型，Docker 镜像未构建。3 美元含税仅为未来每会话预算偏好，不是启动授权或供应商硬封顶。当前私有控制和模型授权仍未启用；尚需补齐每次点击的新 scope 与动态逐任务授权，再做经授权的真实端到端验收。CPU 整机故障下无独立停机保证，不能声称已有独立守护。
 
 
 #### 当前会话模型授权衔接（2026-10-16，本地代码验证）
-可选私有 `modelPolicyFile` 明确模型许可与任务上限，并与 `scopePolicyFile`、SSH bootstrap 同时配置后，CPU 守护在当前主机确认通过后创建本次 v2 模型授权。每会话独立随机签名密钥与原截止时间不可续期；保存原始授权，重启复用，不把历史主机信任或预算带到新会话。新照片任务通过签名传到 GPU 校验，无需修改常驻模型的启动授权。缺许可、当前点击、主机确认或新鲜状态时拒绝；删除/撤销本次已发布授权不会自动补发。仍未实际开机、部署或加载模型，私有运行配置未启用。
+可选私有 `modelPolicyFile` 明确模型许可与任务上限，并与 `scopePolicyFile`、SSH bootstrap 同时配置后，CPU 守护在本轮主机绑定通过后创建本次 v2 模型授权。每会话独立随机签名密钥与原截止时间不可续期；保存原始授权，重启复用，不把历史主机信任或预算带到新会话。新照片任务通过签名传到 GPU 校验，无需修改常驻模型的启动授权。缺许可、当前点击、主机确认或新鲜状态时拒绝；删除/撤销本次已发布授权不会自动补发。仍未实际开机、部署或加载模型，私有运行配置未启用。
 
 
 ### 非 SSH GPU HTTPS 通道（本地准备，未部署）
@@ -367,7 +372,7 @@ CosmosWorkerExecutor 保留为旧的逐任务冷加载适配器，不报告 read
 
 第九轮真实连接验收：公网 mTLS 与主动关闭 SSH 后的直连健康/合成 blob 下载已通过；未换 IP、未提交推理、模型 READY 未确认。实测使用 `project/mtls_relay.py`，不是 Nginx。当前已安全停机、撤销本轮直连配置；每次新会话的自动代理部署/证书绑定和完整模型推理验收仍待完成。
 
-自动mTLS接线已在本地接入主机确认后的部署链（可选私有directTLS），不再依赖逐轮手工脚本；健康绑定通过才发布，停止自动撤销。自动版本尚未重新实机验收，当前GPU仍关闭。
+自动mTLS接线已在本地接入本轮主机绑定后的部署链（可选私有directTLS），不再依赖逐轮手工脚本；健康绑定通过才发布，停止自动撤销。自动版本尚未重新实机验收，当前GPU仍关闭。
 
 ### 模型冷加载分段计时（2026-10-16，本地实现，待实机采样）
 
@@ -404,7 +409,7 @@ tokenizer 的 encoder/decoder 是通过 torch.load 读取的 JIT 制品，不能
 ### 生成阶段条与 GPU 监控台（本地实现，待实机验收）
 
 点击 GPU 卡片的主区域会打开宽 1120px、最高 800px 的只读监控台；窄屏改为单列，支持 Esc、
-关闭与手动刷新。卡片上的启动、主机确认、停止按钮仍是各自独立且需确认的操作，打开/关闭
+关闭与手动刷新。卡片上的启动、停止按钮仍是各自独立且需确认的操作；本轮主机绑定由守护自动处理，打开/关闭
 监控台不触发它们。摘要显示当前会话/供应商状态、模型状态、本轮预算、当前 VM/IP、身份确认、
 原工作/停机/核验/绝对截止和资源释放证明。CPU-only 风险保留；预算不是账单硬封顶。
 没有实际采集的 GPU 利用率、显存、温度明确写“未接入采集”，不显示估算数字。

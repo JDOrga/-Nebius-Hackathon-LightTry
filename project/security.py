@@ -153,6 +153,18 @@ class RateLimiter:
         self.limits={'ip':240,'user':120,'login':10,'upload':8,'write':30,'generate':3}
         with workspace.connect() as db:
             db.execute('CREATE TABLE IF NOT EXISTS rate_windows (key TEXT PRIMARY KEY,bucket INTEGER NOT NULL,count INTEGER NOT NULL)')
+            db.execute('CREATE TABLE IF NOT EXISTS language_rate_events (owner TEXT NOT NULL,at REAL NOT NULL)')
+            db.execute('CREATE INDEX IF NOT EXISTS language_rate_events_owner_at ON language_rate_events(owner,at)')
+
+    def consume_language(self, owner):
+        """At most ten ordinary-user text submissions in any rolling 60 seconds."""
+        now=self.clock()
+        with self.workspace.lock,self.workspace.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            db.execute('DELETE FROM language_rate_events WHERE at<=?',(now-60,))
+            count=db.execute('SELECT count(*) FROM language_rate_events WHERE owner=? AND at>?',(owner,now-60)).fetchone()[0]
+            if count>=10:raise JobError('LANGUAGE_RATE_LIMITED','普通用户每分钟最多发送 10 条 Nemotron 请求。',429)
+            db.execute('INSERT INTO language_rate_events VALUES (?,?)',(owner,now))
 
     def check(self,category,identity):
         bucket=int(self.clock()//60)

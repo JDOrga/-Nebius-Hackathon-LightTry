@@ -175,11 +175,13 @@ def public_failure(snapshot,enrollment,fresh):
         'USER_STOP_BEFORE_BOOTSTRAP_REPAIR':'用户要求修复前先停机',
         'USER_STOP_BEFORE_ERROR_CLASSIFICATION':'用户要求补全错误分类前先停机',
         'OPERATOR_STOP':'操作者请求停机',
+        'AUTO_HOST_TRUST_FAILED':'本轮自动绑定主机失败；未继续部署',
         'DEADLINE_OR_CPU_LEASE':'触发旧版时间或心跳保护；旧记录未细分原因',
         'DEADLINE_DURING_OBSERVATION':'状态查询期间触发旧版时间或心跳保护；旧记录未细分原因'}
     reason=snapshot.get('stopReason') or snapshot.get('error')
     if snapshot.get('stopSent') and reason in reasons:
-        return {'code':reason,'severity':'info' if released else 'warning','title':'GPU已停止' if released else 'GPU停机保护已触发',
+        manual=reason in {'USER_REQUESTED_STOP','USER_STOP_BEFORE_BOOTSTRAP_REPAIR','USER_STOP_BEFORE_ERROR_CLASSIFICATION','OPERATOR_STOP'}
+        return {'code':reason,'severity':'info' if released else 'warning','title':'GPU已停止' if released else 'GPU正在停止' if manual else 'GPU停机保护已触发',
             'stage':'stop_guard','detail':'停机原因：'+reasons[reason]+'。',
             'cost':'已确认STOPPED且实例已释放。' if released else '停机请求已提交，但尚未确认实例释放，可能仍在计费。',
             'action':'恢复连接不会自动开机；如需使用，请手动重新启动。' if released else '等待释放确认，不要重复启动。','active':not released}
@@ -223,7 +225,9 @@ def public_monitor(snapshot,fresh,now):
                'stopDeadline','verifyDeadline','absoluteDeadline')}
     return {'providerState':snapshot.get('providerState') if snapshot.get('providerState') in
             ('STOPPED','RUNNING','STARTING','STOPPING','PROVISIONING','IMAGE_PULLING') else 'UNKNOWN',
-            'host':safe_host,'hostConfirmed':snapshot.get('hostConfirmed') is True,'deadlines':deadlines,
+            'host':safe_host,'hostConfirmed':snapshot.get('hostConfirmed') is True,
+            'hostTrustMethod':snapshot.get('hostTrustMethod') if snapshot.get('hostTrustMethod') in ('manual','guard-tofu') else None,
+            'deadlines':deadlines,
             'clientLastSeenAt':number(snapshot.get('clientLastSeenAt')),'clientIdleDeadline':number(snapshot.get('idleDeadline')),
             'stopRequested':snapshot.get('stopSent') is True,'verifiedStopped':snapshot.get('verifiedStopped') is True,
             'instancesEmpty':snapshot.get('instancesEmpty') is True,'worker':telemetry,

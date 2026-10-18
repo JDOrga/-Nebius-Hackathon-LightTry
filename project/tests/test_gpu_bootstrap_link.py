@@ -75,7 +75,9 @@ class BootstrapTests(TLSFixture):
         self.bootstrap=SSHBootstrap(self.control,self.binding)
         self.key_data=base64.b64encode(b'\0\0\0\x0bssh-ed25519\0\0\0 '+b'x'*32).decode()
         self.calls=[];self.bootstrap.runner=Mock(side_effect=self.fake_run)
-        self.child=Mock(pid=333);self.child.poll.return_value=None;self.bootstrap.spawn=Mock(return_value=self.child)
+        self.child=Mock(pid=333);self.child.poll.return_value=None
+        self.child.stderr=io.BytesIO(b'')  # Tunnel drain expects a byte stream, not Mock.read().
+        self.bootstrap.spawn=Mock(return_value=self.child)
     def tearDown(self):self.bootstrap.close();self.tmp.cleanup()
     def fake_run(self,command,**kw):
         self.calls.append(command)

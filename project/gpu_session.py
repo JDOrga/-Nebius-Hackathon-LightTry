@@ -184,14 +184,18 @@ class Sessions:
                 observation.get('resourceId')==value['resourceId'] and
                 observation.get('state') in ('STOPPED','STOPPING','STARTING','RUNNING'))
 
-    def confirm_host(self, identity, host_identity):
+    def confirm_host(self, identity, host_identity, *, trust_method='manual'):
         with self.lock:
+            if trust_method not in ('manual','guard-tofu'):
+                raise ValueError('HOST_TRUST_METHOD_INVALID')
             value=self.get(identity)
             if (value['state']!='LOADING' or not value['hostIdentity'] or host_identity!=value['hostIdentity'] or
                 self.clock()>=value['workDeadline'] or not 0<=self.clock()-value['lastObservedAt']<=30 or
                 not value.get('recoveryMode') and value['idleDeadline'] is not None and self.clock()>=value['idleDeadline']):
                 raise JobError('CURRENT_HOST_CONFIRMATION_REQUIRED','当前 RUNNING 主机身份不匹配。',409)
-            value['hostConfirmed']=True;self.save(value,'CURRENT_HOST_CONFIRMED');return value
+            value['hostConfirmed']=True;value['hostTrustMethod']=trust_method
+            self.save(value,'CURRENT_HOST_AUTO_BOUND' if trust_method=='guard-tofu' else 'CURRENT_HOST_CONFIRMED')
+            return value
 
     def client_presence(self, identity):
         """Workbench presence is not CPU liveness or task activity."""

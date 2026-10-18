@@ -18,6 +18,15 @@ from cpu_supervisor import CPUHostSupervisor
 LOG = logging.getLogger('lighttry.service')
 
 
+def auto_host_trust_enabled(value):
+    setting=value.get('autoHostTrust')
+    if setting is None:return False
+    if (type(setting) is not dict or setting!={
+            'enabled':True,'operatorAcceptsFirstContactMitmRisk':True} or value.get('bootstrap') is None):
+        raise ValueError('EXPLICIT_FIRST_CONTACT_RISK_ACCEPTANCE_REQUIRED')
+    return True
+
+
 class ControlBinding:
     def __init__(self, sessions, scope, clock=time.time):
         self.sessions, self.scope, self.clock = sessions, scope, clock
@@ -104,7 +113,7 @@ def load_control(path, code_root, clock=time.time, *, observer=False):
         return None
     value = json.loads(runtime_file(path, code_root).decode('utf-8'))
     if (not isinstance(value, dict) or
-            set(value)-{'schemaVersion','enabled','factory','guardRoot','scopeFile','binding','protection','bootstrap','scopePolicyFile','modelPolicyFile','recoveryPolicy','directTLS','firstConnect'} or
+            set(value)-{'schemaVersion','enabled','factory','guardRoot','scopeFile','binding','protection','bootstrap','scopePolicyFile','modelPolicyFile','recoveryPolicy','directTLS','firstConnect','autoHostTrust'} or
             not {'schemaVersion','enabled','factory','guardRoot','scopeFile','binding'}<=set(value) or
             value['schemaVersion'] != 1 or type(value['enabled']) is not bool or (not observer and not value['enabled']) or
             not isinstance(value['factory'], str) or
@@ -115,6 +124,7 @@ def load_control(path, code_root, clock=time.time, *, observer=False):
     if policy is not None and (not isinstance(policy,dict) or set(policy)!={'mode','cpuHostRiskAccepted'} or
             policy.get('mode')!='cpu-only' or policy.get('cpuHostRiskAccepted') is not True):
         raise ValueError('EXPLICIT_CPU_HOST_RISK_ACCEPTANCE_REQUIRED')
+    auto_trust=auto_host_trust_enabled(value)
     root = Path(value['guardRoot'])
     if (not root.is_absolute() or root.resolve().is_relative_to(Path(code_root).resolve()) or
             any(p.is_symlink() for p in (root,*root.parents))):
@@ -150,6 +160,7 @@ def load_control(path, code_root, clock=time.time, *, observer=False):
             type(recovery['holdWithinOriginalWorkWindow']) is not bool):raise ValueError('EXPLICIT_RECOVERY_POLICY_REQUIRED')
     sessions.recovery_mode=recovery['holdWithinOriginalWorkWindow']
     control=ControlBinding(sessions,scope,clock)
+    control.auto_host_trust=auto_trust
     if value.get('scopePolicyFile'):
         from scope_issuer import ScopeIssuer
         issuer_policy=json.loads(runtime_file(value['scopePolicyFile'],code_root).decode())

@@ -44,7 +44,34 @@ class ChatTests(unittest.TestCase):
  def test_reply_kinds_strict_schema_html_and_no_illegal_parameters(self):
   for status in ('explanation','clarification','unsupported'):
    v={**self.good,'status':status,'parameters':None,'question':'需要保留哪个环境？' if status=='clarification' else ''};validate(v,self.env,self.policy,'zh',True)
-  for v in [{**self.good,'reason':'<img src=x onerror=alert(1)>'},{**self.good,'parameters':{**self.good['parameters'],'strength':1.4}},{**self.good,'status':'explanation'},{**self.good,'validated':True}]:
+  for v in [{**self.good,'reason':'<img src=x onerror=alert(1)>'},{**self.good,'parameters':{**self.good['parameters'],'strength':1.4}},{**self.good,'validated':True}]:
    with self.assertRaises(LanguageError):validate(v,self.env,self.policy,'zh',True)
+  self.assertIsNone(validate({**self.good,'status':'explanation'},self.env,self.policy,'zh',True)['parameters'])
   with self.assertRaises(LanguageError):validate({**self.good,'status':'explanation','parameters':None},self.env,self.policy)
+ def test_chinese_chat_accepts_mixed_product_terms_but_not_english_only(self):
+  mixed={**self.good,'status':'explanation','parameters':None,'reason':'\u6211\u53ef\u4ee5\u89e3\u91ca lighting plan \u7684\u8bbe\u7f6e\uff0c\u5e76\u534f\u52a9\u4f60\u8c03\u6574\u5e03\u5149\u3002'}
+  self.assertEqual(validate(mixed,self.env,self.policy,'zh',True)['status'],'explanation')
+  with self.assertRaises(LanguageError) as caught:validate({**self.good,'reason':mixed['reason']},self.env,self.policy,'zh',False)
+  self.assertEqual(caught.exception.code,'LANGUAGE_MISMATCH')
+  with self.assertRaises(LanguageError) as caught:validate({**mixed,'reason':'I can explain the lighting plan'},self.env,self.policy,'zh',True)
+  self.assertEqual(caught.exception.code,'LANGUAGE_MISMATCH')
+ def test_capability_question_is_prompted_as_direct_conversation_not_edit(self):
+  a=self.adapter([{**self.good,'status':'explanation','parameters':None}])
+  b=copy.deepcopy(self.body);b['text']='what can you do'
+  result=a.recommend(b)
+  self.assertEqual(result['status'],'explanation');self.assertEqual(result['parameters'],None)
+  prompt=self.sent[0]['messages'][0]['content']
+  self.assertIn('You answer the user in this text conversation',prompt)
+  self.assertIn('answer harmless conversation and questions about your capabilities',prompt)
+  self.assertIn('a direct useful answer in reason',prompt)
+  self.assertNotIn('Unrelated requests or instructions to execute/leak are unsupported',prompt)
+ def test_chat_explanation_discards_stray_parameters_without_creating_an_edit(self):
+  answer={**self.good,'status':'explanation','parameters':self.good['parameters'],
+          'reason':'\u6211\u53ef\u4ee5\u89e3\u91ca\u5e03\u5149\u8bbe\u7f6e\u5e76\u7ed9\u51fa\u5efa\u8bae\uff0c\u4f46\u4e0d\u4f1a\u81ea\u52a8\u4fee\u6539\u65b9\u6848\u3002'}
+  a=self.adapter([answer]);b=copy.deepcopy(self.body);b['text']='what can you do'
+  result=a.recommend(b)
+  self.assertEqual(result['status'],'explanation');self.assertIsNone(result['parameters'])
+  self.assertNotIn('parameterDiff',result)
+  self.assertEqual(json.loads(a.ledger_path.read_text())['records'][0]['outcome'],'accepted')
+  with self.assertRaises(LanguageError):validate(answer,self.env,self.policy,'zh',False)
 if __name__=='__main__':unittest.main()

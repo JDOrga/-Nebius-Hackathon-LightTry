@@ -75,12 +75,12 @@ class ProfileTests(unittest.TestCase):
             status,_,_=self.request('/api/gpu/entry-start','POST',json.dumps({'requestId':'b'*32}).encode(),cookie)
             self.assertEqual(status,202)
         self.app.entry_thread.join(timeout=2);sessions.start.assert_called_once()
-    def test_csrf_foreign_origin_and_user_role_cannot_start(self):
+    def test_csrf_foreign_origin_and_user_still_need_configured_gpu_control(self):
         cookie=self.login();body=json.dumps({'requestId':'a'*32}).encode()
         self.assertEqual(self.request('/api/gpu/entry-start','POST',body,cookie,{'HTTP_X_LIGHTTRY_TOKEN':'BAD'})[0],403)
         self.assertEqual(self.request('/api/gpu/entry-start','POST',body,cookie,{'HTTP_ORIGIN':'https://evil.test'})[0],403)
         self.app.accounts.users['lighttry']['role']='user'
-        self.assertEqual(self.request('/api/gpu/entry-start','POST',body,cookie)[0],403)
+        self.assertEqual(self.request('/api/gpu/entry-start','POST',body,cookie)[0],503)
     def test_private_profile_rejects_public_origin_and_environment_cannot_enable_paid(self):
         with patch.dict(os.environ,{'LIGHTTRY_GPU_CONTROL_CONFIG':'UNTRUSTED_ENV','LIGHTTRY_MODEL_GRANT_FILE':'UNTRUSTED_ENV'}):
             opt=options(self.paths);self.assertIsNone(opt.gpu_control_config);self.assertIsNone(opt.model_grant_file)
@@ -119,6 +119,27 @@ class ProfileTests(unittest.TestCase):
         sessions.request_stop.assert_not_called()
         self.assertEqual(self.request('/api/gpu/stop','POST',json.dumps({'sessionId':sid}).encode(),cookie)[0],202)
         sessions.request_stop.assert_called_once_with(sid)
+
+    def test_owner_auto_trust_hides_browser_confirmation_and_rejects_manual_post(self):
+        cookie=self.login();sid='b'*32;host={'vmId':'SYNTHETIC_VM','ip':'203.0.113.1'}
+        snapshot={'sessionId':sid,'scopeId':'a'*32,'resourceId':'RESOURCE_FIXTURE','state':'LOADING',
+                  'lastObservedAt':time.time(),'hostIdentity':host,'hostConfirmed':False,
+                  'verifiedStopped':False,'stopSent':False}
+        sessions=Mock();sessions.latest.return_value=snapshot;sessions.protection_mode='cpu-only'
+        bootstrap=Mock();bootstrap.public.return_value={'stage':'awaiting_host_confirmation','canConfirm':True,
+            'sessionId':sid,'hostIdentity':host,'fingerprint':'SHA256:SYNTHETIC'}
+        self.app.gpu_sessions=sessions
+        self.app.gpu_scope={'scopeId':'a'*32,'resourceId':'RESOURCE_FIXTURE','expiresAt':time.time()+60}
+        self.app.gpu_control=SimpleNamespace(bootstrap=bootstrap,auto_host_trust=True,close=lambda:None)
+        status,_,raw=self.request('/api/gpu/entry-status',cookie=cookie)
+        self.assertEqual(status,200,raw);info=json.loads(raw)
+        self.assertFalse(info['hostConfirmation']['canConfirm'])
+        self.assertTrue(info['hostConfirmation']['automatic'])
+        self.assertIn('自动绑定',info['message'])
+        body={'sessionId':sid,'hostIdentity':host,'fingerprint':'SHA256:SYNTHETIC'}
+        status,_,raw=self.request('/api/gpu/confirm-host','POST',json.dumps(body).encode(),cookie)
+        self.assertEqual(status,409,raw)
+        bootstrap.confirm.assert_not_called();sessions.confirm_host.assert_not_called()
 
 
 class WSLTests(unittest.TestCase):

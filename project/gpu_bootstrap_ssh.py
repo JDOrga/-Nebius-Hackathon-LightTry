@@ -273,9 +273,14 @@ class SSHBootstrap:
         command=[self.settings['sshExecutable'],*self.ssh_args(sid),'-o','ExitOnForwardFailure=yes','-o','ServerAliveInterval=5',
             '-o','ServerAliveCountMax=1','-N','-L','127.0.0.1:'+str(self.settings['tunnelPort'])+':'+bind+':'+str(self.settings['workerPort']),
             value['hostIdentity']['sshUser']+'@'+value['hostIdentity']['ip']]
-        self.tunnel=self.spawn(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+        self.tunnel=self.spawn(command,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,
                                shell=False,start_new_session=os.name!='nt')
         self.tunnel_sid=sid
+        self.tunnel_capture={"sample":bytearray(),"bytes":0}
+        self.tunnel_started=time.monotonic()
+        self.tunnel_reported=False
+        self.tunnel_reader=threading.Thread(target=self.drain_tunnel,args=(self.tunnel.stderr,self.tunnel_capture),daemon=True)
+        self.tunnel_reader.start()
         if self.stopped.is_set():self.close_tunnel();raise ValueError('BOOTSTRAP_CLOSED')
         try:self.check(sid,confirmed=True)
         except Exception:self.close_tunnel();raise
@@ -301,6 +306,7 @@ class SSHBootstrap:
             directory=self.directory(sid);directory.mkdir(parents=True,exist_ok=True,mode=0o700)
             if (directory/'deployed.json').exists():
                 if self.tunnel is None or self.tunnel.poll() is not None:
+                    self.record_tunnel_exit(sid)
                     if (directory/'direct-ready.json').is_file() and getattr(self.control.sessions.worker,'direct_available',False) is True:self.status(sid,'direct_https_configured_ssh_unavailable')
                     else:self.status(sid,'uncertain',error='SSH_TUNNEL_NOT_LIVE_NO_RECONNECT')
                 return
@@ -324,11 +330,44 @@ class SSHBootstrap:
                     self.write(directory/'failed.json',{'error':label,'failure':info});self.status(sid,'uncertain',error=label,failure=info)
             self.thread=threading.Thread(target=run,name='gpu-ssh-bootstrap',daemon=True);self.thread.start()
 
+    @staticmethod
+    def drain_tunnel(stream,capture):
+        try:
+            while True:
+                chunk=stream.read(1024)
+                if not chunk:break
+                capture['bytes']+=len(chunk)
+                remaining=4096-len(capture['sample'])
+                if remaining>0:capture['sample'].extend(chunk[:remaining])
+        except (OSError,ValueError):pass
+        finally:
+            try:stream.close()
+            except (OSError,ValueError):pass
+
+    def record_tunnel_exit(self,sid,intentional=False):
+        if self.tunnel is None or getattr(self,'tunnel_sid',None)!=sid:return
+        code=self.tunnel.poll()
+        if code is None or getattr(self,'tunnel_reported',False):return
+        reader=getattr(self,'tunnel_reader',None)
+        if reader:reader.join(timeout=.2)
+        capture=getattr(self,'tunnel_capture',{'sample':bytearray(),'bytes':0})
+        label=stderr_code(bytes(capture['sample']))
+        info={'stage':'tunnel','code':label,'exitCode':code,
+              'durationMs':max(0,round((time.monotonic()-getattr(self,'tunnel_started',time.monotonic()))*1000)),
+              'intentionalClose':intentional,'stderrBytes':capture['bytes'],
+              'stderrTruncated':capture['bytes']>4096,'rawDetailsRecorded':False,'retryAllowed':False}
+        if intentional:info['code']='SSH_TUNNEL_CLOSED_BY_OPERATOR'
+        elif code==0:info['code']='SSH_CONNECTION_CLOSED'
+        self.write(self.directory(sid)/'tunnel-exit.json',info)
+        self.tunnel_reported=True
+
     def close_tunnel(self):
+        self.record_tunnel_exit(getattr(self,'tunnel_sid',None))
         if self.tunnel and self.tunnel.poll() is None:
             self.tunnel.terminate()
             try:self.tunnel.wait(timeout=3)
             except subprocess.TimeoutExpired:self.tunnel.kill();self.tunnel.wait(timeout=3)
+        self.record_tunnel_exit(getattr(self,'tunnel_sid',None),intentional=True)
     def connected(self,sid):
         return bool(self.tunnel and getattr(self,'tunnel_sid',None)==sid and self.tunnel.poll() is None and
                     (self.directory(sid)/'deployed.json').is_file())

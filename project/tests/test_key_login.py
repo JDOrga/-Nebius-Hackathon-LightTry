@@ -65,9 +65,14 @@ class KeyLoginTests(unittest.TestCase):
   now=[100.];sessions=LoginSessions(self.app.accounts,clock=lambda:now[0]);token,_=sessions.issue('lighttry');self.assertEqual(sessions.authenticate(token),'lighttry');now[0]+=8*3600;self.assertIsNone(sessions.authenticate(token))
   token,_=sessions.issue('lighttry');self.app.accounts.users['lighttry']['hash']='0'*64;self.assertIsNone(sessions.authenticate(token))
  def test_login_rate_limit_and_no_secret_leak(self):
+  cookie,_=self.login()
   for i in range(11):last=self.req('/auth/login','POST',b'accessKey=invalid')
   self.assertEqual(last[0],429);self.assertEqual(last[1]['Retry-After'],'60')
+  self.assertEqual(self.req('/api/me',cookie=cookie)[0],200)
   text=(self.root/'state/logs/service.log').read_text();self.assertNotIn(KEY,text);self.assertNotIn('accessKey=',text)
+ def test_stale_session_reads_do_not_exhaust_actual_login_attempts(self):
+  for _ in range(15):self.assertEqual(self.req('/api/lighting')[0],401)
+  self.assertEqual(self.req('/auth/login','POST',urlencode({'accessKey':KEY}).encode())[0],303)
  def gpu_fixture(self,state='STOPPED',age=0):
   class FakeGPU:
    def __init__(self):self.calls=0;self.entered=threading.Event();self.release=threading.Event()
@@ -92,10 +97,11 @@ class KeyLoginTests(unittest.TestCase):
    status,_,out=self.req('/api/gpu/entry-start','POST',body,cookie=cookie,extra=headers);self.assertEqual(status,202);self.assertTrue(gpu.entered.wait(1));self.assertFalse(gpu.release.is_set());self.assertEqual(self.req('/',cookie=cookie)[0],200)
    self.assertEqual(self.req('/api/gpu/entry-start','POST',body,cookie=cookie,extra=headers)[0],202);self.assertEqual(gpu.calls,1)
   finally:gpu.release.set();self.app.entry_thread.join(2)
- def test_gpu_start_requires_auth_csrf_role_and_valid_scope(self):
+ def test_gpu_start_requires_auth_csrf_and_valid_scope_for_both_roles(self):
   gpu=self.gpu_fixture();body=json.dumps({'requestId':'c'*32}).encode();headers={'CONTENT_TYPE':'application/json','HTTP_X_LIGHTTRY_TOKEN':self.app.handler.csrf_token};cookie,_=self.login()
   self.assertEqual(self.req('/api/gpu/entry-start','POST',body,extra=headers)[0],401)
-  self.assertEqual(self.req('/api/gpu/entry-start','POST',body,cookie=cookie,extra=headers)[0],403)
+  self.assertEqual(self.req('/api/gpu/entry-start','POST',body,cookie=cookie,extra=headers)[0],202)
+  gpu.release.set();self.app.entry_thread.join(2);self.app.entry_start=None;gpu.calls=0
   cookie=self.operator_cookie();self.assertEqual(self.req('/api/gpu/entry-start','POST',body,cookie=cookie,extra={'CONTENT_TYPE':'application/json'})[0],403)
   self.app.gpu_scope['expiresAt']=time.time()-1;self.assertEqual(self.req('/api/gpu/entry-start','POST',body,cookie=cookie,extra=headers)[0],409);self.assertEqual(gpu.calls,0)
  def test_gpu_entry_get_does_not_start_and_failure_is_not_retried(self):

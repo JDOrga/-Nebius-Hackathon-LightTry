@@ -278,12 +278,14 @@ function paintGpuMonitor(info){
   banner=document.createElement('section');banner.id='gpu-error-banner';banner.setAttribute('role','alert');
   banner.style.cssText='margin:12px 22px;padding:14px 18px;border:1px solid #c36b38;border-radius:12px;background:#fff4e8;color:#713b18;line-height:1.6';
   const title=document.createElement('strong'),detail=document.createElement('p'),button=document.createElement('button');
-  title.id='gpu-error-title';detail.id='gpu-error-detail';button.type='button';button.textContent='查看GPU错误详情';
+  title.id='gpu-error-title';detail.id='gpu-error-detail';button.id='gpu-notice-detail';button.type='button';
   button.onclick=()=>{$('gpu-console-dialog').showModal();};banner.append(title,detail,button);
   (document.querySelector('main')||document.body.firstElementChild).before(banner);
  }
  banner.hidden=!notice;
- if(notice){$('gpu-error-title').textContent=notice.title;$('gpu-error-detail').textContent=notice.text;}
+ if(notice){$('gpu-error-title').textContent=notice.title;$('gpu-error-detail').textContent=notice.text;
+  banner.setAttribute('role',notice.severity==='error'?'alert':'status');
+  $('gpu-notice-detail').textContent=notice.severity==='error'?'查看GPU错误详情':notice.code==='OPERATOR_STOP'||notice.code==='USER_REQUESTED_STOP'||notice.code?.startsWith('USER_STOP_')?'查看停机详情':'查看GPU状态详情';}
  gpuMonitorInfo=info;
  const budget=info.budgetUsdIncludingTax;
  $('gpu-monitor-budget').textContent=Number.isFinite(budget)&&budget>0?`本次预算 ${budget.toFixed(2)} 美元（含税）。自动停机不保证账单硬封顶。请求提交后可继续编辑方案。`:'启动后可能产生费用。请求会在后台处理，无需等待，你可以继续编辑方案。';
@@ -291,7 +293,7 @@ function paintGpuMonitor(info){
  let label=info.providerConnected?labels[info.state]||'状态未知':info.configured===false?'未连接':info.stale?'状态已过期':labels[info.state]||'状态未知';
  if(info.startStatus==='requested'&&!info.active)label='启动请求已提交';
  if(info.startStatus==='failed'&&!info.active)label='启动未成功';
- if(info.diagnostic?.active)label='发生故障 · 查看详情';
+ if(info.diagnostic?.active&&info.diagnostic.severity==='error')label='发生故障 · 查看详情';
  $('gpu-monitor').dataset.state=info.configured===false&&!info.providerConnected?'DISCONNECTED':info.state||'UNKNOWN';
  $('gpu-monitor').title=info.message||'GPU 服务器状态';
  $('gpu-monitor-state').textContent=label;
@@ -301,7 +303,7 @@ function paintGpuMonitor(info){
  $('gpu-monitor-start').hidden=info.active===true;
  $('gpu-monitor-enroll').hidden=!info.hostConfirmation?.canConfirm;
  $('gpu-monitor-enroll').disabled=gpuHostBusy;
- $('gpu-monitor-stop').hidden=!info.canStop;
+ $('gpu-monitor-stop').hidden=!info.canStop&&!info.stopBlockedByOtherTasks;
  $('gpu-monitor-stop').disabled=gpuStopBusy;
  $('gpu-monitor-start').title=info.canStart?'启动 GPU 可能产生费用':info.message||'当前不可启动';
  paintGpuConsole(document,info);
@@ -336,7 +338,7 @@ async function gpuControlAction(path,body){
  try{
   const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-LightTry-Token':inference.csrfToken},
    body:JSON.stringify(body),signal:controller.signal});
-  if(!response.ok)throw Error('服务器未接受操作，请刷新状态后核查。');
+  if(!response.ok){const value=await response.json().catch(()=>null),error=Error(value?.error?.message||'服务器未接受操作，请刷新状态后核查。');error.code=value?.error?.code;throw error;}
   return await response.json();
  }finally{clearTimeout(timer);}
 }
@@ -350,14 +352,16 @@ $('gpu-host-confirm').onclick=async()=>{
  finally{pendingGpuHost=null;gpuHostBusy=false;$('gpu-entry-notice').hidden=false;await refreshGpuMonitor();}
 };
 $('gpu-monitor-stop').onclick=()=>{
- if(gpuStopBusy||!gpuMonitorInfo?.canStop)return;
+ if(gpuStopBusy||(!gpuMonitorInfo?.canStop&&!gpuMonitorInfo?.stopBlockedByOtherTasks))return;
+ if(gpuMonitorInfo.stopBlockedByOtherTasks){pendingGpuStop=null;$('gpu-stop-warning').textContent='有其他用户的生成任务正在运行或排队，普通用户无权关闭 GPU。';$('gpu-stop-confirm').disabled=true;$('gpu-stop-dialog').showModal();return;}
+ $('gpu-stop-warning').textContent='正在进行的生成可能中断。提交后仍需等待服务器停止并释放资源。';
  pendingGpuStop=gpuMonitorInfo.sessionId;$('gpu-stop-confirm').disabled=false;$('gpu-stop-dialog').showModal();
 };
 $('gpu-stop-confirm').onclick=async()=>{
  if(gpuStopBusy||!pendingGpuStop||!inference?.csrfToken)return;
  gpuStopBusy=true;$('gpu-stop-confirm').disabled=true;$('gpu-stop-dialog').close();
  try{await gpuControlAction('/api/gpu/stop',{sessionId:pendingGpuStop});$('gpu-entry-notice').textContent='停止请求已提交，请等待服务器释放。';}
- catch(e){$('gpu-entry-notice').textContent=e.name==='AbortError'?'停止结果尚未确认，请刷新状态后核查。':e.message;}
+ catch(e){$('gpu-entry-notice').textContent=e.name==='AbortError'?'停止结果尚未确认，请刷新状态后核查。':e.message;if(e.code==='FOREIGN_GPU_TASK'){$('gpu-stop-warning').textContent=e.message;$('gpu-stop-confirm').disabled=true;$('gpu-stop-dialog').showModal();}}
  finally{pendingGpuStop=null;gpuStopBusy=false;$('gpu-entry-notice').hidden=false;await refreshGpuMonitor();}
 };
 $('gpu-monitor-start').onclick=()=>{if(gpuStartBusy||!gpuMonitorInfo?.canStart)return;$('gpu-monitor-warning').textContent='';$('gpu-monitor-confirm').disabled=false;$('gpu-monitor-dialog').showModal();};

@@ -3,6 +3,11 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from gpu_monitoring import public_failure
 class WebErrorTests(unittest.TestCase):
+ def test_manual_stop_is_not_fault_during_verification_or_after_release(self):
+  v=public_failure({'state':'STOPPING','stopSent':True,'stopReason':'OPERATOR_STOP'},{},True)
+  self.assertEqual(v['title'],'GPU正在停止');self.assertEqual(v['severity'],'warning')
+  v=public_failure({'state':'STOPPED','stopSent':True,'stopReason':'OPERATOR_STOP','verifiedStopped':True,'instancesEmpty':True},{},True)
+  self.assertEqual(v['title'],'GPU已停止');self.assertEqual(v['severity'],'info');self.assertFalse(v['active'])
  def test_remote_error_not_loading_and_warns_cost(self):
   v=public_failure({'state':'LOADING'},{'stage':'uncertain','error':'BOOTSTRAP_REMOTE_UNCERTAIN'},True)
   self.assertTrue(v['active']);self.assertIn('指纹',v['detail']);self.assertIn('计费',v['cost'])

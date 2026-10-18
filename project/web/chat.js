@@ -17,7 +17,7 @@ export function createChat({get,api,environmentLabel,apply}){
  if(ref&&ref!==live.reference&&sessions[k].items.length){sessions[k].items.push({role:'notice',text:'编辑上下文已改变，下一次请求使用当前版本。旧建议不能直接应用。'});sessions[k].items=sessions[k].items.slice(-12);}ref=live.reference;return sessions[k];}
  function textNode(tag,text,cls){const e=document.createElement(tag);e.textContent=text;if(cls)e.className=cls;return e;}
  function update(){const live=get(),s=session();if(!live||!s)return;
- $('chat-context').textContent=live.label;$('chat-service').textContent=live.language.enabled?(live.language.developmentTestMode?'演示模式 · 不调用真实模型':'AI 助手已启用 · 发送可能产生费用，不会生成图片'):'AI 助手暂不可用，仍可手动调光';
+ $('chat-context').textContent=live.label;$('chat-service').textContent=live.language.enabled?(live.language.developmentTestMode?'演示模式 · 不调用真实模型':live.language.unbounded?'管理员模式 · Nemotron 不设应用次数或费用上限；发送可能计费，不会生成图片':'AI 助手已启用 · 每60秒最多10条；发送可能计费，不会生成图片'):'AI 助手暂不可用，仍可手动调光';
  $('chat-send').disabled=pending||!live.language.enabled;$('chat-send').textContent=pending?'等待中…':'发送';$('chat-send').title=!live.language.enabled?'AI 助手暂不可用':pending?'请求仍在等待，不重复发送':'发送文字，不生成图片';
  const log=$('chat-history'),previousScroll=log.scrollTop,atEnd=log.scrollHeight-log.scrollTop-log.clientHeight<40;log.replaceChildren();if(live.confirmedApplication)log.append(textNode('p','当前方案已确认应用到 v'+live.confirmedApplication.version+'；'+(live.result.kind==='none'?'尚未生成。':'已有匹配结果。'),'chat-applied-summary'));if(!s.items.length)log.append(textNode('p','描述你想要的光照效果，也可以询问调整建议。','chat-empty'));
  for(const m of s.items){const bubble=textNode('article',m.text,'chat-bubble '+m.role);log.append(bubble);

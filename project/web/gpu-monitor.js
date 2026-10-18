@@ -9,7 +9,7 @@ const stateNames={STOPPED:'已停止',STARTING:'正在启动',LOADING:'正在准
 export function gpuNotice(info={}){
  const d=info.diagnostic;
  const lost=info.clientConnection==='lost'?'工作台在线连接已断开，正在重连。连续5分钟没有任何工作台连接会自动停机；恢复连接不会自动开机。':'';
- if(d)return {title:d.title,text:[d.detail,d.cost,d.action,info.stale?'当前快照已过期。':'',lost].filter(Boolean).join(' '),severity:d.severity,active:d.active};
+ if(d)return {code:d.code,title:d.title,text:[d.detail,d.cost,d.action,info.stale?'当前快照已过期。':'',lost].filter(Boolean).join(' '),severity:d.severity,active:d.active};
  if(lost)return {title:'工作台连接已断开',text:lost,severity:'warning',active:false};
  if(info.configured===false)return {title:'GPU启动暂不可用',text:info.message||'GPU控制未接入或已禁用；不会自动启动。文字对话与本地编辑不受影响。',severity:'warning',active:false};
  if(info.stale||info.state==='UNKNOWN')return {title:'GPU状态无法确认',text:'无法获取可靠状态；服务器可能仍在计费。不要重复启动，不使用时请停止并核实释放。',severity:'error',active:true};
@@ -64,7 +64,7 @@ export function consoleView(info={},now=Date.now()/1000){
    ['最近引导失败阶段',info.hostConfirmation?.failure?.stageLabel||'未记录'],
    ['最近引导错误码',info.hostConfirmation?.failure?.code||(info.hostConfirmation?.stage==='uncertain'?'旧记录未细分':'无已记录错误')],
    ['最近引导错误说明',info.hostConfirmation?.failure?.message||'未保留具体分类时不猜测原因'],
-   ['身份确认',monitor.hostConfirmed?'本轮已确认':'未确认，不继承旧信任'],
+   ['主机绑定',monitor.hostConfirmed?(monitor.hostTrustMethod==='guard-tofu'?'本轮自动绑定 · 首次连接信任':'本轮已确认'):'未绑定，不继承旧信任'],
    ['可靠 RUNNING',time(deadlines.runningAt)],['启动等待截止',time(deadlines.startupDeadline)],
    ['工作台最后在线',time(monitor.clientLastSeenAt)],['无客户端连接停机截止',time(monitor.clientIdleDeadline)],
    ['工作截止',time(deadlines.workDeadline)],['停机目标',time(deadlines.stopDeadline)],
