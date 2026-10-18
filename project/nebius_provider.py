@@ -130,6 +130,10 @@ class NebiusProvider:
             raise ValueError('NEBIUS_AUTHORIZED_PUBLIC_KEY_MISMATCH')
         status=raw.get('status',{})
         if not isinstance(status.get('instances'),list):
+            # A startup phase can precede the backing VM pointer. Preserve that
+            # phase without inventing an empty-instance/release proof or host.
+            if summary['state'] in ('PROVISIONING','STARTING','IMAGE_PULLING'):
+                return s,{**raw,'_lighttry_instances_proof':'startup-instance-list-pending'},{**summary,'instances':None}
             # ProtoJSON omits empty repeated fields. Omission alone is NOT proof:
             # require a complete independent project-wide VM list, then recheck
             # the same STOPPED Devlab/spec. Null/malformed values stay rejected.
@@ -159,8 +163,11 @@ class NebiusProvider:
         result={'resourceId':resource,'independent':True,'state':mapped[state],
                 'instances':summary['instances'],'simulation':False,'image':summary['image'],
                 'instancesProof':raw.get('_lighttry_instances_proof','devlab-explicit-array')}
-        # Missing/null instances never counts as release proof (legacy summary defaults []).
-        if not isinstance(raw.get('status',{}).get('instances'),list):
+        # Only an omitted startup list is pending. Null/malformed lists, missing
+        # RUNNING identity and missing STOPPED release proof remain rejected.
+        pending=(state in ('PROVISIONING','STARTING','IMAGE_PULLING') and
+                 'instances' not in raw.get('status',{}) and summary['instances'] is None)
+        if not isinstance(raw.get('status',{}).get('instances'),list) and not pending:
             raise ValueError('NEBIUS_INSTANCES_PROOF_REQUIRED')
         if state=='RUNNING':
             active=[x for x in summary['instances'] if x.get('state')=='RUNNING']
