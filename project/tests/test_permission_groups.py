@@ -184,6 +184,34 @@ class PermissionGroupTests(unittest.TestCase):
         status,_=self.request('lighttry','/api/gpu/stop','POST',json.dumps({'sessionId':self.sid}).encode())
         self.assertEqual(status,202);self.sessions.request_stop.assert_called_once_with(self.sid)
 
+    def test_stop_survives_old_expired_web_scope_during_start_loading_and_unknown(self):
+        self.sessions.protection_mode='cpu-only'
+        self.snapshot['scopeId']='c'*32
+        self.scope.update(expiresAt=time.time()-60,budgetApproved=False)
+        for state in ('STARTING','LOADING','UNKNOWN'):
+            with self.subTest(state=state):
+                self.snapshot.update(state=state,lastObservedAt=time.time()-(120 if state=='UNKNOWN' else 0))
+                self.sessions.request_stop.reset_mock()
+                status,info=self.request('alice','/api/gpu/entry-status')
+                self.assertEqual(status,200,info);self.assertTrue(info['canStop'])
+                self.assertEqual(info['sessionId'],self.sid);self.assertFalse(info['canStart'])
+                status,_=self.request('alice','/api/gpu/stop','POST',json.dumps({'sessionId':self.sid}).encode())
+                self.assertEqual(status,202);self.sessions.request_stop.assert_called_once_with(self.sid)
+
+    def test_stop_still_requires_current_session_resource_and_pending_release(self):
+        self.snapshot['scopeId']='c'*32
+        status,_=self.request('lighttry','/api/gpu/stop','POST',json.dumps({'sessionId':'d'*32}).encode())
+        self.assertEqual(status,404);self.sessions.request_stop.assert_not_called()
+        self.snapshot['resourceId']='OTHER_RESOURCE'
+        self.assertFalse(self.app.gpu_entry_info('lighttry')['canStop'])
+        self.snapshot['resourceId']=self.scope['resourceId']
+        for field in ('stopSent','verifiedStopped'):
+            with self.subTest(field=field):
+                self.snapshot[field]=True
+                self.assertFalse(self.app.gpu_entry_info('lighttry')['canStop'])
+                self.snapshot[field]=False
+        self.assertFalse(self.app.gpu_entry_info()['canStop'])
+
     def test_foreign_blocked_dispatch_and_unknown_legacy_active_fail_closed(self):
         self.queued('bob','blocked',number=4)
         self.assertTrue(self.app.queue.foreign_in_flight('alice'))

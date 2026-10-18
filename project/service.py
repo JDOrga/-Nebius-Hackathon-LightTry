@@ -390,7 +390,9 @@ class Application:
             reason={'awaiting_host_confirmation':'正在自动绑定本次服务器连接。' if auto_trust else '请先核对并确认本次服务器连接。','waiting_authorization':'正在等待本次模型授权。',
                     'deploying':'正在连接模型服务。','deployed':'服务器已连接，正在加载模型。',
                     'uncertain':'服务器连接未确认，请先停止并核查。'}.get(enrollment['stage'],'正在准备服务器连接。')
-        stop_base=bool(owner and scope and snapshot.get('sessionId') and snapshot.get('scopeId')==scope.get('scopeId') and
+        # Stop binds to the latest durable session/resource, not the Web's
+        # possibly older start scope. Expired start approval cannot block release.
+        stop_base=bool(owner and scope and snapshot.get('sessionId') and
                       snapshot.get('resourceId')==scope.get('resourceId') and not snapshot.get('verifiedStopped') and not snapshot.get('stopSent'))
         stop_blocked=bool(stop_base and not operator and self.queue.foreign_in_flight(owner_scope or owner))
         can_stop=bool(stop_base and not stop_blocked)
