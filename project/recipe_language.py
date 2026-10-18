@@ -315,6 +315,9 @@ class RecipeLanguage:
             return {'status':'unsupported','action':'revise','parameters':None,'name':'','reason':
                 '仅修改允许的光照方案；不执行命令、不读取或泄露秘密。' if body['replyLanguage']=='zh' else 'Only bounded lighting-plan changes are supported; no commands or secrets.',
                 'question':'','source':'production-local-safety','modelCalled':False}
+        chinese_chat_request=bool(chat_context and body['replyLanguage']=='zh' and
+            re.search(r'[\u4e00-\u9fff]',body['text']) and
+            not re.search(r'(?:用|以)英(?:文|语)(?:回答|回复|说|写|输出)|(?:翻译|译)成英文|英文(?:翻译|版本|输出)|in English|answer in English',body['text'],re.I))
         if not self.lock.acquire(blocking=False):raise LanguageError('LANGUAGE_BUSY','已有文字操作执行中。',409)
         try:
             for path,sha in self.frozen.items():
@@ -363,17 +366,17 @@ class RecipeLanguage:
             if chat_context:
                 instructions=('You are a friendly conversational assistant in a lighting workbench. '
                     'Chat naturally about everyday topics, ideas, creative directions and technical questions; topics need not be about lighting. '
-                    'Follow the user\'s preferred language and tone; responseLanguage is only a default. Mixed languages, paragraphs, examples, code and URLs are fine as plain text. '
+                    'Follow the user\'s preferred language and tone; responseLanguage is only a default. If the latest user request is in Chinese and does not explicitly ask for another language, write the reply in Chinese, including lighting proposal reasons and questions; Allow brief English terms or phrases mixed into Chinese; use a fully English reply when the user explicitly requests it. Paragraphs, examples, code and URLs are fine as plain text. '
                     'Answer directly, and ask a natural follow-up when useful. Do not force casual conversation into a lighting edit or recite limitations in every reply. '
                     'Use ordinary text for conversation. Alternatively use propose_lighting_plan with status=explanation, parameters=null, '
                     'a direct useful answer in reason, and an optional follow-up in question. '
                     'When the user wants a lighting change, interpret their intent broadly and propose a useful approximation without requiring numeric specifications. '
-                    'Only call propose_lighting_plan with status=ready for an actual applicable lighting proposal, with a reason and empty question. '
+                    'Only call propose_lighting_plan with status=ready for an actual applicable lighting proposal, with a reason and an optional follow-up question. '
                     'Use clarification only when essential information is missing. If part of an idea cannot be implemented, discuss alternatives and help with the achievable part. '
                     'Parameter bounds apply to applicable proposals, not to what you can discuss. '
                     'For edits, preserve unspecified values from selectedScheme. Prefer operations: rotate, exposure, set, add_zone, edit_zone, remove_zone. '
                     'Legacy schemes use allowedCombinations; parameterized schemaVersion 2 supports the continuous tool fields. '
-                    'Colored zones operate in procedural mode: set mode=procedural and both environment references=null; edit or replace existing zones when already at the three-zone limit. '
+                    'Any added or edited light zone operates only in procedural mode. When the selected scheme is in environment mode and the user asks for a new zone, propose the switch to procedural mode yourself: set mode=procedural and both environment references=null, then add the zone. Do not require the user to request the mode switch separately. State that the HDR environment is replaced and the proposed result needs preview and approval; edit or replace existing zones when already at the three-zone limit. '
                     'Complete v2 recipes may omit the three server processing identities; all actual lighting fields are required. '
                     'Use save_variant for a comparison version. Proposals require user approval and do not apply or generate anything. '
                     'You receive text and scheme data, not images or browsing results. Be honest about what you know; discuss physical concepts freely, '
@@ -433,6 +436,8 @@ class RecipeLanguage:
                         parsed['parameters']=resolve_proposal_parameters(parsed['parameters'],current['parameters'],
                             self.environments,full_recipe=self.full_procedural_recipe)
                     value=validate(parsed,self.environments,self.policy,body['replyLanguage'],bool(chat_context))
+                    if (chinese_chat_request and not re.search(r'[\u4e00-\u9fff]',value['reason'] or value['question'])):
+                        raise LanguageError('LANGUAGE_MISMATCH','中文请求的回复应使用中文；当前方案未改变。')
                     if value['status']=='ready' and value['parameters'].get('schemaVersion')==2:
                         before=current['parameters'];after=value['parameters']
                         if after['mode']=='environment' and after['zones']!=(before.get('zones',[]) if before.get('schemaVersion')==2 else []):
@@ -450,12 +455,16 @@ class RecipeLanguage:
                     record['outcome']=e.code
                     if getattr(e,'validation_detail',None):record['parameterValidationDetail']=e.validation_detail
                     if (chat_context and not self.full_procedural_recipe and self.acceptance_validator is None and
-                            e.code in ('PARAMETER_RANGE_INVALID','INACTIVE_ZONE_CHANGE')):
+                            (e.code=='PARAMETER_RANGE_INVALID' or
+                             (e.code=='INACTIVE_ZONE_CHANGE' and attempt>=self.repair_limit))):
                         # Keep useful conversation while withholding invalid controls.
                         # Audit the rejected proposal separately from the accepted text.
                         reason=parsed.get('reason','')
+                        reason=reason if type(reason) is str else ''
+                        if (reason and chinese_chat_request and not re.search(r'[\u4e00-\u9fff]',reason)):
+                            reason=''
                         fallback={**parsed,'status':'explanation','parameters':None,'name':'','question':'',
-                            'reason':(reason[:900] if type(reason) is str else '')+'\n\n'+e.message}
+                            'reason':(reason[:900]+'\n\n' if reason else '')+e.message}
                         value=validate(fallback,self.environments,self.policy,body['replyLanguage'],True)
                         if self.adapter._key and self.adapter._key in json.dumps(value,ensure_ascii=False):
                             raise LanguageError('UNSAFE_EXPLANATION','回复包含服务凭据，已拒绝。')
@@ -465,7 +474,7 @@ class RecipeLanguage:
                     if e.code in ('LANGUAGE_AUTH','LANGUAGE_TIMEOUT','LANGUAGE_UPSTREAM','LANGUAGE_RATE_LIMIT') or attempt>=self.repair_limit or time.monotonic()>=deadline:
                         if e.code=='LANGUAGE_AUTH':ledger['status']='stopped-auth'
                         raise
-                    feedback={'INACTIVE_ZONE_CHANGE':'Zone changes are inactive in environment mode. If the user asked to add or change a light, use mode=procedural with environmentId and environmentSha256 null; otherwise leave zones unchanged.',
+                    feedback={'INACTIVE_ZONE_CHANGE':'The user asked for a zone. Propose a procedural lighting recipe now: set mode=procedural, environmentId=null and environmentSha256=null, then add or edit the zone. Tell the user the HDR environment is replaced; do not ask them to request the switch.',
                         'LANGUAGE_MISMATCH':'name/reason/question must use the requested language; technical IDs alone do not set the language.',
                         'SCHEMA_FORM_MISMATCH':'Return the complete procedural recipe, not operations. Include every required field and exact processing version.',
                         'SEMANTIC_SCOPE_MISMATCH':'Respect the explicit request: procedural lighting requires mode=procedural and environmentId/environmentSha256=null. Use exactly key and fill IDs. Preserve all unrequested fields; a fill-only follow-up changes only fill strength.',

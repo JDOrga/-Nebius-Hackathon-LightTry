@@ -59,6 +59,34 @@ class ChatTests(unittest.TestCase):
   self.assertEqual(validate(answer,self.env,self.policy,'zh',True)['question'],answer['question'])
   with self.assertRaises(LanguageError):validate(answer,self.env,self.policy,'zh',False)
   with self.assertRaises(LanguageError):validate({**answer,'reason':''},self.env,self.policy,'zh',True)
+ def test_chinese_chat_repairs_english_only_but_allows_mixed_and_requested_english(self):
+  english={**self.good,'reason':'Try a slightly lower input multiplier.'}
+  chinese={**self.good,'reason':'略微降低输入倍率试试。'}
+  a=self.adapter([english,chinese,{**self.good,'reason':'略微降低 HDR input 倍率试试。'},english])
+  b=copy.deepcopy(self.body);b['text']='帮我调暗一点';r=a.recommend(b)
+  self.assertEqual(r['reason'],chinese['reason']);self.assertEqual(len(self.sent),2)
+  self.assertEqual(json.loads(a.ledger_path.read_text())['records'][0]['outcome'],'LANGUAGE_MISMATCH')
+  b['chat']['requestId']='e'*32;r=a.recommend(b)
+  self.assertIn('HDR input',r['reason']);self.assertEqual(len(self.sent),3)
+  b['chat']['requestId']='f'*32;b['text']='请用英文回答：帮我调暗一点';r=a.recommend(b)
+  self.assertEqual(r['reason'],english['reason']);self.assertEqual(len(self.sent),4)
+ def test_environment_zone_request_repairs_to_procedural_proposal(self):
+  from light_console import initial
+  self.policy['parameterized']=True;self.body['currentScheme']['parameters']=initial(self.env['sunny'])
+  self.normal=normalize_scheme(self.body['currentScheme'],self.env,self.policy)
+  self.body['chat']['snapshot']={k:self.normal[k] for k in ('inputId','planId','version','recipeKey')}
+  self.body['text']='然后在左上角加一个暖光区'
+  zone={'id':'warm_left','name':'左上暖光','enabled':True,'azimuthDeg':315,'elevationDeg':30,'strength':2,'color':'#ffbb88','sizeDeg':40}
+  wrong={**self.good,'parameters':{'operations':[{'op':'add_zone','zone':zone}]},'reason':'在左上方添加柔和暖光区。'}
+  corrected={**wrong,'parameters':{'operations':[{'op':'set','field':'mode','value':'procedural'},
+    {'op':'set','field':'environmentId','value':None},{'op':'set','field':'environmentSha256','value':None},
+    {'op':'add_zone','zone':zone}]},'reason':'改为程序化布光并添加暖光区；原环境图会退出，应用前可预览。'}
+  a=self.adapter([wrong,corrected]);r=a.recommend(self.body)
+  self.assertEqual(len(self.sent),2);self.assertEqual(r['status'],'ready')
+  self.assertEqual(r['parameters']['mode'],'procedural');self.assertIsNone(r['parameters']['environmentId'])
+  self.assertEqual(r['parameters']['zones'],[zone]);self.assertEqual(self.body['currentScheme']['parameters']['mode'],'environment')
+  self.assertIn('Do not require the user to request the mode switch separately.',self.sent[0]['messages'][0]['content'])
+  self.assertEqual(json.loads(a.ledger_path.read_text())['records'][0]['outcome'],'INACTIVE_ZONE_CHANGE')
  def test_capability_question_is_prompted_as_direct_conversation_not_edit(self):
   a=self.adapter([{**self.good,'status':'explanation','parameters':None}])
   b=copy.deepcopy(self.body);b['text']='what can you do'
