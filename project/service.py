@@ -669,6 +669,9 @@ class Application:
                 env=metadata['lightingScheme'].get('parameters',{}).get('environmentId')
                 if isinstance(env,str) and env.startswith('hdr-'):self.workspace.require_owner('hdr',env,h.owner_scope)
             h.json_response(self.queue.submit(self.body(h,MAX_BYTES),metadata,h.headers.get('Content-Type'),h.owner_scope),202)
+        elif path.startswith('/api/requests/') and path.endswith('/abandon') and path.count('/')==4 and h.command=='POST':
+            rid=path.split('/')[-2]
+            h.json_response(self.queue.abandon_request(rid,h.owner_scope))
         elif path.startswith('/api/requests/') and h.command=='GET':
             rid=path.split('/')[-1]
             try:task=self.queue.by_request(rid,h.owner_scope)

@@ -77,6 +77,36 @@ class ServiceSecurityTests(unittest.TestCase):
         self.assertEqual(executor.calls,[])
         with self.app.workspace.connect() as db:self.assertEqual(db.execute('SELECT count(*) FROM gpu_queue').fetchone()[0],0)
 
+    def test_abandon_unaccepted_request_blocks_late_submit_without_paid_dispatch(self):
+        self.app.handler.task_store.executor=ApprovedOfflineExecutor()
+        rid='e'*32
+        metadata={'inputId':'a'*32,'requestId':rid,'presetId':'sunny','name':'错标照片'}
+        headers={'CONTENT_TYPE':'image/jpeg','HTTP_X_LIGHTTRY_REQUEST':base64.b64encode(json.dumps(metadata).encode()).decode()}
+        status,body,_=request(self.app,'/api/tasks','POST',image_bytes(),extra=headers)
+        self.assertEqual(status,422)
+        self.assertEqual(json.loads(body)['error']['code'],'INVALID_IMAGE')
+        path='/api/requests/'+rid+'/abandon'
+        status,body,_=request(self.app,path,'POST')
+        self.assertEqual(status,200)
+        self.assertEqual(json.loads(body),{'requestId':rid,'abandoned':True})
+        self.assertEqual(request(self.app,path,'POST')[0],200)  # Idempotent.
+        status,body,_=self.submit(rid)
+        self.assertEqual(status,409)
+        self.assertEqual(json.loads(body)['error']['code'],'REQUEST_ABANDONED')
+        with self.app.workspace.connect() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM gpu_queue').fetchone()[0],0)
+
+    def test_abandon_rejects_an_already_accepted_request(self):
+        self.app.handler.task_store.executor=ApprovedOfflineExecutor()
+        rid='f'*32
+        status,body,_=self.submit(rid)
+        self.assertEqual(status,202)
+        identity=json.loads(body)['taskId']
+        status,body,_=request(self.app,'/api/requests/'+rid+'/abandon','POST')
+        self.assertEqual(status,409)
+        self.assertEqual(json.loads(body)['error']['code'],'REQUEST_ALREADY_ACCEPTED')
+        self.assertEqual(json.loads(request(self.app,'/api/requests/'+rid)[1])['taskId'],identity)
+
     def test_get_never_dispatches_and_both_roles_require_configured_gpu_control(self):
         executor=ApprovedOfflineExecutor();self.app.handler.task_store.executor=executor
         for route in ('/api/generate','/api/gpu/start','/api/gpu/stop','/api/tasks/start','/api/tasks/stop'):

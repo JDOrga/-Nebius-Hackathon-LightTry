@@ -13,3 +13,12 @@ test('thumbnail picking, copy and compare reuse the actual scheme store and comp
 test('temporary preview expansion retains fit pipeline and AI launcher id',()=>{assert.ok(html.includes('id="expand-preview"'));assert.ok(work.includes("classList.toggle('expanded-preview')"));assert.ok(work.includes('Math.min(...imgs.map'));assert.ok(html.includes('id="chat-open"'));assert.ok(html.includes('id="chat-panel"'));});
 
 test('visible environment list and dirty-draft barrier never auto-generate',()=>{assert.ok(consoleCode.includes('data-env-choice'));assert.ok(consoleCode.includes('onDraftChange(d.length>0)'));assert.ok(work.includes("$('generate').disabled=draftDirty||generationBlocked"));assert.ok(html.includes('id="action-draft-status"'));});
+
+test('uncertain upload can only be abandoned by a server-confirmed explicit action',()=>{
+ assert.ok(html.includes('id="abandon-submission"'));
+ assert.ok(html.includes('id="abandon-submission-dialog"'));
+ assert.ok(work.includes("e.status===422&&e.code==='INVALID_IMAGE'"));
+ assert.ok(work.includes("'/api/requests/'+unfinished.meta.requestId+'/abandon'"));
+ assert.ok(work.includes('if(result.abandoned!==true||result.requestId!==unfinished.meta.requestId)'));
+ assert.ok(work.includes('await chooseUploadDraft();'));
+});

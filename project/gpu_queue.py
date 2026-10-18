@@ -32,6 +32,9 @@ class GPUQueue:
                 fingerprint TEXT NOT NULL,metadata TEXT NOT NULL,mime TEXT NOT NULL,
                 state TEXT NOT NULL,created REAL NOT NULL,error TEXT,
                 UNIQUE(owner,request))''')
+            db.execute('''CREATE TABLE IF NOT EXISTS gpu_abandoned_requests (
+                owner TEXT NOT NULL,request TEXT NOT NULL,created REAL NOT NULL,
+                PRIMARY KEY(owner,request))''')
 
     def row(self, identity, owner):
         if not ID.fullmatch(identity):raise JobError('TASK_NOT_FOUND','任务不存在。',404)
@@ -104,6 +107,9 @@ class GPUQueue:
             if existing:
                 if existing[1]!=fingerprint:raise JobError('IDEMPOTENCY_CONFLICT','重复请求内容不同。',409)
                 return self.get(existing[0],owner)
+            if db.execute('SELECT 1 FROM gpu_abandoned_requests WHERE owner=? AND request=?',
+                          (owner,metadata['requestId'])).fetchone():
+                raise JobError('REQUEST_ABANDONED','该请求身份已作废，请重新确认新照片。',409)
             # Human/operator scope, current budget and guard are adapter checks, not client fields.
             if executor.authorize_job(self.account(owner),copy.deepcopy(metadata),fingerprint) is not True:
                 raise JobError('EXECUTION_NOT_AUTHORIZED','本任务没有当前服务端收费授权。',403)
@@ -132,6 +138,16 @@ class GPUQueue:
         with self.workspace.connect() as db:row=db.execute('SELECT id FROM gpu_queue WHERE owner=? AND request=?',(owner,request)).fetchone()
         if not row:raise JobError('TASK_NOT_FOUND','请求不存在。',404)
         return self.get(row[0],owner)
+
+    def abandon_request(self, request, owner):
+        """Atomically tombstone an unaccepted browser request before allowing a new photo."""
+        if not isinstance(request,str) or not ID.fullmatch(request):
+            raise JobError('INVALID_REQUEST','请求身份无效。',422)
+        with self.mutex,self.workspace.lock,self.workspace.connect() as db:
+            if db.execute('SELECT 1 FROM gpu_queue WHERE owner=? AND request=?',(owner,request)).fetchone():
+                raise JobError('REQUEST_ALREADY_ACCEPTED','该请求已受理；请先查看任务，不能作废。',409)
+            db.execute('INSERT OR IGNORE INTO gpu_abandoned_requests VALUES (?,?,?)',(owner,request,time.time()))
+        return {'requestId':request,'abandoned':True}
 
     def tick(self):
         # Called by the dedicated worker only. Holds one lane across all owners.
