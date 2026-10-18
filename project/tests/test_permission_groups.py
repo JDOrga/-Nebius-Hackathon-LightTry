@@ -44,15 +44,86 @@ class PermissionGroupTests(unittest.TestCase):
         self.app.gpu_sessions=self.sessions;self.app.gpu_scope=self.scope
         self.app.gpu_control=SimpleNamespace(bootstrap=None,auto_host_trust=False,close=lambda:None)
 
-    def request(self,owner,path,method='GET',body=b'',ip='127.0.0.1'):
+    def request(self,owner,path,method='GET',body=b'',ip='127.0.0.1',space=None):
         token,_=self.app.login_sessions.issue(owner)
         environ={'REQUEST_METHOD':method,'PATH_INFO':path,'wsgi.input':io.BytesIO(body),
                  'CONTENT_LENGTH':str(len(body)),'CONTENT_TYPE':'application/json',
                  'HTTP_HOST':'localhost:8080','HTTP_ORIGIN':'http://localhost:8080',
                  'HTTP_X_LIGHTTRY_TOKEN':self.app.handler.csrf_token,
-                 'HTTP_COOKIE':'lighttry_session='+token,'REMOTE_ADDR':ip}
+                 'HTTP_COOKIE':'lighttry_session='+token+('; lighttry_space='+space if space else ''),'REMOTE_ADDR':ip}
         got=[];payload=b''.join(self.app(environ,lambda status,headers:got.append((int(status.split()[0]),dict(headers)))))
         return got[0][0],json.loads(payload) if payload.startswith(b'{') else payload
+
+    def test_shared_key_browser_spaces_isolate_content_stop_and_rate(self):
+        self.app.session_scoped_accounts=frozenset({'alice'})
+        account_hash=self.app.accounts.users['alice']['hash']
+        first=self.app.workspace.issue_browser_space('alice',account_hash)
+        second=self.app.workspace.issue_browser_space('alice',account_hash)
+        self.assertEqual(self.app.workspace.issue_browser_space('alice',account_hash,first),first)
+        first_owner=self.app.workspace.browser_space('alice',account_hash,first)
+        second_owner=self.app.workspace.browser_space('alice',account_hash,second)
+        self.assertNotEqual(first_owner,second_owner)
+        first_me=self.request('alice','/api/me',space=first)
+        second_me=self.request('alice','/api/me',space=second)
+        self.assertEqual(first_me[0],200);self.assertEqual(second_me[0],200)
+        self.assertNotEqual(first_me[1]['workspaceId'],second_me[1]['workspaceId'])
+        self.assertEqual(self.request('alice','/api/me',space=first)[1]['workspaceId'],first_me[1]['workspaceId'])
+        self.assertEqual(self.request('alice','/api/me')[0],401)
+        from PIL import Image
+        picture=io.BytesIO();Image.new('RGB',(32,32),(72,109,84)).save(picture,format='PNG')
+        photo_id='e'*32
+        self.app.workspace.save_photo(photo_id,'private',picture.getvalue(),'image/png',first_owner)
+        self.assertEqual([p['id'] for p in self.request('alice','/api/workspace',space=first)[1]['photos']],[photo_id])
+        self.assertEqual(self.request('alice','/api/workspace',space=second)[1]['photos'],[])
+        self.assertEqual(self.request('alice','/api/photos/'+photo_id,space=first)[0],200)
+        self.assertEqual(self.request('alice','/api/photos/'+photo_id,space=second)[0],404)
+        self.app.workspace.claim('plan','d'*32,first_owner)
+        self.assertFalse(self.app.workspace.owned('plan','d'*32,second_owner))
+        self.queued(first_owner,number=33)
+        self.assertTrue(self.app.gpu_entry_info('alice',first_owner)['canStop'])
+        self.assertFalse(self.app.gpu_entry_info('alice',second_owner)['canStop'])
+        self.assertEqual(self.request('alice','/api/gpu/stop','POST',
+            json.dumps({'sessionId':self.sid}).encode(),space=second)[0],403)
+        now=[1000.];self.app.limiter.clock=lambda:now[0]
+        for _ in range(10):
+            self.assertNotEqual(self.request('alice','/api/language/recommend','POST',b'{}',space=first)[0],429)
+        self.assertEqual(self.request('alice','/api/language/recommend','POST',b'{}',space=first)[0],429)
+        self.assertNotEqual(self.request('alice','/api/language/recommend','POST',b'{}',space=second)[0],429)
+
+    def test_standalone_deployment_requires_explicit_shared_account_opt_in(self):
+        self.assertEqual(parser().parse_args([]).session_scoped_accounts,[])
+        self.assertEqual(parser().parse_args(['--session-scoped-account','alice']).session_scoped_accounts,['alice'])
+
+    def test_browser_space_persists_and_key_rotation_invalidates_old_space(self):
+        self.app.session_scoped_accounts=frozenset({'alice'})
+        account_hash=self.app.accounts.users['alice']['hash']
+        token=self.app.workspace.issue_browser_space('alice',account_hash)
+        scope=self.app.workspace.browser_space('alice',account_hash,token)
+        from persistence import Workspace
+        reopened=Workspace(self.app.workspace.root,self.app.handler.environment_library.environments,
+            self.app.handler.lighting_capabilities,default_owner='lighttry')
+        self.assertEqual(reopened.browser_space('alice',account_hash,token),scope)
+        self.assertIsNone(reopened.browser_space('alice','a'*64,token))
+
+    def test_shared_key_relogin_reuses_browser_cookie(self):
+        from urllib.parse import urlencode
+        self.app.session_scoped_accounts=frozenset({'alice'})
+        def login(cookie=''):
+            body=urlencode({'accessKey':'SYNTHETIC_USER_'+'B'*32}).encode()
+            environ={'REQUEST_METHOD':'POST','PATH_INFO':'/auth/login','wsgi.input':io.BytesIO(body),
+                'CONTENT_LENGTH':str(len(body)),'CONTENT_TYPE':'application/x-www-form-urlencoded',
+                'HTTP_HOST':'localhost:8080','HTTP_ORIGIN':'http://localhost:8080',
+                'HTTP_COOKIE':cookie,'REMOTE_ADDR':'127.0.0.1'}
+            got=[];self.app(environ,lambda status,headers:got.append((status,headers)))
+            self.assertTrue(got[0][0].startswith('303 '))
+            return [v for k,v in got[0][1] if k=='Set-Cookie']
+        first=login()
+        self.assertEqual(len(first),2)
+        space=next(v.split(';',1)[0] for v in first if v.startswith('lighttry_space='))
+        session=next(v.split(';',1)[0] for v in first if v.startswith('lighttry_session='))
+        second=login(space+'; '+session)
+        self.assertIn(space,second[0])
+        self.assertNotEqual(session,next(v.split(';',1)[0] for v in second if v.startswith('lighttry_session=')))
 
     def queued(self,owner,state='waiting',number=1):
         identity=('%032x'%number)
@@ -146,8 +217,9 @@ class PermissionGroupTests(unittest.TestCase):
             'statusSettingsFile':None,'gpuControlConfig':None,'modelGrantFile':None}))
         profile.chmod(0o600)
         paths={'local_cpu_config':str(profile),'assets_dir':None,
-               'tasks_dir':str(self.root/'local-tasks'),'accepted_packages':[]}
-        with patch.dict(os.environ,{'LIGHTTRY_RECIPE_LANGUAGE_CONFIG_FILE':str(text_config),
+               'tasks_dir':str(self.root/'local-tasks'),'accepted_packages':[],
+               'language_config':str(text_config)}
+        with patch.dict(os.environ,{'LIGHTTRY_RECIPE_LANGUAGE_CONFIG_FILE':str(self.root/'missing-text-policy.json'),
                                     'LIGHTTRY_NEMOTRON_KEY_FILE':str(key_file)}):
             app=LocalApplication(local_options(paths))
             try:
@@ -165,6 +237,16 @@ class PermissionGroupTests(unittest.TestCase):
             try:
                 self.assertIsNone(app.language_for('alice'))
                 self.assertTrue(app.language_for('lighttry').unbounded)
+            finally:app.close()
+            policy['user']={'ledgerFile':str(self.root/'user-unbounded-ledger.json'),
+                'unbounded':True,'ownerAcceptsUnboundedCost':True}
+            text_config.write_text(json.dumps(policy));text_config.chmod(0o600)
+            app=LocalApplication(local_options(paths))
+            try:
+                self.assertTrue(app.language_for('alice').unbounded)
+                self.assertIsNone(app.language_for('alice').budget)
+                self.assertIsNone(app.language_for('alice').max_calls)
+                self.assertEqual(app.language_for('alice').ledger_scope,'user')
             finally:app.close()
 
 

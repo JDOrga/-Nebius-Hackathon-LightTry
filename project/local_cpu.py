@@ -15,7 +15,7 @@ from nebius_status import NebiusStatus
 def options(paths):
     value=json.loads(runtime_file(paths['local_cpu_config'],ROOT).decode('utf-8'))
     required={'schemaVersion','publicOrigin','accountsFile','dataRoot','statusSettingsFile','gpuControlConfig','modelGrantFile'}
-    if not isinstance(value,dict) or set(value)-required-{'startPolicyFile'} or not required<=set(value) or value['schemaVersion']!=1:
+    if not isinstance(value,dict) or set(value)-required-{'startPolicyFile','sessionScopedAccounts'} or not required<=set(value) or value['schemaVersion']!=1:
         raise ValueError('EXPLICIT_PRIVATE_LOCAL_CPU_PROFILE_REQUIRED')
     origin=urlsplit(value['publicOrigin'])
     if (origin.scheme!='http' or origin.hostname!='127.0.0.1' or not origin.port or
@@ -27,7 +27,8 @@ def options(paths):
         data_root=value['dataRoot'],assets_dir=paths['assets_dir'],evidence_config=Path(paths['evidence_config']) if paths.get('evidence_config') else None,
         accepted_package=[Path(p) for p in paths['accepted_packages']],local_task_root=Path(paths['tasks_dir']),
         local_loopback=True,status_settings_file=value['statusSettingsFile'],start_policy_file=value.get('startPolicyFile'),
-        gpu_control_config=value['gpuControlConfig'],model_grant_file=value['modelGrantFile'])
+        gpu_control_config=value['gpuControlConfig'],model_grant_file=value['modelGrantFile'],
+        language_config=paths.get('language_config'),session_scoped_accounts=value.get('sessionScopedAccounts',[]))
 
 
 class LocalApplication(Application):
@@ -38,7 +39,7 @@ class LocalApplication(Application):
             super().close();raise ValueError('LOCAL_LEGACY_OWNER_REQUIRED')
         self.operator_recipe_language=None
         # Explicit, bounded server-only text scope; never inferred from a key alone.
-        text_config=os.environ.get('LIGHTTRY_RECIPE_LANGUAGE_CONFIG_FILE')
+        text_config=getattr(opts,'language_config',None) or os.environ.get('LIGHTTRY_RECIPE_LANGUAGE_CONFIG_FILE')
         if text_config:
             try:
                 from recipe_language import RecipeLanguage
@@ -64,7 +65,10 @@ class LocalApplication(Application):
                     self.handler.task_store.approved_language_operation=self.handler.recipe_language.approved_operation
                 else:
                     user,operator=cfg['user'],cfg['operator']
-                    if ((user is not None and (not isinstance(user,dict) or set(user)!={'ledgerFile','maxCalls','budgetUsd'})) or
+                    bounded_user=isinstance(user,dict) and set(user)=={'ledgerFile','maxCalls','budgetUsd'}
+                    unlimited_user=(isinstance(user,dict) and set(user)=={'ledgerFile','unbounded','ownerAcceptsUnboundedCost'} and
+                        user['unbounded'] is True and user['ownerAcceptsUnboundedCost'] is True)
+                    if ((user is not None and not (bounded_user or unlimited_user)) or
                             not isinstance(operator,dict) or set(operator)!={'ledgerFile','unbounded','operatorAcceptsUnboundedCost'} or
                             operator['unbounded'] is not True or operator['operatorAcceptsUnboundedCost'] is not True):
                         raise ValueError('EXPLICIT_ROLE_TEXT_POLICY_REQUIRED')
@@ -72,8 +76,10 @@ class LocalApplication(Application):
                     user_ledger=private_ledger(user['ledgerFile']) if user is not None else None
                     if user_ledger is not None and user_ledger.resolve()==operator_ledger.resolve():raise ValueError('ROLE_TEXT_LEDGERS_MUST_DIFFER')
                     self.handler.recipe_language=(RecipeLanguage(self.handler.catalog['presets'],
-                        self.handler.lighting_capabilities,key,user_ledger,max_calls=user['maxCalls'],
-                        budget=user['budgetUsd'],repair_limit=0,measured_cases=measured,ledger_scope='user')
+                        self.handler.lighting_capabilities,key,user_ledger,
+                        max_calls=None if unlimited_user else user['maxCalls'],
+                        budget=None if unlimited_user else user['budgetUsd'],repair_limit=0,
+                        measured_cases=measured,unbounded=unlimited_user,ledger_scope='user')
                         if user is not None else None)
                     self.operator_recipe_language=RecipeLanguage(self.handler.catalog['presets'],
                         self.handler.lighting_capabilities,key,operator_ledger,max_calls=None,budget=None,
@@ -103,7 +109,7 @@ class LocalApplication(Application):
         if not self.gpu_control and opts.status_settings_file:
             self.observer=NebiusStatus(opts.status_settings_file)
 
-    def language_for(self, owner):
+    def language_for(self, owner, owner_scope=None):
         if self.is_operator(owner) and self.operator_recipe_language is not None:
             return self.operator_recipe_language
         return self.handler.recipe_language
@@ -114,8 +120,8 @@ class LocalApplication(Application):
         if self.model_executor:self.model_executor.start()
         if self.observer:self.observer.start()
 
-    def gpu_entry_info(self,owner=None):
-        info=super().gpu_entry_info(owner)
+    def gpu_entry_info(self,owner=None,owner_scope=None):
+        info=super().gpu_entry_info(owner,owner_scope)
         if self.observer and not self.gpu_control:info.update(self.observer.snapshot())
         if self.start_policy:info.update(budgetUsdIncludingTax=self.start_policy['budgetUsdIncludingTax'],budgetHardCap=False)
         if not self.gpu_control:info['message']='GPU控制当前未启用（维护中），不能从网页启动；这不代表已确认GPU停机。文字对话与本地编辑仍可使用。'

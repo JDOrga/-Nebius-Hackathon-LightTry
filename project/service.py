@@ -55,6 +55,12 @@ class Application:
             raise ValueError('EXACT_PUBLIC_ORIGIN_REQUIRED')
         self.origin = parsed.scheme + '://' + parsed.netloc
         self.accounts = Accounts(options.accounts_file, ROOT, os.environ.get('LIGHTTRY_ACCESS_KEY') or os.environ.get('LIGHTTRY_ACCESS_PASSWORD'))
+        scoped=getattr(options,'session_scoped_accounts',()) or ()
+        if (not isinstance(scoped,(list,tuple)) or any(
+                not isinstance(name,str) or name not in self.accounts.users or
+                self.accounts.users[name]['role']!='user' for name in scoped)):
+            raise ValueError('EXPLICIT_BROWSER_SCOPED_USER_REQUIRED')
+        self.session_scoped_accounts=frozenset(scoped)
         self.login_sessions = LoginSessions(self.accounts)
         self.login_slots = threading.BoundedSemaphore(2)
         self.provider_secrets = ProviderSecrets(ROOT)
@@ -172,6 +178,14 @@ class Application:
         except Exception:
             return ''
 
+    def browser_token(self, environ):
+        raw=environ.get('HTTP_COOKIE','')
+        if len(raw)>8192:return ''
+        try:
+            cookie=SimpleCookie();cookie.load(raw)
+            return cookie['lighttry_space'].value if 'lighttry_space' in cookie else ''
+        except Exception:return ''
+
     def authorized(self, environ):
         # Basic authentication is deliberately no longer accepted.
         return self.login_sessions.authenticate(self.session_token(environ))
@@ -179,13 +193,17 @@ class Application:
     def is_operator(self, owner):
         return bool(owner and self.accounts.users[owner]['role']=='operator')
 
-    def language_for(self, owner):
+    def language_for(self, owner, owner_scope=None):
         return self.handler.recipe_language
 
     def session_cookie(self, token, seconds):
         secure = '; Secure' if self.origin.startswith('https://') else ''
         return ('lighttry_session=' + token + '; Path=/; Max-Age=' + str(seconds) +
                 '; HttpOnly; SameSite=Strict' + secure)
+
+    def browser_cookie(self, token):
+        secure='; Secure' if self.origin.startswith('https://') else ''
+        return 'lighttry_space='+token+'; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict'+secure
 
     def login_page(self, h, status=200, failed=False):
         message = '访问密钥无效或已过期，请重新输入。' if failed else '输入访问密钥，继续你的光照创作。'
@@ -223,12 +241,15 @@ class Application:
                 return True
             self.login_sessions.revoke(self.session_token(environ))
             token, seconds = self.login_sessions.issue(owner)
+            space=(self.workspace.issue_browser_space(owner,self.accounts.users[owner]['hash'],
+                self.browser_token(environ)) if owner in self.session_scoped_accounts else None)
             h.send_response(303); h.send_header('Location', self.gpu_login_destination())
+            if space:h.send_header('Set-Cookie',self.browser_cookie(space))
             h.send_header('Set-Cookie', self.session_cookie(token, seconds)); h.end_headers()
             return True
         return False
 
-    def gpu_entry_info(self, owner=None):
+    def gpu_entry_info(self, owner=None, owner_scope=None):
         # Consume the guard's local snapshot only: never add a cloud poll on login.
         snapshot = {}
         if self.gpu_sessions:
@@ -289,7 +310,7 @@ class Application:
                     'uncertain':'服务器连接未确认，请先停止并核查。'}.get(enrollment['stage'],'正在准备服务器连接。')
         stop_base=bool(owner and scope and snapshot.get('sessionId') and snapshot.get('scopeId')==scope.get('scopeId') and
                       snapshot.get('resourceId')==scope.get('resourceId') and not snapshot.get('verifiedStopped') and not snapshot.get('stopSent'))
-        stop_blocked=bool(stop_base and not operator and self.queue.foreign_in_flight(owner))
+        stop_blocked=bool(stop_base and not operator and self.queue.foreign_in_flight(owner_scope or owner))
         can_stop=bool(stop_base and not stop_blocked)
         from gpu_monitoring import public_monitor
         return {'active':active,'state':state,'canStart':allowed,'canStop':can_stop,
@@ -306,7 +327,7 @@ class Application:
         return '/' if self.gpu_entry_info()['active'] else '/gpu-entry'
 
     def gpu_entry_page(self, h):
-        info=self.gpu_entry_info(h.user)
+        info=self.gpu_entry_info(h.user,h.owner_scope)
         if info['active']:
             h.send_response(303);h.send_header('Location','/');h.end_headers();return
         title='GPU 尚未启动' if info['state']=='STOPPED' else '进入工作台前'
@@ -328,7 +349,7 @@ class Application:
         body=studio.shared.strict_json(self.body(h,1024).decode('utf-8'))
         if not isinstance(body,dict) or set(body)!={'requestId'} or not ID.fullmatch(str(body['requestId'])):
             raise JobError('INVALID_BODY','启动请求无效。',422)
-        info=self.gpu_entry_info(h.user)
+        info=self.gpu_entry_info(h.user,h.owner_scope)
         if info['active']:
             h.json_response({'status':'already_active'},202);return
         if not self.gpu_sessions or not self.gpu_scope:
@@ -387,7 +408,9 @@ class Application:
             h.user=self.authorized(environ)
             operator=self.is_operator(h.user)
             if not operator:self.limiter.consume('ip',environ.get('REMOTE_ADDR','unknown'))
-            if h.user:h.recipe_language=self.language_for(h.user)
+            h.owner_scope=(h.user if h.user not in self.session_scoped_accounts else self.workspace.browser_space(
+                h.user,self.accounts.users[h.user]['hash'],self.browser_token(environ)) if h.user else None)
+            if h.user:h.recipe_language=self.language_for(h.user,h.owner_scope)
             if not h.valid_host():
                 h.job_error(JobError('INVALID_HOST', '访问地址未配置。', 403))
             elif self.login_route(h, environ):
@@ -397,23 +420,25 @@ class Application:
                     self.login_page(h, 401)
                 else:
                     h.job_error(JobError('AUTH_REQUIRED', '请先使用访问密钥登录。', 401))
+            elif not h.owner_scope and urlsplit(h.path).path!='/auth/logout':
+                h.job_error(JobError('BROWSER_SPACE_REQUIRED','请重新登录以绑定此浏览器的私有工作区。',401))
             elif not h.valid_origin():
                 h.job_error(JobError('INVALID_ORIGIN', '仅接受已配置的同源访问。', 403))
             elif h.command in ('POST', 'PUT', 'DELETE') and h.headers.get('X-LightTry-Token') != h.csrf_token:
                 h.job_error(JobError('INVALID_TOKEN', '请刷新页面后重试。', 403))
             else:
-                if not operator:self.limiter.consume('user',h.user)
+                if not operator:self.limiter.consume('user',h.owner_scope)
                 path=urlsplit(h.path).path
                 if any(part in ('.','..') for part in path.split('/')) or '%' in path or '\\' in path or any(ord(c)<32 for c in path):
                     raise JobError('UNSAFE_PATH','路径无效。',404)
                 if h.command=='POST':
                     if not operator:
-                        self.limiter.consume('write',h.user)
-                        if path=='/api/tasks':self.limiter.consume('generate',h.user)
+                        self.limiter.consume('write',h.owner_scope)
+                        if path=='/api/tasks':self.limiter.consume('generate',h.owner_scope)
                         if path in ('/api/lighting/recommend','/api/language/recommend'):
-                            self.limiter.consume_language(h.user)
+                            self.limiter.consume_language(h.owner_scope)
                     if path.startswith('/api/photos/') or path in ('/api/tasks','/api/environments/import'):
-                        if not operator:self.limiter.consume('upload',h.user)
+                        if not operator:self.limiter.consume('upload',h.owner_scope)
                         slot=self.upload_slots.acquire(blocking=False)
                         if not slot:raise JobError('UPLOAD_BUSY','解码通道繁忙，请稍后重试。',429)
                 self.check_ownership(h,path)
@@ -463,15 +488,15 @@ class Application:
         return [h.wfile.getvalue()]
 
     def check_ownership(self,h,path):
-        if path.startswith(('/study/','/study-download/','/study-region/','/study-download-region/')) and h.user!=self.workspace.default_owner:
+        if path.startswith(('/study/','/study-download/','/study-region/','/study-download-region/')) and h.owner_scope!=self.workspace.default_owner:
             raise JobError('OBJECT_NOT_FOUND','结果不存在或不属于当前账号。',404)
         if path.startswith('/api/tasks/'):
             identity=path.split('/')[3]
-            self.workspace.require_owner('task',identity,h.user)
+            self.workspace.require_owner('task',identity,h.owner_scope)
         if path.startswith('/api/environments/') and path.endswith('/thumbnail'):
             sha=path.split('/')[3]
             if not any(e['sha256']==sha and e.get('source',{}).get('kind')!='local-import' for e in h.environment_library.environments.values()):
-                self.workspace.require_owner('hdr','hdr-'+sha,h.user)
+                self.workspace.require_owner('hdr','hdr-'+sha,h.owner_scope)
         if path=='/api/workspace' and h.command=='POST':return
 
     def body(self, h, limit):
@@ -500,7 +525,7 @@ class Application:
                 if current.get('sessionId'):self.gpu_sessions.client_presence(current['sessionId'])
             h.json_response({'ok':True})
         elif path=='/api/gpu/entry-status' and h.command=='GET':
-            h.json_response(self.gpu_entry_info(h.user))
+            h.json_response(self.gpu_entry_info(h.user,h.owner_scope))
         elif path=='/api/gpu/entry-start' and h.command=='POST':
             self.start_gpu_from_entry(h)
         elif path=='/api/gpu/status' and h.command=='GET':
@@ -528,19 +553,21 @@ class Application:
                 with self.queue.mutex:
                     current=self.gpu_sessions.latest()
                     if body['sessionId']!=current.get('sessionId'):raise JobError('SESSION_NOT_FOUND','会话不匹配。',404)
-                    if not self.is_operator(h.user) and self.queue.foreign_in_flight(h.user):
+                    if not self.is_operator(h.user) and self.queue.foreign_in_flight(h.owner_scope):
                         raise JobError('FOREIGN_GPU_TASK','有其他用户的生成任务正在运行或排队，普通用户无权关闭 GPU。',403)
                     h.json_response(self.gpu_sessions.request_stop(body['sessionId']),202)
             else:raise JobError('CONTROL_NOT_CONFIGURED','此控制接口未配置。',503)
         elif h.command=='GET' and path=='/api/me':
-            h.json_response({'username':h.user,'role':self.accounts.users[h.user]['role']})
+            me={'username':h.user,'role':self.accounts.users[h.user]['role']}
+            if h.user in self.session_scoped_accounts:me['workspaceId']=h.owner_scope.split('~',1)[1]
+            h.json_response(me)
         elif h.command=='GET' and path=='/api/environments':
-            h.json_response({'environments':[e for e in h.environment_library.environments.values() if e.get('source',{}).get('kind')!='local-import' or self.workspace.owned('hdr',e['id'],h.user)]})
+            h.json_response({'environments':[e for e in h.environment_library.environments.values() if e.get('source',{}).get('kind')!='local-import' or self.workspace.owned('hdr',e['id'],h.owner_scope)]})
         elif h.command=='GET' and path=='/api/accepted-results':
-            own=h.user==self.workspace.default_owner
+            own=h.owner_scope==self.workspace.default_owner
             h.json_response({'schemes':h.imported_schemes if own else [],'studies':[x for x in h.studies if x.get('recipeKey')] if own else []})
         elif h.command=='GET' and path=='/api/lighting':
-            own=h.user==self.workspace.default_owner
+            own=h.owner_scope==self.workspace.default_owner
             h.json_response({'schemaVersion':1,'capabilities':h.lighting_capabilities,'studies':h.studies if own else [],
                 'importedSchemes':h.imported_schemes if own else [],'textOnlyAI':True,
                 'language':h.recipe_language.capabilities() if h.recipe_language else {'enabled':False,'message':'Nemotron 未启用；手动操作不收费。'}})
@@ -550,10 +577,10 @@ class Application:
             if not isinstance(body,dict):raise JobError('INVALID_BODY','需要 JSON 对象。',400)
             scheme=body.get('currentScheme',body);params=scheme.get('parameters',scheme)
             environment=params.get('environmentId')
-            if isinstance(environment,str) and environment.startswith('hdr-'):self.workspace.require_owner('hdr',environment,h.user)
+            if isinstance(environment,str) and environment.startswith('hdr-'):self.workspace.require_owner('hdr',environment,h.owner_scope)
             if scheme.get('planId'):
                 with self.workspace.connect() as db:row=db.execute("SELECT owner FROM ownership WHERE kind='plan' AND id=?",(scheme['planId'],)).fetchone()
-                if row and row[0]!=h.user:raise JobError('OBJECT_NOT_FOUND','方案不属于当前账号。',404)
+                if row and row[0]!=h.owner_scope:raise JobError('OBJECT_NOT_FOUND','方案不属于当前账号。',404)
             h.rfile=io.BytesIO(data)
             with h.task_store.mutex:h.do_POST()
         elif h.command=='POST' and path=='/api/environments/import':
@@ -562,7 +589,7 @@ class Application:
             studio.decode_hdr(payload)
             identity='hdr-'+studio.digest(payload)
             with h.task_store.mutex:
-                self.workspace.claim('hdr',identity,h.user)
+                self.workspace.claim('hdr',identity,h.owner_scope)
                 from urllib.parse import unquote
                 env=h.environment_library.import_bytes(payload,unquote(h.headers.get('X-Environment-Name','导入环境')))
                 h.task_store.environments[env['id']]=env
@@ -575,24 +602,24 @@ class Application:
             metadata=studio.shared.strict_json(base64.b64decode(encoded,validate=True).decode('utf-8'))
             if 'lightingScheme' in metadata:
                 env=metadata['lightingScheme'].get('parameters',{}).get('environmentId')
-                if isinstance(env,str) and env.startswith('hdr-'):self.workspace.require_owner('hdr',env,h.user)
-            h.json_response(self.queue.submit(self.body(h,MAX_BYTES),metadata,h.headers.get('Content-Type'),h.user),202)
+                if isinstance(env,str) and env.startswith('hdr-'):self.workspace.require_owner('hdr',env,h.owner_scope)
+            h.json_response(self.queue.submit(self.body(h,MAX_BYTES),metadata,h.headers.get('Content-Type'),h.owner_scope),202)
         elif path.startswith('/api/requests/') and h.command=='GET':
             rid=path.split('/')[-1]
-            try:task=self.queue.by_request(rid,h.user)
+            try:task=self.queue.by_request(rid,h.owner_scope)
             except JobError:
                 task=None
                 from inference.jobs import read
                 for folder in h.task_store.root.iterdir():
-                    if ID.fullmatch(folder.name) and self.workspace.owned('task',folder.name,h.user) and not folder.is_symlink() and (folder/'task.json').is_file():
+                    if ID.fullmatch(folder.name) and self.workspace.owned('task',folder.name,h.owner_scope) and not folder.is_symlink() and (folder/'task.json').is_file():
                         if read(folder/'task.json').get('requestId')==rid:task=h.task_store.get(folder.name);break
                 if task is None:raise JobError('TASK_NOT_FOUND','请求不存在。',404)
             h.json_response(task)
-        elif path.startswith('/api/tasks/') and self.queue.contains(path.split('/')[3],h.user):
+        elif path.startswith('/api/tasks/') and self.queue.contains(path.split('/')[3],h.owner_scope):
             parts=path.split('/');identity=parts[3]
-            if h.command=='GET' and len(parts)==4:h.json_response(self.queue.get(identity,h.user))
+            if h.command=='GET' and len(parts)==4:h.json_response(self.queue.get(identity,h.owner_scope))
             elif h.command=='GET' and len(parts)==5 and parts[-1]=='original' and not (h.task_store.root/identity/'task.json').is_file():
-                row=self.queue.row(identity,h.user);file=self.queue.root/identity/'original'
+                row=self.queue.row(identity,h.owner_scope);file=self.queue.root/identity/'original'
                 if any(p.is_symlink() for p in (file,*file.parents)) or not file.is_file():raise JobError('FILE_NOT_FOUND','照片不存在。',404)
                 payload=file.read_bytes()
                 metadata=json.loads(row[4])
@@ -605,11 +632,11 @@ class Application:
                 db.execute('SELECT 1').fetchone()
             h.json_response({'status': 'ready', 'paidServices': self.model_executor is not None})
         elif h.command == 'GET' and path in ('/api/workspace', '/api/workspace/export'):
-            value = self.workspace.library(h.user)
+            value = self.workspace.library(h.owner_scope)
             value['taskIds'] = [p.name for p in h.task_store.root.iterdir()
-                                if ID.fullmatch(p.name) and not p.is_symlink() and (p / 'task.json').is_file() and self.workspace.owned('task',p.name,h.user)]
+                                if ID.fullmatch(p.name) and not p.is_symlink() and (p / 'task.json').is_file() and self.workspace.owned('task',p.name,h.owner_scope)]
             with self.workspace.connect() as db:
-                value['taskIds'] += [r[0] for r in db.execute('SELECT id FROM gpu_queue WHERE owner=?',(h.user,)) if r[0] not in value['taskIds']]
+                value['taskIds'] += [r[0] for r in db.execute('SELECT id FROM gpu_queue WHERE owner=?',(h.owner_scope,)) if r[0] not in value['taskIds']]
             h.send_bytes(json.dumps(value, ensure_ascii=False).encode(), 'application/json; charset=utf-8',
                          'lighttry-workspace.json' if path.endswith('/export') else None)
         elif h.command == 'POST' and path == '/api/workspace':
@@ -617,18 +644,18 @@ class Application:
                 raise JobError('INVALID_BODY', '需要 JSON。', 400)
             body = studio.shared.strict_json(self.body(h, 1024 * 1024).decode('utf-8'))
             with h.task_store.mutex:
-                h.json_response(self.workspace.save_library(body,h.user))
+                h.json_response(self.workspace.save_library(body,h.owner_scope))
         elif path.startswith('/api/photos/'):
             pid = path.removeprefix('/api/photos/')
             if h.command == 'GET':
-                _, data, mime = self.workspace.photo(pid,h.user)
+                _, data, mime = self.workspace.photo(pid,h.owner_scope)
                 h.send_bytes(data, mime)
             elif h.command == 'POST':
                 metadata = studio.shared.strict_json(base64.b64decode(h.headers.get('X-LightTry-Photo', ''), validate=True).decode('utf-8'))
                 if not isinstance(metadata, dict) or set(metadata) != {'name'}:
                     raise JobError('PHOTO_METADATA_INVALID', '照片名称字段无效。', 422)
                 h.json_response(self.workspace.save_photo(pid, metadata['name'], self.body(h, MAX_BYTES),
-                                                          h.headers.get('Content-Type'),h.user), 201)
+                                                          h.headers.get('Content-Type'),h.owner_scope), 201)
             else:
                 h.job_error(JobError('METHOD_NOT_ALLOWED', '请求方法不支持。', 405))
         else:
@@ -639,6 +666,8 @@ class Application:
 def parser():
     p = argparse.ArgumentParser(description='Linux/CPU standalone service; paid services remain OFF.')
     p.add_argument('--accounts-file',default=os.environ.get('LIGHTTRY_ACCOUNTS_FILE'))
+    p.add_argument('--session-scoped-account',action='append',dest='session_scoped_accounts',default=[],
+                   help='Explicit shared-key user whose private workspace and stop ownership use a durable browser identity.')
     p.add_argument('--model-grant-file',type=Path,default=os.environ.get('LIGHTTRY_MODEL_GRANT_FILE'))
     p.add_argument('--gpu-control-config',type=Path,default=os.environ.get('LIGHTTRY_GPU_CONTROL_CONFIG'),
                    help='Private audited control factory binding; no implicit cloud start.')

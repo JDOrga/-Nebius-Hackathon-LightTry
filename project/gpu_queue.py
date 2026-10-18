@@ -15,6 +15,11 @@ from lighting import canonical, normalize_scheme
 
 
 class GPUQueue:
+    @staticmethod
+    def account(owner):
+        # Browser-space suffix is ownership only; paid authorization remains account-scoped.
+        return owner.split('~',1)[0]
+
     def __init__(self, workspace, task_store):
         self.workspace,self.store=workspace,task_store
         self.root=workspace.root/'queue'
@@ -100,7 +105,7 @@ class GPUQueue:
                 if existing[1]!=fingerprint:raise JobError('IDEMPOTENCY_CONFLICT','重复请求内容不同。',409)
                 return self.get(existing[0],owner)
             # Human/operator scope, current budget and guard are adapter checks, not client fields.
-            if executor.authorize_job(owner,copy.deepcopy(metadata),fingerprint) is not True:
+            if executor.authorize_job(self.account(owner),copy.deepcopy(metadata),fingerprint) is not True:
                 raise JobError('EXECUTION_NOT_AUTHORIZED','本任务没有当前服务端收费授权。',403)
             if db.execute("SELECT count(*) FROM gpu_queue WHERE state IN ('waiting','dispatching','active','blocked')").fetchone()[0]>=20:
                 raise JobError('QUEUE_FULL','串行队列已满。',429)
@@ -149,7 +154,7 @@ class GPUQueue:
             if not row or not executor:return
             metadata=json.loads(row[4])
             if (not callable(getattr(executor,'authorize_job',None)) or
-                    executor.authorize_job(row[1],copy.deepcopy(metadata),row[3]) is not True):
+                    executor.authorize_job(self.account(row[1]),copy.deepcopy(metadata),row[3]) is not True):
                 return  # Expired/revoked approval never becomes a dispatch.
             # Durable latch must be committed BEFORE the one and only external dispatch.
             db.execute("UPDATE gpu_queue SET state='dispatching' WHERE id=?",(row[0],));db.commit()

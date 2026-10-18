@@ -1,8 +1,10 @@
 """Private single-workspace persistence. No browser credentials or model execution."""
 from contextlib import contextmanager
 import json
+import hashlib
 import os
 import re
+import secrets
 from pathlib import Path
 import sqlite3
 import threading
@@ -45,7 +47,30 @@ class Workspace:
                 CREATE TABLE IF NOT EXISTS schemes (
                     plan_id TEXT NOT NULL, version INTEGER NOT NULL, body TEXT NOT NULL,
                     saved_at REAL NOT NULL, PRIMARY KEY(plan_id, version));
+                CREATE TABLE IF NOT EXISTS browser_spaces (
+                    token_hash TEXT PRIMARY KEY, account TEXT NOT NULL, account_hash TEXT NOT NULL,
+                    space_id TEXT UNIQUE NOT NULL, created_at REAL NOT NULL);
             ''')
+
+    def browser_space(self, account, account_hash, token):
+        """Recover a private owner only with both a live account and its browser cookie."""
+        if not isinstance(token,str) or not re.fullmatch(r'[A-Za-z0-9_-]{43}',token):return None
+        digest=hashlib.sha256(token.encode()).hexdigest()
+        with self.connect() as db:
+            row=db.execute('SELECT space_id FROM browser_spaces WHERE token_hash=? AND account=? AND account_hash=?',
+                           (digest,account,account_hash)).fetchone()
+        return account+'~'+row[0] if row else None
+
+    def issue_browser_space(self, account, account_hash, prior_token=None):
+        if (not isinstance(account,str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,32}',account) or
+                not isinstance(account_hash,str) or not re.fullmatch('[a-f0-9]{64}',account_hash)):
+            raise ValueError('BROWSER_SPACE_ACCOUNT_INVALID')
+        if self.browser_space(account,account_hash,prior_token):return prior_token
+        token=secrets.token_urlsafe(32);space_id=uuid.uuid4().hex
+        with self.lock,self.connect() as db:
+            db.execute('INSERT INTO browser_spaces VALUES (?,?,?,?,?)',
+                       (hashlib.sha256(token.encode()).hexdigest(),account,account_hash,space_id,time.time()))
+        return token
 
     def claim(self, kind, identity, owner, db=None):
         if db is None:

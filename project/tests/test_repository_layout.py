@@ -33,6 +33,14 @@ class RepositoryLayoutTests(unittest.TestCase):
             self.assertEqual(cfg['assets_dir'],str((ROOT/'relative assets').resolve()))
             self.assertEqual(args,['--port','8801'])
 
+    def test_private_language_policy_path_is_data_only_and_resolved(self):
+        with tempfile.TemporaryDirectory() as t:
+            p=Path(t)/'paths.json'
+            p.write_text(json.dumps({'local_cpu_config':'private/local-cpu.json',
+                                     'language_config':'private/text-roles.json'}))
+            _,cfg,_=launch.local_options(['--local-config',str(p)])
+            self.assertEqual(cfg['language_config'],str((ROOT/'private/text-roles.json').resolve()))
+
     def test_config_cannot_enable_paid_services_or_embed_keys(self):
         for field in ('inference_config','language_key_file','budget','api_key'):
             with self.subTest(field=field), tempfile.TemporaryDirectory() as t:

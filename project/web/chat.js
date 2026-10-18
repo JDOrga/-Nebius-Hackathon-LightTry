@@ -8,8 +8,10 @@ export const boundedMessages=items=>{let total=0;return items.filter(m=>m.role==
 export const applicable=(m,live,draftEpoch)=>!live.busy&&m.value?.status==='ready'&&!m.state&&m.ref===live.reference&&m.draftEpoch===draftEpoch&&!sameParameters(m.value.parameters,live.scheme.parameters);
 export function createChat({get,api,environmentLabel,apply}){
  const keep=(items,n)=>{const pinned=items.map((m,i)=>m.operationId?i:-1).filter(i=>i>=0).slice(-4);const rest=items.map((_,i)=>i).filter(i=>!pinned.includes(i)).slice(-(n-pinned.length));return [...pinned,...rest].sort((a,b)=>a-b).map(i=>items[i]);};
- const storage='lighttry.chat.tab.v1';let sessions={},selected=null,ref=null,pending=false,editEpoch=0,composing=false,drag=null;
- try{const saved=JSON.parse(sessionStorage.getItem(storage)||'{}');if(saved&&typeof saved==='object'&&!Array.isArray(saved))for(const [k,v] of Object.entries(saved).slice(-4)){if(/^[a-f0-9]{32}:[a-f0-9]{32}$/.test(k)&&/^[a-f0-9]{32}$/.test(v.id)&&Array.isArray(v.items))sessions[k]={id:v.id,items:v.items.filter(m=>['user','assistant','notice'].includes(m.role)&&typeof m.text==='string'&&m.text.length<=600&&!sensitive(m.text)).slice(-8),draft:''};}}catch{}
+ let storage='lighttry.chat.tab.v1',sessions={},selected=null,ref=null,pending=false,editEpoch=0,composing=false,drag=null;
+ function loadSessions(){try{const saved=JSON.parse(sessionStorage.getItem(storage)||'{}');if(saved&&typeof saved==='object'&&!Array.isArray(saved))for(const [k,v] of Object.entries(saved).slice(-4)){if(/^[a-f0-9]{32}:[a-f0-9]{32}$/.test(k)&&/^[a-f0-9]{32}$/.test(v.id)&&Array.isArray(v.items))sessions[k]={id:v.id,items:v.items.filter(m=>['user','assistant','notice'].includes(m.role)&&typeof m.text==='string'&&m.text.length<=600&&!sensitive(m.text)).slice(-8),draft:''};}}catch{}}
+ loadSessions();
+ function setWorkspaceScope(scope){storage='lighttry.chat.tab.v1.'+scope;sessions={};selected=null;ref=null;editEpoch++;$('chat-input').value='';loadSessions();}
  // Reloaded proposal cards are inert: only live validated responses can apply.
  for(const v of Object.values(sessions))for(const m of v.items){delete m.value;delete m.ref;if(m.operationId&&!['applied','rejected'].includes(m.state))m.state='stale';}
  function save(){try{const entries=Object.entries(sessions).slice(-4);sessionStorage.setItem(storage,JSON.stringify(Object.fromEntries(entries.map(([k,v])=>[k,{id:v.id,items:keep(v.items,8).map(m=>({role:m.role,text:m.text.slice(0,600),operationId:m.operationId,state:m.state||'stale',appliedVersion:m.appliedVersion,displayDiff:m.displayDiff}))}]))));}catch{$('chat-status').textContent='标签会话存储不可用；关闭后文字不会保留。';}}
@@ -17,7 +19,7 @@ export function createChat({get,api,environmentLabel,apply}){
  if(ref&&ref!==live.reference&&sessions[k].items.length){sessions[k].items.push({role:'notice',text:'编辑上下文已改变，下一次请求使用当前版本。旧建议不能直接应用。'});sessions[k].items=sessions[k].items.slice(-12);}ref=live.reference;return sessions[k];}
  function textNode(tag,text,cls){const e=document.createElement(tag);e.textContent=text;if(cls)e.className=cls;return e;}
  function update(){const live=get(),s=session();if(!live||!s)return;
- $('chat-context').textContent=live.label;$('chat-service').textContent=live.language.enabled?(live.language.developmentTestMode?'演示模式 · 不调用真实模型':live.language.unbounded?'管理员模式 · Nemotron 不设应用次数或费用上限；发送可能计费，不会生成图片':'AI 助手已启用 · 每60秒最多10条；发送可能计费，不会生成图片'):'AI 助手暂不可用，仍可手动调光';
+ $('chat-context').textContent=live.label;$('chat-service').textContent=live.language.enabled?(live.language.developmentTestMode?'演示模式 · 不调用真实模型':live.language.unbounded?(live.role==='operator'?'管理员模式 · Nemotron 不设应用次数或费用上限；发送可能计费，不会生成图片':'普通用户 · 每60秒最多10条；不设总预算，发送可能计费，不会生成图片'):'AI 助手已启用 · 每60秒最多10条；发送可能计费，不会生成图片'):'AI 助手暂不可用，仍可手动调光';
  $('chat-send').disabled=pending||!live.language.enabled;$('chat-send').textContent=pending?'等待中…':'发送';$('chat-send').title=!live.language.enabled?'AI 助手暂不可用':pending?'请求仍在等待，不重复发送':'发送文字，不生成图片';
  const log=$('chat-history'),previousScroll=log.scrollTop,atEnd=log.scrollHeight-log.scrollTop-log.clientHeight<40;log.replaceChildren();if(live.confirmedApplication)log.append(textNode('p','当前方案已确认应用到 v'+live.confirmedApplication.version+'；'+(live.result.kind==='none'?'尚未生成。':'已有匹配结果。'),'chat-applied-summary'));if(!s.items.length)log.append(textNode('p','描述你想要的光照效果，也可以询问调整建议。','chat-empty'));
  for(const m of s.items){const bubble=textNode('article',m.text,'chat-bubble '+m.role);log.append(bubble);
@@ -66,5 +68,5 @@ export function createChat({get,api,environmentLabel,apply}){
  $('chat-handle').onpointermove=e=>{if(drag){panel.style.left=drag.left+e.clientX-drag.x+'px';panel.style.top=drag.top+e.clientY-drag.y+'px';clamp();}};
  $('chat-handle').onpointerup=$('chat-handle').onpointercancel=()=>drag=null;
  addEventListener('resize',()=>{if(!panel.hidden)clamp();});visualViewport?.addEventListener('resize',()=>{panel.style.setProperty('--chat-vh',(visualViewport.height*.01)+'px');if(!panel.hidden)clamp();});
- return {update};
+ return {update,setWorkspaceScope};
 }

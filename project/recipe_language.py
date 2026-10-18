@@ -131,8 +131,8 @@ class RecipeLanguage:
         self.environments={p['id']:p for p in presets};self.policy=copy.deepcopy(policy)
         self.ledger_path=Path(ledger_path);self.max_calls=max_calls;self.budget=budget
         if (type(unbounded) is not bool or ledger_scope not in (None,'user','operator') or
-                (unbounded and (max_calls is not None or budget is not None or ledger_scope!='operator')) or
-                (not unbounded and (type(max_calls) is not int or not 1<=max_calls<=100 or type(budget) not in (int,float) or not 0<budget<=2.20)) or
+                (unbounded and (max_calls is not None or budget is not None or ledger_scope not in ('user','operator'))) or
+                (not unbounded and ((max_calls is not None and (type(max_calls) is not int or not 1<=max_calls<=100)) or type(budget) not in (int,float) or not 0<budget<=2.20)) or
                 type(repair_limit) is not int or repair_limit not in (0,1)):
             raise ValueError('EXPLICIT_LANGUAGE_QUOTA_POLICY_REQUIRED')
         self.unbounded=unbounded
@@ -153,23 +153,24 @@ class RecipeLanguage:
         if self.ledger_path.exists():
             ledger=read(self.ledger_path)
             if (ledger.get('model')!=MODEL or ledger.get('maxCalls')!=max_calls or ledger.get('budgetEnvelopeUsd')!=budget or
-                    ledger.get('quotaMode','bounded')!=('unbounded-operator' if unbounded else 'bounded') or
+                    ledger.get('quotaMode','bounded')!=('unbounded-'+str(ledger_scope) if unbounded else 'bounded') or
                     ledger.get('roleScope')!=ledger_scope):
                 raise ValueError('PRESERVE_EXISTING_LANGUAGE_LEDGER_NO_RESET')
             if ledger.get('mode')!=('OFFLINE_SYNTHETIC_NOT_NEMOTRON' if self.synthetic else 'REAL_PROVIDER'):
                 raise ValueError('DO_NOT_RELABEL_SYNTHETIC_LEDGER_AS_PROVIDER')
         else:
             self.ledger_path.parent.mkdir(parents=True,exist_ok=True)
-            with self.ledger_path.open('x',encoding='utf-8') as f:json.dump({'model':MODEL,'status':'active','quotaMode':'unbounded-operator' if unbounded else 'bounded','roleScope':ledger_scope,
+            with self.ledger_path.open('x',encoding='utf-8') as f:json.dump({'model':MODEL,'status':'active','quotaMode':'unbounded-'+str(ledger_scope) if unbounded else 'bounded','roleScope':ledger_scope,
                 'maxCalls':max_calls,'budgetEnvelopeUsd':budget,'calls':0,'chargedOrReservedEnvelopeUsd':0,
                 'oldLedgerUsed':False,'records':[],'mode':'OFFLINE_SYNTHETIC_NOT_NEMOTRON' if self.synthetic else 'REAL_PROVIDER'},f,ensure_ascii=False,indent=2)
 
     def capabilities(self):
         ledger=read(self.ledger_path)
         wire=self.adapter._wire_done
-        return {'enabled':self.adapter.enabled and ledger['status']=='active' and (self.unbounded or ledger['calls']<self.max_calls) and not (wire and not wire.is_set()),
+        return {'enabled':self.adapter.enabled and ledger['status']=='active' and (self.max_calls is None or ledger['calls']<self.max_calls) and (self.unbounded or ledger['chargedOrReservedEnvelopeUsd']+RESERVE<=self.budget) and not (wire and not wire.is_set()),
             'developmentTestMode':self.synthetic,'textOnly':True,'noAutomaticGeneration':True,'unbounded':self.unbounded,
             'message':'离线替身，仅测试服务状态。' if self.synthetic else
+                'Nemotron 不设应用次数或费用上限；普通用户每分钟最多发送 10 条，每次发送仍可能计费。' if self.unbounded and self.ledger_scope=='user' else
                 '管理员 Nemotron 不设应用次数或费用上限；每次发送仍可能计费。' if self.unbounded else
                 'Nemotron 只接收所选方案、需求与有限历史，不接收照片；点击才调用。'}
 
@@ -338,7 +339,7 @@ class RecipeLanguage:
                 if len(json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode())>15000:raise LanguageError('CONTEXT_TOO_LONG','修复后的上下文也必须在15KB上限内。',400)
                 if time.monotonic()>=deadline:raise LanguageError('LANGUAGE_TIMEOUT','共享总超时已到，不再发起修复。')
                 ledger=read(self.ledger_path)
-                if ledger['status']!='active' or (not self.unbounded and (ledger['calls']>=self.max_calls or ledger['chargedOrReservedEnvelopeUsd']+RESERVE>self.budget)):
+                if ledger['status']!='active' or (not self.unbounded and ((self.max_calls is not None and ledger['calls']>=self.max_calls) or ledger['chargedOrReservedEnvelopeUsd']+RESERVE>self.budget)):
                     raise LanguageError('LANGUAGE_BUDGET_EXHAUSTED','本轮文字次数或费用预留已到，不追加调用。',503)
                 record={'operationId':operation,'attempt':attempt,'repairLimitThisOperation':self.repair_limit,'fullProceduralRecipeRequired':self.full_procedural_recipe,
                     'thinkingMode':self.adapter.thinking_mode,'maxTokens':self.adapter.max_tokens,'reservedEnvelopeUsd':RESERVE,
@@ -403,7 +404,7 @@ class RecipeLanguage:
                         record.update(usage=usage,preTaxTokenEstimateUsd=actual,envelopeEstimateUsd=actual*1.5)
                         ledger['chargedOrReservedEnvelopeUsd']+=actual*1.5-RESERVE
                     # Unknown cost reservation never released, no thinking text/key persisted.
-                    if not self.unbounded and ledger['calls']>=self.max_calls:ledger['status']='stopped-count'
+                    if self.max_calls is not None and ledger['calls']>=self.max_calls:ledger['status']='stopped-count'
                     ledger['records'][-1]=record;atomic(self.ledger_path,ledger)
             raise LanguageError('INVALID_SCHEME_PROPOSAL','没有合法建议，方案未改变。')
         finally:self.lock.release()
