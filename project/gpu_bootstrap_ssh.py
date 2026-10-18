@@ -141,13 +141,16 @@ class SSHBootstrap:
 
     def wait_current(self,sid,*,confirmed=False):
         """Wait only for a bounded local observation recovery, never replay an SSH action."""
-        end=time.monotonic()+getattr(self,'state_wait_seconds',15)
+        end=time.monotonic()+getattr(self,'state_wait_seconds',60)
         while True:
             try:return self.check(sid,confirmed=confirmed)
             except ValueError as error:
                 if getattr(error,'precondition',None) not in ('TRANSIENT_OBSERVATION','TRANSIENT_PROVIDER_STATE'):
                     raise
-                remaining=end-time.monotonic()
+                value=self.control.sessions.get(sid)
+                deadline=min(value['workDeadline'],value['absoluteDeadline'],self.control.scope['expiresAt'],
+                             getattr(self,'deploy_deadline',value['workDeadline']))
+                remaining=min(end-time.monotonic(),deadline-self.clock())
                 if remaining<=0:self.unavailable('TRANSIENT_STATE_TIMEOUT')
                 self.stopped.wait(min(.5,remaining))
 

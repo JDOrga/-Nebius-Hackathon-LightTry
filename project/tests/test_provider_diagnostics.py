@@ -36,6 +36,15 @@ class DiagnosticTests(unittest.TestCase):
   self.a.runner.return_value=subprocess.CompletedProcess([],2,'','SECRET')
   with self.assertRaises(RuntimeError) as e:self.a._call(['ai','devlab','restart'])
   self.assertEqual(str(e.exception),'NEBIUS_COMMAND_FAILED');self.assertFalse(e.exception.diagnostic['persisted']);self.assertEqual(self.a.runner.call_count,1)
+ def test_instance_binding_failure_retains_only_states_without_extra_queries(self):
+  self.a._read=Mock(return_value=({}, {}, {'state':'RUNNING','image':'image','instances':[
+   {'state':'IMAGE_PULLING','compute_instance_state':'RUNNING','public_ip':'SECRET_IP','compute_instance_id':'SECRET_VM'},
+   {'state':'SECRET_UNKNOWN','compute_instance_state':'SECRET_UNKNOWN'}]}))
+  self.a._read.return_value[1]['status']={'instances':[]}
+  with self.assertRaisesRegex(ValueError,'NEBIUS_CURRENT_VM_NOT_UNIQUE'):self.a.observe('fixture')
+  d=self.rows()[0];self.assertEqual(d['activeCount'],0);self.assertEqual(d['instanceCount'],2)
+  self.assertEqual(d['instances'][0],{'state':'IMAGE_PULLING','computeState':'RUNNING'})
+  self.assertNotIn('SECRET',json.dumps(d));self.a.runner.assert_not_called();self.a._read.assert_called_once()
  def test_start_failure_persists_without_repeat(self):
   from test_worker_guard import GuardTests
   f=GuardTests();f.setUp();self.addCleanup(f.tearDown)

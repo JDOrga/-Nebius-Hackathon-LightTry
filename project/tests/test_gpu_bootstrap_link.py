@@ -194,6 +194,19 @@ class BootstrapTests(TLSFixture):
         self.assertTrue(self.bootstrap.terminal_failed(self.sid))
         self.assertEqual(read(self.bootstrap.directory(self.sid)/'failure-info.json')['precondition'],'TRANSIENT_STATE_TIMEOUT')
         self.assertFalse((self.bootstrap.directory(self.sid)/'remote-error.json').exists())
+    def test_local_recovery_after_fifteen_seconds_does_not_replay_actions(self):
+        self.value.update(runningAt=90,state='UNKNOWN',error='OBSERVATION_UNCERTAIN')
+        def recover(_):self.value.update(state='LOADING',error=None)
+        with patch('gpu_bootstrap_ssh.time.monotonic',side_effect=[0,20]),patch.object(self.bootstrap.stopped,'wait',side_effect=recover) as wait:
+            self.assertEqual(self.bootstrap.wait_current(self.sid)['state'],'LOADING')
+        wait.assert_called_once();self.bootstrap.runner.assert_not_called()
+    def test_local_recovery_wait_is_clipped_by_original_deployment_deadline(self):
+        self.value.update(runningAt=90,state='UNKNOWN',error='OBSERVATION_UNCERTAIN')
+        self.bootstrap.deploy_deadline=100.1
+        with patch('gpu_bootstrap_ssh.time.monotonic',side_effect=[0,0,61]),patch.object(self.bootstrap.stopped,'wait') as wait:
+            with self.assertRaises(ValueError) as caught:self.bootstrap.wait_current(self.sid)
+        self.assertEqual(caught.exception.precondition,'TRANSIENT_STATE_TIMEOUT')
+        self.assertAlmostEqual(wait.call_args.args[0],.1);self.bootstrap.runner.assert_not_called()
     def test_scope_mismatch_is_not_a_transient_wait(self):
         self.value['scopeId']='c'*32
         with self.assertRaisesRegex(ValueError,'CURRENT_RUNNING_HOST_REQUIRED') as caught:

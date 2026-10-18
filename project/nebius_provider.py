@@ -164,7 +164,24 @@ class NebiusProvider:
             raise ValueError('NEBIUS_INSTANCES_PROOF_REQUIRED')
         if state=='RUNNING':
             active=[x for x in summary['instances'] if x.get('state')=='RUNNING']
-            if len(active)!=1:raise ValueError('NEBIUS_CURRENT_VM_NOT_UNIQUE')
+            if len(active)!=1:
+                # Preserve only bounded state labels/counts, never IPs or VM IDs.
+                states={'RUNNING','STARTING','PROVISIONING','IMAGE_PULLING','STOPPING','STOPPED','FAILED','ERROR'}
+                receipt={'stage':'devlab_instance_binding','code':'NEBIUS_CURRENT_VM_NOT_UNIQUE',
+                         'instanceCount':len(summary['instances']),'activeCount':len(active),
+                         'instances':[{'state':x.get('state') if x.get('state') in states else 'UNKNOWN',
+                                       'computeState':x.get('compute_instance_state') if x.get('compute_instance_state') in states else 'UNKNOWN'}
+                                      for x in summary['instances'][:8]]}
+                try:
+                    path=self.root/'provider-diagnostics.sqlite3'
+                    if path.is_symlink():raise ValueError('DIAGNOSTIC_SYMLINK_FORBIDDEN')
+                    with closing(sqlite3.connect(path,timeout=.1)) as db,db:
+                        path.chmod(0o600)
+                        db.execute('CREATE TABLE IF NOT EXISTS diagnostics(id INTEGER PRIMARY KEY,at REAL,body TEXT)')
+                        db.execute('INSERT INTO diagnostics(at,body) VALUES (?,?)',(self.clock(),json.dumps(receipt)))
+                        db.execute('DELETE FROM diagnostics WHERE id NOT IN (SELECT id FROM diagnostics ORDER BY id DESC LIMIT 256)')
+                except Exception:pass  # A diagnostic failure must not change the rejection.
+                raise ValueError('NEBIUS_CURRENT_VM_NOT_UNIQUE')
             if not re.fullmatch(r'computeinstance-[a-z0-9]+',active[0]['compute_instance_id']):
                 raise ValueError('NEBIUS_CURRENT_VM_ID_INVALID')
             vm=self._call(['compute','instance','get','--id',active[0]['compute_instance_id']],deadline=deadline)
