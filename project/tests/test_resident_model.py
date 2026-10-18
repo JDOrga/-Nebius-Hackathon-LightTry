@@ -132,6 +132,24 @@ class ExecutorTests(unittest.TestCase):
         self.fixture=fixtures.ModelTests();self.fixture.setUp()
         cfg=read(self.fixture.config);cfg['executionMode']='resident';atomic(self.fixture.config,cfg);self.fixture.config.chmod(0o600)
     def tearDown(self):self.fixture.tearDown()
+    def test_prepared_deadline_never_exceeds_exact_grant_after_iso_roundtrip(self):
+        from datetime import datetime
+        from gpu_model import CosmosWorkerExecutor
+        # The real failed IPC request rounded 1792323463.8967068 up by one ULP.
+        for expires in (1792323463.8967068,1792323463.896706,1792323463.0):
+            with self.subTest(expires=expires),tempfile.TemporaryDirectory() as tmp:
+                executor=CosmosWorkerExecutor.__new__(CosmosWorkerExecutor)
+                executor.ledger=SimpleNamespace(root=Path(tmp),blob=Mock(return_value=b'SYNTHETIC'))
+                executor.config={'repo':tmp,'checkpointDir':tmp,'cudaHome':tmp}
+                executor.authorize=Mock(return_value={'expiresAt':expires,'approvalReference':'SYNTHETIC','budgetUsdIncludingTax':3})
+                with patch('gpu_model.unpack_input',return_value=({},{})),patch('gpu_model.BUNDLE_FILES',[]):
+                    prep,deadline=executor.prepare({'jobId':'a'*32,'artifactSha256':'b'*64})
+                runtime=read(prep/'runtime.json');budget=read(prep/'guard-receipt.json')
+                self.assertEqual(deadline,expires)
+                self.assertEqual(runtime['deadline_utc'],budget['deadline_utc'])
+                parsed=datetime.fromisoformat(runtime['deadline_utc']).timestamp()
+                self.assertLessEqual(parsed,expires)
+                self.assertLess(expires-parsed,0.000001)
     def test_construction_does_not_boot_and_cold_cannot_prepare(self):
         with patch('resident_executor.subprocess.Popen') as spawn:
             executor=ResidentCosmosExecutor(self.fixture.ledger,self.fixture.config)

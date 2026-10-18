@@ -85,8 +85,13 @@ class CosmosWorkerExecutor:
             target=prep/rel;target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source,target)
         for rel,raw in files.items():
             target=prep/rel;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(raw)
-        from datetime import datetime,timezone
-        deadline=datetime.fromtimestamp(grant['expiresAt'],timezone.utc).isoformat()
+        from datetime import datetime,timezone,timedelta
+        deadline=datetime.fromtimestamp(grant['expiresAt'],timezone.utc)
+        # ISO timestamps have microsecond precision. Never round the original
+        # grant upward: resident IPC compares against its exact numeric expiry.
+        if deadline.timestamp()>grant['expiresAt']:
+            deadline-=timedelta(microseconds=1)
+        deadline=deadline.isoformat()
         runtime={'repo':self.config['repo'],'checkpoint_dir':self.config['checkpointDir'],'cuda_home':self.config['cudaHome'],
                  'deadline_utc':deadline,'model_license_ack':True,'weights_mode':'full'}
         budget={'offline':False,'single_run':True,'approval_reference':grant['approvalReference'],
