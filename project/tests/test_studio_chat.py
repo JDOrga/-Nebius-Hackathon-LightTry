@@ -87,6 +87,35 @@ class ChatTests(unittest.TestCase):
   self.assertEqual(r['parameters']['zones'],[zone]);self.assertEqual(self.body['currentScheme']['parameters']['mode'],'environment')
   self.assertIn('Do not require the user to request the mode switch separately.',self.sent[0]['messages'][0]['content'])
   self.assertEqual(json.loads(a.ledger_path.read_text())['records'][0]['outcome'],'INACTIVE_ZONE_CHANGE')
+ def test_zero_repair_chinese_ready_keeps_usable_plan_without_paid_retry(self):
+  english={**self.good,'reason':'Try a slightly lower input multiplier.','question':'Would you like it darker?'}
+  a=self.adapter([english]);a.repair_limit=0;self.body['text']='给我一个方案，帮场景调暗些'
+  r=a.recommend(self.body)
+  self.assertEqual(r['status'],'ready');self.assertEqual(r['parameters'],english['parameters'])
+  self.assertIn('核对下方参数差异',r['reason']);self.assertEqual(r['question'],'')
+  self.assertEqual(len(self.sent),1)
+  record=json.loads(a.ledger_path.read_text(encoding='utf-8'))['records'][0]
+  self.assertEqual(record['repairLimitThisOperation'],0)
+  self.assertEqual(record['languageFallback'],'validated-ready-chinese-summary')
+ def test_zero_repair_zone_request_converts_only_with_user_intent(self):
+  from light_console import initial
+  self.policy['parameterized']=True;self.body['currentScheme']['parameters']=initial(self.env['sunny'])
+  self.normal=normalize_scheme(self.body['currentScheme'],self.env,self.policy)
+  self.body['chat']['snapshot']={k:self.normal[k] for k in ('inputId','planId','version','recipeKey')}
+  zone={'id':'warm_left','name':'左上暖光','enabled':True,'azimuthDeg':315,'elevationDeg':30,'strength':2,'color':'#ffbb88','sizeDeg':40}
+  wrong={**self.good,'parameters':{'operations':[{'op':'add_zone','zone':zone}]},'reason':'在左上方添加柔和暖光区。'}
+  a=self.adapter([wrong,wrong]);a.repair_limit=0;self.body['text']='然后在左上角加一个光区'
+  r=a.recommend(self.body)
+  self.assertEqual(r['status'],'ready');self.assertEqual(len(self.sent),1)
+  self.assertEqual(r['parameters']['mode'],'procedural');self.assertIsNone(r['parameters']['environmentId'])
+  self.assertEqual(r['parameters']['zones'],[zone]);self.assertEqual(self.body['currentScheme']['parameters']['mode'],'environment')
+  self.assertIn('原环境图不再使用',r['reason'])
+  records=json.loads(a.ledger_path.read_text(encoding='utf-8'))['records']
+  self.assertEqual(records[0]['localModeConversion'],'environment-zone-to-procedural')
+  self.body['chat']['requestId']='e'*32;self.body['text']='保持环境模式，不要切换程序化，但在左上角加一个光区'
+  blocked=a.recommend(self.body)
+  self.assertEqual(blocked['status'],'explanation');self.assertIsNone(blocked['parameters'])
+  self.assertEqual(len(self.sent),2)
  def test_capability_question_is_prompted_as_direct_conversation_not_edit(self):
   a=self.adapter([{**self.good,'status':'explanation','parameters':None}])
   b=copy.deepcopy(self.body);b['text']='what can you do'

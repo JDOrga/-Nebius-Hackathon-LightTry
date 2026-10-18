@@ -24,6 +24,8 @@ RESERVE=.0107304*1.5  # 15000 input +40960 output at0.06/0.24 per million;50% en
 INJECTION=re.compile(r'忽略.{0,12}(规则|指令|要求)|执行.{0,8}(命令|脚本)|泄露|系统提示词|ignore.{0,20}(rule|instruction)|system\s*prompt|api\s*key|\b(curl|powershell|sudo|ssh)\b',re.I)
 VISUAL_CLAIM=re.compile(r'我(?:看到|看见|观察到)|照片(?:里|中)(?:有|显示|是)|\bI\s+(?:can\s+)?see\b|in\s+your\s+(?:image|photo)',re.I)
 PHYSICAL_CLAIM=re.compile(r'(精确|精准).{0,10}(EV|曝光|色温|灯位|光照)|(?:保证|确保).{0,12}(保色|颜色不变|纹理不变|材质不变)|\b(?:exact|precise)\b.{0,12}\b(?:EV|kelvin|lamp|exposure)\b',re.I)
+ZONE_REQUEST=re.compile(r'光区|(?:新增|添加|加|调整|修改).{0,12}(?:灯|光)|\b(?:add|edit|change)\b.{0,40}\b(?:zone|light)\b',re.I)
+KEEP_ENVIRONMENT=re.compile(r'保持.{0,8}环境模式|(?:不|不要|别).{0,8}(?:切换|转到|改成).{0,8}程序化|environment\s+only',re.I)
 
 def proposal_diagnosis(value,key=''):
     """Private bounded final-data diagnosis; never thoughts, images or credentials."""
@@ -436,12 +438,27 @@ class RecipeLanguage:
                         parsed['parameters']=resolve_proposal_parameters(parsed['parameters'],current['parameters'],
                             self.environments,full_recipe=self.full_procedural_recipe)
                     value=validate(parsed,self.environments,self.policy,body['replyLanguage'],bool(chat_context))
-                    if (chinese_chat_request and not re.search(r'[\u4e00-\u9fff]',value['reason'] or value['question'])):
-                        raise LanguageError('LANGUAGE_MISMATCH','中文请求的回复应使用中文；当前方案未改变。')
                     if value['status']=='ready' and value['parameters'].get('schemaVersion')==2:
                         before=current['parameters'];after=value['parameters']
                         if after['mode']=='environment' and after['zones']!=(before.get('zones',[]) if before.get('schemaVersion')==2 else []):
-                            raise LanguageError('INACTIVE_ZONE_CHANGE','环境模式不会使用新增或修改的光区；建议未应用。')
+                            if (chat_context and self.repair_limit==0 and before.get('mode')=='environment' and ZONE_REQUEST.search(body['text']) and
+                                    not KEEP_ENVIRONMENT.search(body['text'])):
+                                converted={**after,'mode':'procedural','environmentId':None,'environmentSha256':None}
+                                value={**value,'parameters':normalize_parameters(converted,self.environments,self.policy)}
+                                note=('已切换为程序化布光；原环境图不再使用，请预览后确认。' if body['replyLanguage']=='zh' else
+                                    'Switched to procedural lighting; the HDR environment is replaced. Preview before approval.')
+                                if chinese_chat_request and not re.search(r'[\u4e00-\u9fff]',value['reason']):
+                                    value['reason']=note
+                                    value['question']=''
+                                elif len(value['reason'])+len(note)+1<=CHAT_REASON_LIMIT:
+                                    value['reason']=value['reason'].rstrip()+' '+note
+                                record['localModeConversion']='environment-zone-to-procedural'
+                            else:raise LanguageError('INACTIVE_ZONE_CHANGE','环境模式不会使用新增或修改的光区；建议未应用。')
+                    if chinese_chat_request and not re.search(r'[\u4e00-\u9fff]',value['reason'] or value['question']):
+                        if self.repair_limit:raise LanguageError('LANGUAGE_MISMATCH','中文请求的回复应使用中文；当前方案未改变。')
+                        if value['status']=='ready':
+                            value={**value,'reason':'已生成有界布光建议；请核对下方参数差异，预览并确认后再应用。','question':''}
+                            record['languageFallback']='validated-ready-chinese-summary'
                     if self.acceptance_validator is not None:
                         try:self.acceptance_validator(value)
                         except ValueError as error:
