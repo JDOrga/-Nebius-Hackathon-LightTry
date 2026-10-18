@@ -3,7 +3,7 @@ import {resetClientStorage} from './workspace-portability.js';
 import {archive,readArchive,mergeLibraries} from './workspace-portability.js';
 import {createConsole} from './console.js';
 import {createChat} from './chat.js';
-import {paintGenerationButton,paintGpuConsole,gpuNotice} from './gpu-monitor.js';
+import {paintGenerationButton,paintGpuConsole,gpuNotice,gpuStopCountdown} from './gpu-monitor.js';
 import {savedSampleSelection,allowed,removeFamily,createScheme,revise as reviseBase,variant,sameParameters,matchingTask,validateLibrary,referenceKey,uid,restoreInputStub,photoTitle,schemePresentation,environmentEdit,comparisonCursor,schemeCaption,mergeAcceptedLibrary,schemeWire} from './scheme-state.js';
 const $=id=>document.getElementById(id), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let catalog,lighting,inference,schemes=[],current,input,file=null,tasks=[],mode='result',compareKey=null,pending=false,requestId=null,region=false,zoom=1,pan={x:0,y:0};
@@ -258,6 +258,15 @@ try{const message=sessionStorage.getItem('lighttry.gpuEntryNotice');if(message){
 
 // Read one local guard-snapshot stream; never asks the cloud provider to poll.
 let gpuMonitorInfo=null,gpuMonitorBusy=false,gpuStartBusy=false,gpuMonitorTimer=null,gpuHostBusy=false,gpuStopBusy=false;
+let gpuCountdownAnchor=null,gpuCountdownTimer=null;
+const gpuCountdownClock=()=>typeof performance!=='undefined'&&typeof performance.now==='function'?performance.now():Date.now();
+function paintGpuCountdown(){
+ const now=gpuCountdownAnchor?gpuCountdownAnchor.serverNow+Math.max(0,gpuCountdownClock()-gpuCountdownAnchor.atMs)/1000:NaN;
+ const view=gpuStopCountdown(gpuMonitorInfo||{},now),label=$('gpu-monitor-countdown');
+ label.hidden=!view.visible;label.textContent=view.visible?view.text:'';
+ if((!view.ticking||document.hidden)&&gpuCountdownTimer){clearInterval(gpuCountdownTimer);gpuCountdownTimer=null;}
+ if(view.ticking&&!document.hidden&&!gpuCountdownTimer)gpuCountdownTimer=setInterval(paintGpuCountdown,1000);
+}
 function gpuGenerationBlocked(){return inference?.requiresGPUReady===true&&(!gpuMonitorInfo?.canGenerate||gpuMonitorInfo.state!=='READY'||gpuMonitorInfo.stale===true);}
 function gpuGenerationLabel(){return gpuMonitorInfo?.hostConfirmation?.canConfirm?'先确认服务器连接':gpuMonitorInfo?.state==='STARTING'?'服务器启动中':gpuMonitorInfo?.state==='LOADING'?'模型加载中':'请先启动 GPU';}
 function applyGpuGenerationGate(){
@@ -270,7 +279,8 @@ function applyGpuGenerationGate(){
   button.title=wait?gpuMonitorInfo?.message||'请等待模型就绪':'提交当前方案';}
 }
 let clientConnectionState='connecting';
-function paintGpuMonitor(info){
+function paintGpuMonitor(info,{freshSnapshot=false}={}){
+ if(freshSnapshot)gpuCountdownAnchor=Number.isFinite(info.serverNow)?{serverNow:info.serverNow,atMs:gpuCountdownClock()}:null;
  info={...info,clientConnection:clientConnectionState};
  const notice=gpuNotice(info);
  let banner=$('gpu-error-banner');
@@ -287,6 +297,7 @@ function paintGpuMonitor(info){
   banner.setAttribute('role',notice.severity==='error'?'alert':'status');
   $('gpu-notice-detail').textContent=notice.severity==='error'?'查看GPU错误详情':notice.code==='OPERATOR_STOP'||notice.code==='USER_REQUESTED_STOP'||notice.code?.startsWith('USER_STOP_')?'查看停机详情':'查看GPU状态详情';}
  gpuMonitorInfo=info;
+ paintGpuCountdown();
  const budget=info.budgetUsdIncludingTax;
  $('gpu-monitor-budget').textContent=Number.isFinite(budget)&&budget>0?`本次预算 ${budget.toFixed(2)} 美元（含税）。自动停机不保证账单硬封顶。请求提交后可继续编辑方案。`:'启动后可能产生费用。请求会在后台处理，无需等待，你可以继续编辑方案。';
  const labels={STOPPED:'已停止',STARTING:'启动中',LOADING:'准备中',READY:'运行中',EXECUTING:'生成中',STOPPING:'关闭中',UNKNOWN:'状态未知'};
@@ -313,7 +324,7 @@ async function refreshGpuMonitor(){
  if(gpuMonitorBusy)return;
  gpuMonitorBusy=true;$('gpu-monitor-refresh').disabled=true;
  const statusController=new AbortController(),statusTimeout=setTimeout(()=>statusController.abort(),10000);
- try{paintGpuMonitor(await api('/api/gpu/entry-status',{signal:statusController.signal}));}
+ try{paintGpuMonitor(await api('/api/gpu/entry-status',{signal:statusController.signal}),{freshSnapshot:true});}
  catch(e){paintGpuMonitor({...gpuMonitorInfo,state:'UNKNOWN',stale:true,canGenerate:false,hostConfirmation:{canConfirm:false},configured:e.status===404?false:undefined,canStart:false,message:e.status===404?'本地预览未连接 GPU 服务。':'暂时无法读取 GPU 状态；下列旧快照不代表当前状态。'});}
  finally{clearTimeout(statusTimeout);gpuMonitorBusy=false;$('gpu-monitor-refresh').disabled=false;clearTimeout(gpuMonitorTimer);if(!document.hidden)gpuMonitorTimer=setTimeout(refreshGpuMonitor,$('gpu-console-dialog').open?5000:15000);}
 }
@@ -378,8 +389,8 @@ $('gpu-monitor-confirm').onclick=async()=>{
  }catch(e){$('gpu-entry-notice').textContent=e.name==='AbortError'?'启动请求结果尚未确认，请勿重复提交，稍后刷新状态。':e.message;}
  finally{clearTimeout(timer);gpuStartBusy=false;$('gpu-entry-notice').hidden=false;await refreshGpuMonitor();}
 };
-document.addEventListener('visibilitychange',()=>{clearTimeout(gpuMonitorTimer);if(!document.hidden)refreshGpuMonitor();});
-window.addEventListener('pagehide',()=>clearTimeout(gpuMonitorTimer));
+document.addEventListener('visibilitychange',()=>{clearTimeout(gpuMonitorTimer);paintGpuCountdown();if(!document.hidden)refreshGpuMonitor();});
+window.addEventListener('pagehide',()=>{clearTimeout(gpuMonitorTimer);clearInterval(gpuCountdownTimer);});
 
 // Keep the socket open in background; closing/freezing JS timers is not logout.
 const workbenchPresence=new WorkbenchPresence({token:()=>inference?.csrfToken,onState:state=>{

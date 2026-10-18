@@ -53,7 +53,15 @@ def cpu_guard_step(control):
                 guard.request_stop(sid,'AUTO_HOST_TRUST_FAILED')
                 guard.fallback.publish(None)
                 return
-        if bootstrap:bootstrap.step(current)
+        if bootstrap:
+            bootstrap.step(current)
+            if (not current.get('stopSent') and not current.get('verifiedStopped') and
+                    bootstrap.terminal_failed(current['sessionId'])):
+                # A failed deployment latch is terminal for this paid session.
+                # Stop once; never retry the remote action or claim release here.
+                guard.request_stop(current['sessionId'],'BOOTSTRAP_FAILED')
+                guard.fallback.publish(None)
+                return
     else:
         try:
             observation=guard.provider.preflight(control.scope['resourceId'])

@@ -176,6 +176,7 @@ def public_failure(snapshot,enrollment,fresh):
         'USER_STOP_BEFORE_ERROR_CLASSIFICATION':'用户要求补全错误分类前先停机',
         'OPERATOR_STOP':'操作者请求停机',
         'AUTO_HOST_TRUST_FAILED':'本轮自动绑定主机失败；未继续部署',
+        'BOOTSTRAP_FAILED':'GPU引导失败，触发停机保护',
         'DEADLINE_OR_CPU_LEASE':'触发旧版时间或心跳保护；旧记录未细分原因',
         'DEADLINE_DURING_OBSERVATION':'状态查询期间触发旧版时间或心跳保护；旧记录未细分原因'}
     reason=snapshot.get('stopReason') or snapshot.get('error')

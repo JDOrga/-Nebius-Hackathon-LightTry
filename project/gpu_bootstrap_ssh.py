@@ -89,21 +89,43 @@ class SSHBootstrap:
             info=cached[2]
         else:
             info=classify(error,getattr(self,'current_stage','unknown'),duration_ms)
+            precondition=getattr(error,'precondition',None)
+            if precondition in {'SCOPE_MISMATCH','RESOURCE_MISMATCH','STOP_REQUESTED','HOST_MISSING',
+                    'OBSERVATION_STALE','DEADLINE_EXPIRED','IMAGE_MISMATCH','STATE_UNSAFE',
+                    'TRANSIENT_OBSERVATION','TRANSIENT_PROVIDER_STATE','TRANSIENT_STATE_TIMEOUT','IDLE_EXPIRED'}:
+                info['precondition']=precondition
             info['at']=self.clock()
             self._last_diagnostic=(sid,error,info)
         self.write(self.directory(sid)/'failure-info.json',info)
         return info
 
+    @staticmethod
+    def unavailable(precondition):
+        # Keep the public error stable, but preserve one bounded private reason.
+        error=ValueError('CURRENT_RUNNING_HOST_REQUIRED')
+        error.precondition=precondition
+        raise error
+
     def check(self,sid,*,confirmed=False):
         if self.stopped.is_set():raise ValueError('BOOTSTRAP_CLOSED')
         value=self.control.sessions.get(sid);now=self.clock()
-        if (value['scopeId']!=self.control.scope['scopeId'] or value['resourceId']!=self.control.scope['resourceId'] or
-            value.get('state') not in ('LOADING','READY','EXECUTING') or value.get('stopSent') or not value.get('hostIdentity') or
-            type(value.get('lastObservedAt')) not in (int,float) or not 0<=now-value['lastObservedAt']<=30 or
-            not value.get('workDeadline') or now>=min(value['workDeadline'],value['absoluteDeadline'],self.control.scope['expiresAt']) or
-            value.get('image')!=self.settings['expectedImage']):raise ValueError('CURRENT_RUNNING_HOST_REQUIRED')
+        if value['scopeId']!=self.control.scope['scopeId']:self.unavailable('SCOPE_MISMATCH')
+        if value['resourceId']!=self.control.scope['resourceId']:self.unavailable('RESOURCE_MISMATCH')
+        if value.get('stopSent') or value.get('verifiedStopped'):self.unavailable('STOP_REQUESTED')
+        if not value.get('hostIdentity'):self.unavailable('HOST_MISSING')
+        if type(value.get('lastObservedAt')) not in (int,float) or not 0<=now-value['lastObservedAt']<=30:
+            self.unavailable('OBSERVATION_STALE')
+        if not value.get('workDeadline') or now>=min(value['workDeadline'],value['absoluteDeadline'],self.control.scope['expiresAt']):
+            self.unavailable('DEADLINE_EXPIRED')
+        if value.get('image')!=self.settings['expectedImage']:self.unavailable('IMAGE_MISMATCH')
+        if value.get('state') not in ('LOADING','READY','EXECUTING'):
+            if value.get('state')=='UNKNOWN' and value.get('error')=='OBSERVATION_UNCERTAIN' and value.get('runningAt') is not None:
+                self.unavailable('TRANSIENT_OBSERVATION')
+            if value.get('state')=='STARTING' and value.get('runningAt') is not None:
+                self.unavailable('TRANSIENT_PROVIDER_STATE')
+            self.unavailable('STATE_UNSAFE')
         if not value.get('recoveryMode') and value.get('idleDeadline') is not None and value['state'] in ('LOADING','READY') and now>=value['idleDeadline']:
-            raise ValueError('CURRENT_RUNNING_HOST_REQUIRED')
+            self.unavailable('IDLE_EXPIRED')
         host=value['hostIdentity']
         if ipaddress.ip_address(host['ip']).version!=4:raise ValueError('BOOTSTRAP_IPV4_REQUIRED')
         if not re.fullmatch('[a-z_][a-z0-9_-]{0,31}',host['sshUser']):raise ValueError('SSH_USER_INVALID')
@@ -116,6 +138,24 @@ class SSHBootstrap:
         if getattr(self,'deployment_session',sid)==sid and hasattr(self,'deployment_grant') and grant_file(self.settings['modelGrantFile'],sid,value['resourceId'],clock=self.clock)!=self.deployment_grant:
             raise ValueError('MODEL_GRANT_CHANGED_DURING_BOOTSTRAP')
         return value
+
+    def wait_current(self,sid,*,confirmed=False):
+        """Wait only for a bounded local observation recovery, never replay an SSH action."""
+        end=time.monotonic()+getattr(self,'state_wait_seconds',15)
+        while True:
+            try:return self.check(sid,confirmed=confirmed)
+            except ValueError as error:
+                if getattr(error,'precondition',None) not in ('TRANSIENT_OBSERVATION','TRANSIENT_PROVIDER_STATE'):
+                    raise
+                remaining=end-time.monotonic()
+                if remaining<=0:self.unavailable('TRANSIENT_STATE_TIMEOUT')
+                self.stopped.wait(min(.5,remaining))
+
+    def terminal_failed(self,sid):
+        """A fixed failed latch means no more deployment; guard owns stop-only action."""
+        path=self.directory(sid)/'failed.json'
+        if path.is_symlink():raise ValueError('BOOTSTRAP_PATH_UNSAFE')
+        return path.is_file()
 
     def public(self,value):
         sid=value.get('sessionId')
@@ -178,7 +218,7 @@ class SSHBootstrap:
         return metadata,code,cfg
 
     def run(self,sid,command,*,input=None,confirmed=True):
-        value=self.check(sid,confirmed=confirmed)
+        value=self.wait_current(sid,confirmed=confirmed)
         deployment_deadline=(self.deploy_deadline if getattr(self,'deployment_session',None)==sid else value['workDeadline'])
         bound=min(20,value['workDeadline']-self.clock(),value['absoluteDeadline']-self.clock(),
                   deployment_deadline-self.clock(),self.control.scope['expiresAt']-self.clock())
@@ -212,7 +252,7 @@ class SSHBootstrap:
         return result.stdout
 
     def capture(self,sid):
-        value=self.check(sid);self.attempt(sid,'capture')
+        value=self.wait_current(sid);self.attempt(sid,'capture')
         output=self.run(sid,[self.settings['keyscanExecutable'],'-T','3','-t','ed25519',value['hostIdentity']['ip']],confirmed=False)
         key,fingerprint=host_key(output.decode('ascii'),value['hostIdentity']['ip'])
         self.write(self.directory(sid)/'candidate.json',{'sessionId':sid,'hostIdentity':value['hostIdentity'],
@@ -225,7 +265,7 @@ class SSHBootstrap:
             '-o','HostKeyAlias=lighttry-'+sid,'-o','ConnectTimeout=5','-o','ConnectionAttempts=1','-i',self.settings['keyFile']]
 
     def vm(self,sid,q):
-        value=self.check(sid,confirmed=True)
+        value=self.wait_current(sid,confirmed=True)
         probe=(ROOT/'cloud/remote_probe.py').read_text(encoding='utf-8');probe=probe[:probe.index("\nif __name__")]
         program=(probe+'\n'+(ROOT/'project/gpu_bootstrap_vm.py').read_text(encoding='utf-8')).encode('utf-8')
         data=base64.b64encode(json.dumps(q,separators=(',',':')).encode()).decode()
@@ -237,7 +277,7 @@ class SSHBootstrap:
         return result
 
     def deploy(self,sid):
-        value=self.check(sid,confirmed=True)
+        value=self.wait_current(sid,confirmed=True)
         self.current_stage='preflight'
         metadata,code,cfg=self.preflight({'image':value['image']})
         grant=grant_file(self.settings['modelGrantFile'],sid,value['resourceId'],clock=self.clock)
@@ -269,7 +309,7 @@ class SSHBootstrap:
         if (receipt.get('resourceId')!=value['resourceId'] or receipt.get('codeSha256')!=metadata['sha256'] or
             receipt.get('launchRequested') is not True or receipt.get('tlsBind')!=remote['tlsBind']):raise ValueError('BOOTSTRAP_LAUNCH_ACK_MISMATCH')
         from worker_tls import private_bind
-        bind=private_bind(remote['tlsBind']);self.check(sid,confirmed=True);self.attempt(sid,'tunnel')
+        bind=private_bind(remote['tlsBind']);self.wait_current(sid,confirmed=True);self.attempt(sid,'tunnel')
         command=[self.settings['sshExecutable'],*self.ssh_args(sid),'-o','ExitOnForwardFailure=yes','-o','ServerAliveInterval=5',
             '-o','ServerAliveCountMax=1','-N','-L','127.0.0.1:'+str(self.settings['tunnelPort'])+':'+bind+':'+str(self.settings['workerPort']),
             value['hostIdentity']['sshUser']+'@'+value['hostIdentity']['ip']]
@@ -282,7 +322,7 @@ class SSHBootstrap:
         self.tunnel_reader=threading.Thread(target=self.drain_tunnel,args=(self.tunnel.stderr,self.tunnel_capture),daemon=True)
         self.tunnel_reader.start()
         if self.stopped.is_set():self.close_tunnel();raise ValueError('BOOTSTRAP_CLOSED')
-        try:self.check(sid,confirmed=True)
+        try:self.wait_current(sid,confirmed=True)
         except Exception:self.close_tunnel();raise
         self.write(self.directory(sid)/'deployed.json',receipt)
         direct=getattr(self.control,'direct_bootstrap',None)
@@ -319,7 +359,7 @@ class SSHBootstrap:
                     issuer=getattr(self.control,'model_grant_issuer',None)
                     if issuer:
                         self.current_stage='authorize'
-                        self.check(sid,confirmed=True)
+                        self.wait_current(sid,confirmed=True)
                         issuer.ensure(sid)
                     if not Path(self.settings['modelGrantFile']).is_file():self.status(sid,'waiting_authorization');return
                     self.status(sid,'deploying');self.deploy(sid)

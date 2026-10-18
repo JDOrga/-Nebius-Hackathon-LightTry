@@ -37,6 +37,7 @@ class AutoHostTrustTests(unittest.TestCase):
         guard.poll.return_value = current
         guard.confirm_host.return_value = confirmed
         bootstrap = Mock()
+        bootstrap.terminal_failed.return_value = False
         bootstrap.public.return_value = {'canConfirm': True, 'sessionId': sid,
             'hostIdentity': host, 'fingerprint': 'SHA256:FIXTURE'}
         control = SimpleNamespace(refresh_scope=Mock(), sessions=guard,
@@ -92,6 +93,20 @@ class AutoHostTrustTests(unittest.TestCase):
         guard.request_stop.assert_called_once_with(sid, 'AUTO_HOST_TRUST_FAILED')
         bootstrap.step.assert_not_called()
         guard.fallback.publish.assert_called_once_with(None)
+
+    def test_terminal_bootstrap_failure_stops_paid_session_once(self):
+        sid, _, current, _, guard, bootstrap, control = self.fixture()
+        current['hostConfirmed'] = True
+        bootstrap.terminal_failed.return_value = True
+        cpu_guard_step(control)
+        bootstrap.step.assert_called_once_with(current)
+        guard.request_stop.assert_called_once_with(sid, 'BOOTSTRAP_FAILED')
+        guard.fallback.publish.assert_called_once_with(None)
+        guard.request_stop.reset_mock()
+        stopped={**current,'stopSent':True,'state':'STOPPING'}
+        guard.poll.return_value=stopped
+        cpu_guard_step(control)
+        guard.request_stop.assert_not_called()
 
 
 if __name__ == '__main__':

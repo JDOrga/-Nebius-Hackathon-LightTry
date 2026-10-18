@@ -160,6 +160,45 @@ class BootstrapTests(TLSFixture):
         restarted=SSHBootstrap(self.control,self.binding);restarted.runner=Mock();restarted.spawn=Mock()
         try:restarted.step(self.value);restarted.runner.assert_not_called();restarted.spawn.assert_not_called()
         finally:restarted.close()
+    def test_transient_unknown_before_install_waits_locally_then_sends_once(self):
+        self.confirmed();self.value['runningAt']=90
+        original=self.bootstrap.runner.side_effect
+        timer=None
+        def fluctuate(command,**kw):
+            nonlocal timer
+            result=original(command,**kw)
+            if any(str(part).endswith('session-secrets.tar.gz') for part in command):
+                self.value.update(state='UNKNOWN',error='OBSERVATION_UNCERTAIN')
+                def recover():self.value.update(state='LOADING',error=None)
+                timer=threading.Timer(.1,recover);timer.start()
+            return result
+        self.bootstrap.runner.side_effect=fluctuate
+        self.bootstrap.step(self.value);self.bootstrap.thread.join(5)
+        if timer:timer.join(2)
+        self.assertEqual(read(self.bootstrap.directory(self.sid)/'status.json')['stage'],'deployed')
+        self.assertEqual(len(self.calls),4)
+        self.assertTrue((self.bootstrap.directory(self.sid)/'launch-attempt').exists())
+        self.assertFalse((self.bootstrap.directory(self.sid)/'failed.json').exists())
+    def test_stuck_transient_unknown_latches_failure_without_install_subprocess(self):
+        self.confirmed();self.value['runningAt']=90
+        self.bootstrap.state_wait_seconds=.05
+        original=self.bootstrap.runner.side_effect
+        def fluctuate(command,**kw):
+            result=original(command,**kw)
+            if any(str(part).endswith('session-secrets.tar.gz') for part in command):
+                self.value.update(state='UNKNOWN',error='OBSERVATION_UNCERTAIN')
+            return result
+        self.bootstrap.runner.side_effect=fluctuate
+        self.bootstrap.step(self.value);self.bootstrap.thread.join(5)
+        self.assertEqual(len(self.calls),3)  # capture, prepare, upload; no install call
+        self.assertTrue(self.bootstrap.terminal_failed(self.sid))
+        self.assertEqual(read(self.bootstrap.directory(self.sid)/'failure-info.json')['precondition'],'TRANSIENT_STATE_TIMEOUT')
+        self.assertFalse((self.bootstrap.directory(self.sid)/'remote-error.json').exists())
+    def test_scope_mismatch_is_not_a_transient_wait(self):
+        self.value['scopeId']='c'*32
+        with self.assertRaisesRegex(ValueError,'CURRENT_RUNNING_HOST_REQUIRED') as caught:
+            self.bootstrap.wait_current(self.sid)
+        self.assertEqual(caught.exception.precondition,'SCOPE_MISMATCH')
     def test_reviewed_remote_error_label_is_retained_without_raw_credentials(self):
         self.confirmed()
         self.bootstrap.runner=Mock(return_value=SimpleNamespace(returncode=3,stdout=b'',stderr=b'CURRENT_VM_IDENTITY_MISMATCH\n'))

@@ -111,7 +111,7 @@ class KeyLoginTests(unittest.TestCase):
   self.assertEqual(self.req('/api/gpu/entry-start','POST',body,cookie=cookie,extra=headers)[0],202);self.app.entry_thread.join(2)
   self.assertEqual(self.req('/api/gpu/entry-start','POST',body,cookie=cookie,extra=headers)[0],202);self.assertEqual(gpu.calls,1);self.assertEqual(self.app.gpu_entry_info('lighttry')['startStatus'],'failed')
  def test_monitor_snapshot_metadata_and_start_latch(self):
-  gpu=self.gpu_fixture();cookie=self.operator_cookie();status,_,body=self.req('/api/gpu/entry-status',cookie=cookie);info=json.loads(body);self.assertEqual(status,200);self.assertTrue(info['configured']);self.assertFalse(info['stale']);self.assertTrue(info['canStart']);self.assertGreater(info['observedAt'],0);self.assertEqual(gpu.calls,0)
+  gpu=self.gpu_fixture();cookie=self.operator_cookie();status,_,body=self.req('/api/gpu/entry-status',cookie=cookie);info=json.loads(body);self.assertEqual(status,200);self.assertTrue(info['configured']);self.assertFalse(info['stale']);self.assertTrue(info['canStart']);self.assertGreater(info['observedAt'],0);self.assertLess(abs(info['serverNow']-time.time()),5);self.assertEqual(gpu.calls,0)
   self.app.entry_start={'scopeId':self.app.gpu_scope['scopeId'],'status':'requested'};self.assertFalse(self.app.gpu_entry_info('lighttry')['canStart'])
   self.app.entry_start={'scopeId':'e'*32,'status':'failed'};info=self.app.gpu_entry_info('lighttry');self.assertIsNone(info['startStatus']);self.assertTrue(info['canStart'])
 if __name__=='__main__':unittest.main(verbosity=2)

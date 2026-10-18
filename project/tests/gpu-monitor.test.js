@@ -2,10 +2,43 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
-import {gpuNotice} from '../web/gpu-monitor.js';
+import {gpuNotice,gpuStopCountdown} from '../web/gpu-monitor.js';
 const source=readFileSync(new URL('../web/workbench.js',import.meta.url),'utf8');
 const html=readFileSync(new URL('../web/index.html',import.meta.url),'utf8');
-function fixture(){const nodes=new Map();const $=id=>{if(!nodes.has(id))nodes.set(id,{dataset:{},hidden:false,disabled:false,textContent:'',title:'',setAttribute(k,v){this[k]=v}});return nodes.get(id)};const c={gpuNotice,$ ,inference:{csrfToken:'synthetic-token'},Date,document:{},paintGpuConsole:()=>{}};vm.createContext(c);const start=source.indexOf('let gpuMonitorInfo=');const end=source.indexOf('async function refreshGpuMonitor',start);vm.runInContext(source.slice(start,end),c);return {c,$};}
+function fixture(extras={}){const nodes=new Map();const $=id=>{if(!nodes.has(id))nodes.set(id,{dataset:{},hidden:false,disabled:false,textContent:'',title:'',setAttribute(k,v){this[k]=v}});return nodes.get(id)};const c={gpuNotice,gpuStopCountdown,$ ,inference:{csrfToken:'synthetic-token'},Date,document:{hidden:false},paintGpuConsole:()=>{},setInterval:()=>1,clearInterval:()=>{},...extras};vm.createContext(c);const start=source.indexOf('let gpuMonitorInfo=');const end=source.indexOf('async function refreshGpuMonitor',start);vm.runInContext(source.slice(start,end),c);return {c,$};}
+test('card countdown uses confirmed RUNNING stop deadline and never claims released',()=>{
+ const at=1700000000,base={state:'READY',monitor:{deadlines:{runningAt:at,stopDeadline:at+3600}}};
+ assert.equal(gpuStopCountdown(base,at).text,'最晚自动停机 01:00:00');
+ assert.equal(gpuStopCountdown(base,at+3599.2).text,'最晚自动停机 00:00:01');
+ assert.equal(gpuStopCountdown(base,at+3600).text,'已到最晚停机时间 · 待核实');
+ for(const state of ['LOADING','READY','EXECUTING'])assert.equal(gpuStopCountdown({...base,state},at).visible,true);
+ for(const state of ['STARTING','STOPPING','STOPPED'])assert.equal(gpuStopCountdown({...base,state},at).visible,false);
+ assert.equal(gpuStopCountdown({...base,monitor:{deadlines:{stopDeadline:at+3600}}},at).visible,false);
+ assert.equal(gpuStopCountdown({...base,stale:true},at).text,'自动停机时间待核实');
+ assert.equal(gpuStopCountdown({...base,state:'UNKNOWN'},at).text,'自动停机时间待核实');
+ assert.equal(gpuStopCountdown({...base,monitor:{...base.monitor,stopRequested:true}},at).visible,false);
+});
+test('header GPU card paints local countdown without another provider request',()=>{
+ const {c,$}=fixture(),at=1700000000;
+ assert(html.includes('id="gpu-monitor-countdown"'));
+ assert(html.includes('role="timer"'));
+ c.paintGpuMonitor({configured:true,state:'LOADING',serverNow:at,monitor:{deadlines:{runningAt:at,stopDeadline:at+3600}}},{freshSnapshot:true});
+ assert.equal($('gpu-monitor-countdown').hidden,false);
+ assert.equal($('gpu-monitor-countdown').textContent,'最晚自动停机 01:00:00');
+ c.paintGpuMonitor({configured:true,state:'UNKNOWN',stale:true,monitor:{deadlines:{runningAt:at,stopDeadline:at+3600}}});
+ assert.equal($('gpu-monitor-countdown').textContent,'自动停机时间待核实');
+ c.paintGpuMonitor({configured:true,state:'STOPPED'});
+ assert.equal($('gpu-monitor-countdown').hidden,true);
+ assert(source.includes("{freshSnapshot:true}"));
+ assert(!source.slice(source.indexOf('function paintGpuCountdown'),source.indexOf('function gpuGenerationBlocked')).includes('fetch('));
+});
+test('visible card timer advances locally between server snapshots',()=>{
+ let ms=0,tick=null;const {c,$}=fixture({performance:{now:()=>ms},setInterval:fn=>{tick=fn;return 1}}),at=1700000000;
+ c.paintGpuMonitor({configured:true,state:'READY',serverNow:at,monitor:{deadlines:{runningAt:at,stopDeadline:at+3600}}},{freshSnapshot:true});
+ assert.equal($('gpu-monitor-countdown').textContent,'最晚自动停机 01:00:00');
+ ms=1200;tick();
+ assert.equal($('gpu-monitor-countdown').textContent,'最晚自动停机 00:59:59');
+});
 test('manual stop is a status notice, not a GPU error',()=>{const {c,$}=fixture();c.paintGpuMonitor({state:'STOPPED',configured:true,diagnostic:{code:'OPERATOR_STOP',severity:'info',active:false,title:'GPU已停止',detail:'停机原因：操作者请求停机。',cost:'已确认STOPPED且实例已释放。'}});assert.equal($('gpu-error-banner').role,'status');assert.equal($('gpu-notice-detail').textContent,'查看停机详情');assert.equal($('gpu-monitor-state').textContent,'已停止');c.paintGpuMonitor({state:'LOADING',configured:true,diagnostic:{code:'GPU_CONNECTION_FAILED',severity:'error',active:true,title:'GPU连接准备失败',detail:'连接失败'}});assert.equal($('gpu-error-banner').role,'alert');assert.equal($('gpu-notice-detail').textContent,'查看GPU错误详情');});
 test('header stays stopping during manual stop verification instead of showing fault',()=>{const {c,$}=fixture();c.paintGpuMonitor({state:'STOPPING',configured:true,diagnostic:{code:'OPERATOR_STOP',severity:'warning',active:true,title:'GPU正在停止',detail:'等待释放确认'}});assert.equal($('gpu-monitor-state').textContent,'关闭中');assert.equal($('gpu-error-banner').role,'status');c.paintGpuMonitor({state:'STOPPED',configured:true,diagnostic:{code:'OPERATOR_STOP',severity:'info',active:false,title:'GPU已停止'}});assert.equal($('gpu-monitor-state').textContent,'已停止');});
 test('GPU monitor has status refresh start and a separate fee confirmation',()=>{for(const id of ['gpu-monitor','gpu-monitor-state','gpu-monitor-time','gpu-monitor-refresh','gpu-monitor-start','gpu-monitor-dialog','gpu-monitor-confirm'])assert(html.includes('id="'+id+'"'));assert(html.includes('启动后可能产生费用'));});

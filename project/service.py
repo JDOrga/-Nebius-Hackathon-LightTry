@@ -383,6 +383,7 @@ class Application:
                 'sessionId':snapshot.get('sessionId'),'message':reason,'simulation':snapshot.get('simulation') is True,
                 'configured':self.gpu_sessions is not None,'canGenerate':bool(fresh and state=='READY' and not (diagnostic and diagnostic['active'])),
                 'observedAt':observed if isinstance(observed,(int,float)) and not isinstance(observed,bool) else None,'stale':bool(observed is not None and not fresh),
+                  'serverNow':time.time(),
                 'startStatus':pending.get('status') if pending else None,
                 'protectionMode':getattr(self.gpu_sessions,'protection_mode',None),
                 'hostLossProtected':False if getattr(self.gpu_sessions,'protection_mode',None)=='cpu-only' else None}

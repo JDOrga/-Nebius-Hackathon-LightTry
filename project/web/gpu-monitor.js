@@ -43,6 +43,17 @@ export function paintGenerationButton(button,task,{simulation=false}={}){
  track.append(done,current);button.replaceChildren(fill,text,track);
 }
 const finite=value=>typeof value==='number'&&Number.isFinite(value);
+export function gpuStopCountdown(info={},now=Date.now()/1000){
+ const deadlines=info.monitor?.deadlines||{},running=deadlines.runningAt,stop=deadlines.stopDeadline;
+ if(!finite(running)||running<=0||!finite(stop)||stop<running||
+    !['LOADING','READY','EXECUTING','UNKNOWN'].includes(info.state)||info.monitor?.stopRequested)return {visible:false};
+ if(info.stale===true||info.state==='UNKNOWN'||!finite(now)||now<running-5)
+  return {visible:true,text:'自动停机时间待核实',ticking:false};
+ const left=Math.max(0,Math.ceil(stop-now));
+ if(!left)return {visible:true,text:'已到最晚停机时间 · 待核实',ticking:false};
+ const hours=Math.floor(left/3600),minutes=Math.floor(left%3600/60),seconds=left%60;
+ return {visible:true,text:`最晚自动停机 ${String(hours).padStart(2,'0')}:${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`,ticking:true};
+}
 const time=value=>finite(value)&&value>0?new Date(value*1000).toLocaleString('zh-CN',{hour12:false}):'未记录';
 const duration=value=>finite(value)?value<60000?`${(value/1000).toFixed(1)} 秒`:`${Math.floor(value/60000)} 分 ${Math.floor(value/1000)%60} 秒`:'未采集';
 const size=value=>finite(value)?`${(value/1024**3).toFixed(2)} GiB`:'未采集';
