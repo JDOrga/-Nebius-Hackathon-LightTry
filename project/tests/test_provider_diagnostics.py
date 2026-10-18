@@ -27,6 +27,23 @@ class DiagnosticTests(unittest.TestCase):
   with self.assertRaisesRegex(RuntimeError,'NEBIUS_INVALID_JSON'):self.a._call(['ai','devlab','get'])
   with self.assertRaisesRegex(RuntimeError,'NEBIUS_DEADLINE_EXPIRED'):self.a._call(['ai','devlab','get'],deadline=99)
   self.assertEqual(self.a.runner.call_count,3);self.assertEqual(len(self.rows()),4)
+ def test_closed_failure_classes_do_not_persist_stderr(self):
+  cases=(('rpc error: code = Unavailable desc = Bearer SECRET_TOKEN','grpc_unavailable'),
+         ('grpc-status: 14 SECRET_TOKEN','grpc_unavailable'),
+         ('HTTP 503 SECRET_TOKEN','http_503'),
+         ('x509: certificate verify failed SECRET_TOKEN','tls_certificate'),
+         ('no such host SECRET_TOKEN','dns'),
+         ('internal server error SECRET_TOKEN','server'),
+         ('opaque SECRET_TOKEN','unclassified'))
+  for stderr,expected in cases:
+   self.a.runner.return_value=subprocess.CompletedProcess([],20,'',stderr)
+   with self.assertRaisesRegex(RuntimeError,'NEBIUS_COMMAND_FAILED') as raised:
+    self.a._call(['iam','v2','project','get'])
+   self.assertEqual(raised.exception.diagnostic['failureClass'],expected)
+  persisted=json.dumps(self.rows())
+  self.assertNotIn('SECRET',persisted)
+  self.assertNotIn('Bearer',persisted)
+  self.assertEqual(self.a.runner.call_count,len(cases))
  def test_success_and_retention(self):
   self.a.runner.return_value=subprocess.CompletedProcess([],0,'{}','')
   for _ in range(260):self.assertEqual(self.a._call(['ai','devlab','get']),{})

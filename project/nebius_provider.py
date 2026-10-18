@@ -25,6 +25,35 @@ from cli_bridge import devlab_summary,validate_project_owner,canonical_key,conne
 def build(binding):return NebiusProvider(binding)
 
 
+def safe_cli_failure_class(stderr):
+    """Return only a closed error category; never retain CLI stderr or identifiers."""
+    if not isinstance(stderr,str) or not stderr:return 'none'
+    sample=stderr[:8192].lower()
+    grpc=re.search(r'\b(?:rpc error:\s*)?code\s*=\s*([a-z_]+)\b',sample)
+    if grpc and grpc.group(1) in ('unauthenticated','permissiondenied','deadlineexceeded',
+                                   'unavailable','resourceexhausted','internal','unknown'):
+        return 'grpc_'+grpc.group(1)
+    numeric=re.search(r'\bgrpc-status\s*[:=]\s*(4|7|8|13|14|16)\b',sample)
+    if numeric:return 'grpc_'+{'4':'deadlineexceeded','7':'permissiondenied',
+                                '8':'resourceexhausted','13':'internal',
+                                '14':'unavailable','16':'unauthenticated'}[numeric.group(1)]
+    http=re.search(r'\b(?:http(?:/\d(?:\.\d)?)?\s+|http\s+status(?:\s+code)?\s*[:=]?\s*|status\s+code\s*[:=]\s*)(401|403|429|500|502|503|504)\b',sample)
+    if http:return 'http_'+http.group(1)
+    for label,terms in (
+        ('tls_certificate',('certificate verify failed','x509:','unknown authority')),
+        ('tls_handshake',('tls handshake','ssl handshake')),
+        ('dns',('no such host','name or service not known','temporary failure in name resolution')),
+        ('connection',('connection refused','connection reset','network is unreachable')),
+        ('timeout',('deadline exceeded','timed out','timeout')),
+        ('authentication',('unauthenticated','authentication failed','invalid token','expired token')),
+        ('permission',('permission denied','forbidden')),
+        ('rate_limit',('resource exhausted','too many requests')),
+        ('server',('internal server error','service unavailable','bad gateway')),
+    ):
+        if any(term in sample for term in terms):return label
+    return 'unclassified'
+
+
 class NebiusProvider:
     simulation=False
 
@@ -69,12 +98,14 @@ class NebiusProvider:
             ('timeout',('deadline exceeded','timed out','timeout')),
             ('network',('connection refused','connection reset','no such host','network is unreachable')),
             ('rate_limit',('resource exhausted','too many requests')),
+        ('server',('internal server error','service unavailable','bad gateway')),
             ('invalid_argument',('invalid argument','unknown flag')))
             if any(word in sample for word in words)]
         receipt={'stage':verb,'code':code,'exitCode':exit_code,
                  'durationMs':max(0,round((time.monotonic()-started)*1000)),
                  'stderrSummary':categories or (['redacted'] if raw else []),
-                 'stderrChars':len(raw),'stderrTruncated':len(raw)>8192}
+                 'stderrChars':len(raw),'stderrTruncated':len(raw)>8192,
+                 'failureClass':safe_cli_failure_class(raw)}
         try:
             path=self.root/'provider-diagnostics.sqlite3'
             if path.is_symlink():raise ValueError('DIAGNOSTIC_SYMLINK_FORBIDDEN')
