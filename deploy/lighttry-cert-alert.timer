@@ -1,0 +1,11 @@
+[Unit]
+Description=Check LightTry HTTPS certificate after each scheduled renewal
+
+[Timer]
+OnCalendar=*-*-* 04:15:00
+OnCalendar=*-*-* 16:15:00
+Persistent=true
+Unit=lighttry-cert-alert.service
+
+[Install]
+WantedBy=timers.target

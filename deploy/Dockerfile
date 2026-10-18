@@ -1,6 +1,6 @@
 ARG PYTHON_IMAGE=python:3.14.0-slim-bookworm@sha256:d13fa0424035d290decef3d575cea23d1b7d5952cdf429df8f5542c71e961576
 FROM ${PYTHON_IMAGE}
-LABEL org.opencontainers.image.title="LightTry CPU" org.opencontainers.image.version="2026.10.14-cpu.1"
+LABEL org.opencontainers.image.title="LightTry CPU" org.opencontainers.image.version="2026.10.18-cpu.2"
 WORKDIR /opt/lighttry
 RUN apt-get update && apt-get install --no-install-recommends -y openssh-client ca-certificates \
     && rm -rf /var/lib/apt/lists/*

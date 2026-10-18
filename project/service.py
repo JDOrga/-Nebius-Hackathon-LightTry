@@ -23,7 +23,7 @@ import studio
 from inference.jobs import ID, JobError
 from inference.images import MAX_BYTES
 from persistence import Workspace
-from security import Accounts, RateLimiter, ProviderSecrets, create_temporary_account, LoginSessions
+from security import Accounts, RateLimiter, ProviderSecrets, create_temporary_account, LoginSessions, runtime_file
 from gpu_queue import GPUQueue
 from gpu_bootstrap import load_control
 
@@ -157,6 +157,13 @@ class Application:
         self.log_handler = logs
         LOG.addHandler(logs); LOG.setLevel(logging.INFO)
         LOG.info('service initialized; GPU control binding=%s; model adapter=%s',bool(self.gpu_control),bool(self.model_executor))
+        self.operator_recipe_language=None
+        text_config=getattr(options,'language_config',None)
+        if text_config:
+            try:self.configure_role_language(text_config)
+            except Exception:
+                self.close()
+                raise
 
     def close(self):
         self.presence_stop.set()
@@ -194,7 +201,64 @@ class Application:
         return bool(owner and self.accounts.users[owner]['role']=='operator')
 
     def language_for(self, owner, owner_scope=None):
+        if self.is_operator(owner) and self.operator_recipe_language is not None:
+            return self.operator_recipe_language
         return self.handler.recipe_language
+
+    def configure_role_language(self, text_config):
+        """Only explicit private policy plus a server-side key enables paid text."""
+        from recipe_language import RecipeLanguage
+        from studio import measured_context
+        cfg=json.loads(runtime_file(text_config,ROOT).decode('utf-8'))
+        legacy=set(cfg)=={'schemaVersion','ledgerFile','maxCalls','budgetUsd'} and cfg['schemaVersion']==1
+        tiered=set(cfg)=={'schemaVersion','user','operator'} and cfg['schemaVersion']==2
+        if not (legacy or tiered):raise ValueError('EXPLICIT_LOCAL_TEXT_SCOPE_REQUIRED')
+        key=self.provider_secrets.get('nemotron').lstrip('\ufeff')
+        if not key.isascii() or not 20<=len(key)<=4096 or any(c.isspace() for c in key):
+            raise ValueError('KEY_FILE_FORMAT_INVALID_NO_REQUEST')
+        def private_ledger(raw):
+            ledger=Path(raw)
+            if (not ledger.is_absolute() or ledger.resolve().is_relative_to(ROOT.resolve())
+                    or any(p.is_symlink() for p in (ledger,*ledger.parents))):
+                raise ValueError('PRIVATE_TEXT_LEDGER_REQUIRED')
+            return ledger
+        measured=measured_context(self.handler.studies)
+        if legacy:
+            self.handler.recipe_language=RecipeLanguage(self.handler.catalog['presets'],
+                self.handler.lighting_capabilities,key,private_ledger(cfg['ledgerFile']),
+                max_calls=cfg['maxCalls'],budget=cfg['budgetUsd'],repair_limit=0,measured_cases=measured)
+            self.handler.task_store.approved_language_operation=self.handler.recipe_language.approved_operation
+            return
+        user,operator=cfg['user'],cfg['operator']
+        bounded_user=isinstance(user,dict) and set(user)=={'ledgerFile','maxCalls','budgetUsd'}
+        unlimited_user=(isinstance(user,dict) and set(user)=={'ledgerFile','unbounded','ownerAcceptsUnboundedCost'} and
+            user['unbounded'] is True and user['ownerAcceptsUnboundedCost'] is True)
+        if ((user is not None and not (bounded_user or unlimited_user)) or
+                not isinstance(operator,dict) or set(operator)!={'ledgerFile','unbounded','operatorAcceptsUnboundedCost'} or
+                operator['unbounded'] is not True or operator['operatorAcceptsUnboundedCost'] is not True):
+            raise ValueError('EXPLICIT_ROLE_TEXT_POLICY_REQUIRED')
+        operator_ledger=private_ledger(operator['ledgerFile'])
+        user_ledger=private_ledger(user['ledgerFile']) if user is not None else None
+        if user_ledger is not None and user_ledger.resolve()==operator_ledger.resolve():
+            raise ValueError('ROLE_TEXT_LEDGERS_MUST_DIFFER')
+        self.handler.recipe_language=(RecipeLanguage(self.handler.catalog['presets'],
+            self.handler.lighting_capabilities,key,user_ledger,
+            max_calls=None if unlimited_user else user['maxCalls'],
+            budget=None if unlimited_user else user['budgetUsd'],repair_limit=0,
+            measured_cases=measured,unbounded=unlimited_user,ledger_scope='user')
+            if user is not None else None)
+        self.operator_recipe_language=RecipeLanguage(self.handler.catalog['presets'],
+            self.handler.lighting_capabilities,key,operator_ledger,max_calls=None,budget=None,
+            repair_limit=0,measured_cases=measured,unbounded=True,ledger_scope='operator')
+        from language import LanguageError
+        def verify_operation(operation_id,input_id,parameters):
+            for language in (self.handler.recipe_language,self.operator_recipe_language):
+                if language is None:continue
+                try:return language.approved_operation(operation_id,input_id,parameters)
+                except LanguageError as error:
+                    if error.code!='INVALID_LANGUAGE_PROVENANCE':raise
+            raise LanguageError('INVALID_LANGUAGE_PROVENANCE','该建议未被正式服务接受。',422)
+        self.handler.task_store.approved_language_operation=verify_operation
 
     def session_cookie(self, token, seconds):
         secure = '; Secure' if self.origin.startswith('https://') else ''
@@ -668,6 +732,8 @@ def parser():
     p.add_argument('--accounts-file',default=os.environ.get('LIGHTTRY_ACCOUNTS_FILE'))
     p.add_argument('--session-scoped-account',action='append',dest='session_scoped_accounts',default=[],
                    help='Explicit shared-key user whose private workspace and stop ownership use a durable browser identity.')
+    p.add_argument('--language-config',type=Path,default=os.environ.get('LIGHTTRY_RECIPE_LANGUAGE_CONFIG_FILE'),
+                   help='Private role text policy; requires a server-side Nemotron key. Never enabled by access keys alone.')
     p.add_argument('--model-grant-file',type=Path,default=os.environ.get('LIGHTTRY_MODEL_GRANT_FILE'))
     p.add_argument('--gpu-control-config',type=Path,default=os.environ.get('LIGHTTRY_GPU_CONTROL_CONFIG'),
                    help='Private audited control factory binding; no implicit cloud start.')

@@ -1,3 +1,15 @@
+> Nebius 服务账号认证（2026-10-18）：`lighttry-controller`（`serviceaccount-e00ybpfwg84xtz6dd6`）的 `publickey-e00gdw8z6bkh7b5agw` 已注册且 ACTIVE/4096；服务端独立 root/600 配置 `/etc/lighttry/nebius/service-account.json` 只引用 root/600 私钥，不读取个人 OAuth 配置或静态 IAM token。官方 Python SDK 0.6.24 以该身份取得约12小时 token，`Profile/Get`、实际 `nebius.ai.v1.DevlabService/Get`、项目 `Get`、公钥 `Get` 均成功；DevLab `devlab-e00mt1pp6rph9z4qyv` 属项目 `project-e00cydn2pr00f38xvq3j95`，查询时 STOPPED、实例列表空。公钥元数据无非零 `expires_at`，不代表不可吊销。全新进程重取 token、SDK 强制刷新及合成过期/认证失败测试通过，**自动续签实现已检查／模拟通过，真实跨期续签尚未验证**。网页实际容器 UID10001 在只读密钥/配置挂载下执行同一只读探针成功；独立守护等价容器经用户、镜像、环境、数据卷、挂载核对一致后探针成功，但真正的停机守护及 GPU 控制尚未配置/运行，不能称生产控制链路已接通。只读 IAM `ListMemberOf` 与 `ListAccessPermit` 进一步确认此账号已在租户 `admins` 组，该组对 `tenant-e00yhst8h23xzm7hbw` 持有 `admin` 授权；本次没有授予或调整权限。此范围过宽，公网网页容器已可读取该服务器侧凭据，上线控制前应由所有者收窄最小权限。旧容器和原 `docker inspect` 已保留用于回滚；未启动/重启/停止 GPU，未调用收费模型。
+
+> Nebius 持续化公钥准备（2026-10-18，已由上项认证验证推进）：已在阿里云 CPU 服务器本机生成专用 RSA 4096 密钥对，`/etc/lighttry/nebius/private.pem` 仅 root/600 可读，父目录 root/700；`public.pem` 经 OpenSSL 公私钥匹配与 4096 位检查，SHA-256 为 `33c2f0be46e801e02523978197916204056042fafdbfee730faf18cf00698524`，公钥副本交付到 `C:\Users\WJX\Desktop\public.pem`。私钥未传出服务器；用于容器只读挂载的专用副本仍留在该服务器，权限为 root:10001/640。
+
+> CPU 公网 HTTPS 已验收（2026-10-18）：受信任 IP 证书、443 Nginx 和应用 HTTPS Origin 已启用；外部登录200/TLS校验通过，匿名API401、HTTP登录404；AD/CL 与浏览器隔离经公网实测。生产短期证书至 2026-10-24 16:29:22 UTC，两次每日的 systemd 续期 timer 已启用，Certbot 干跑及部署重载钩子、服务单元均通过。SSH 曾于密钥交换断开，现严格 pin 连接成功但偶发重置，不能称稳定修复；守护/GPU 与付费 Nemotron 仍关闭。
+
+> CPU 证书告警（2026-10-18）：QQ SMTP 授权码由用户以仓库外文件提供，服务端仅 root 可读的 `/etc/lighttry/secrets/qq-smtp-auth.txt` 与 `/etc/lighttry/cert-alert.json` 权限均为600；脚本 `/usr/local/libexec/lighttry-cert-alert.py`、`lighttry-cert-alert.service` 与 `.timer` 已安装。定时器每日北京时间 04:15、16:15 检查本机可信 IP TLS 证书、72小时临期和上次 Certbot 服务结果；失败状态最多每24小时发送一次告警，恢复后重新武装。离线4项测试通过，真实 SMTP 测试返回 `TEST_EMAIL_SENT` 且用户确认收件；健康服务返回 `HEALTHY`，timer enabled+active，HTTPS 登录200。临时上传目录已清理；仅 SMTP 测试投递和正常状态已实测，真实续期故障触发邮件尚未实测。授权码不得进入源码、日志、聊天或归档；吊销须在 QQ 邮箱端操作并替换服务端密钥。Let’s Encrypt 不再发送到期邮件，不以证书账户邮箱代替此告警。
+
+> CPU HTTPS 历史中断点（同日已通过云助手完成发布，SSH 故障仍待查）：外部 HTTP-01 路径通过，生产 IP 证书已签发；服务仍仅绑定 127.0.0.1:8080，HTTP 登录 404、443 无监听。SSH 密钥交换阶段主动断开，连续复测退出255，故没有做 443 切换或自动续期配置。恢复严格 pin SSH 后继续已预检的 Nginx/容器切换；外部可信证书和续期演练成功前不得称公网可用。
+
+> CPU 内网部署状态（2026-10-18）：最新源码镜像已在目标 CPU 机运行，仅 `127.0.0.1:8080`，已保留原数据冷备份和旧容器；远端 AD/CL 登录、浏览器身份隔离及服务重启恢复已实测。公网 80/443 尚未开放，HTTPS、Nemotron Key、GPU 守护的当前云凭据/授权均未配置；不得将内网服务状态当成公开可用或付费能力已验收。
+
 > 最新本地权限取舍（2026-10-18）：普通用户 Nemotron 不设美元预算或总次数上限，仅每浏览器身份滚动60秒最多10条且保留普通访问限流；管理员也无应用层次数/费用上限。私有 AD 与共享 CL 密钥已准备并绑定本地配置，CL 内容及停机任务归属按持久浏览器身份隔离，同浏览器重登录可恢复。GPU 费用由运营方承担，但每次启动仍须原有安全门槛；当前主机无 Nemotron 服务端凭据，文字策略文件已准备但未绑定本地启动入口；未部署公网、未开机、未发起收费文字调用。仅分享地址不是防火墙白名单。此条覆盖下方“未签发新密钥”历史说明。
 
 > 主机信任产品取舍（2026-10-17，本地实现）：用户明确要求去掉面向浏览器用户的逐轮 SSH/TLS 指纹确认，并由运营方承担首次连接身份风险。只有私有 `autoHostTrust.enabled=true` 且 `operatorAcceptsFirstContactMitmRisk=true` 时，独立守护在本轮供应商 API 确认 RUNNING/VM/IP 后，取得本轮候选指纹、重新核对会话/主机/窗口、自动写入本轮 pin 并记录 `guard-tofu`，然后才允许原有单次部署。网页不提供该确认操作；失败则截断部署并请求停机，不继承旧指纹、不禁用 SSH 严格主机校验。首次 `ssh-keyscan` 本身不能证明真伪，存在首次连接中间人风险；这是明确接受的产品取舍，不是安全等价替代。本轮仅离线和本机验证，未启动 GPU 实机验收。

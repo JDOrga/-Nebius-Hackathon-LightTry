@@ -94,6 +94,30 @@ class PermissionGroupTests(unittest.TestCase):
         self.assertEqual(parser().parse_args([]).session_scoped_accounts,[])
         self.assertEqual(parser().parse_args(['--session-scoped-account','alice']).session_scoped_accounts,['alice'])
 
+    def test_standalone_service_accepts_explicit_unbounded_role_policy(self):
+        key_file=self.root/'provider-fixture.key'
+        key_file.write_text('OFFLINE_SYNTHETIC_KEY_'+'X'*24);key_file.chmod(0o600)
+        policy=self.root/'standalone-text-policy.json'
+        policy.write_text(json.dumps({'schemaVersion':2,
+            'user':{'ledgerFile':str(self.root/'standalone-user-ledger.json'),
+                    'unbounded':True,'ownerAcceptsUnboundedCost':True},
+            'operator':{'ledgerFile':str(self.root/'standalone-admin-ledger.json'),
+                        'unbounded':True,'operatorAcceptsUnboundedCost':True}}))
+        policy.chmod(0o600)
+        args=parser().parse_args(['--data-root',str(self.root/'standalone-data'),
+            '--accounts-file',str(self.root/'accounts.json'),'--language-config',str(policy),
+            '--session-scoped-account','alice'])
+        with patch.dict(os.environ,{'LIGHTTRY_NEMOTRON_KEY_FILE':str(key_file)}):
+            app=Application(args)
+            try:
+                self.assertEqual(app.session_scoped_accounts,frozenset({'alice'}))
+                self.assertTrue(app.language_for('alice').unbounded)
+                self.assertIsNone(app.language_for('alice').budget)
+                self.assertTrue(app.language_for('lighttry').unbounded)
+                self.assertNotEqual(app.language_for('alice').ledger_path,
+                                    app.language_for('lighttry').ledger_path)
+            finally:app.close()
+
     def test_browser_space_persists_and_key_rotation_invalidates_old_space(self):
         self.app.session_scoped_accounts=frozenset({'alice'})
         account_hash=self.app.accounts.users['alice']['hash']

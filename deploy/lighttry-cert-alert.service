@@ -1,0 +1,16 @@
+[Unit]
+Description=LightTry HTTPS certificate alert by QQ SMTP
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /usr/local/libexec/lighttry-cert-alert.py run
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/lighttry-cert-alert
+
