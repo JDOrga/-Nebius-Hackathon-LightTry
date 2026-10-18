@@ -729,6 +729,14 @@ class Application:
 
 def parser():
     p = argparse.ArgumentParser(description='Linux/CPU standalone service; paid services remain OFF.')
+    p.add_argument('--listen-host',choices=('127.0.0.1','0.0.0.0'),default='0.0.0.0',
+                   help='Explicit bind address. Use 127.0.0.1 with host-network containers behind Nginx.')
+    def listen_port(value):
+        try: port=int(value)
+        except ValueError:raise argparse.ArgumentTypeError('LISTEN_PORT_INVALID') from None
+        if not 1024<=port<=65535:raise argparse.ArgumentTypeError('LISTEN_PORT_INVALID')
+        return port
+    p.add_argument('--listen-port',type=listen_port,default=8080)
     p.add_argument('--accounts-file',default=os.environ.get('LIGHTTRY_ACCOUNTS_FILE'))
     p.add_argument('--session-scoped-account',action='append',dest='session_scoped_accounts',default=[],
                    help='Explicit shared-key user whose private workspace and stop ownership use a durable browser identity.')
@@ -764,8 +772,8 @@ def main(argv=None):
         app.queue.start()
         if app.gpu_control:app.gpu_control.start_heartbeat()
         if app.model_executor:app.model_executor.start()
-        print('LightTry CPU service: 0.0.0.0:8080; data=' + str(app.workspace.root), flush=True)
-        serve(app, listen='0.0.0.0:8080', threads=16, connection_limit=64,
+        print('LightTry CPU service: '+options.listen_host+':'+str(options.listen_port)+'; data=' + str(app.workspace.root), flush=True)
+        serve(app, listen=options.listen_host+':'+str(options.listen_port), threads=16, connection_limit=64,
               max_request_header_size=16384, max_request_body_size=32 * 1024 * 1024,
               channel_timeout=30, channel_request_lookahead=1, expose_tracebacks=False, clear_untrusted_proxy_headers=True)
     finally:
