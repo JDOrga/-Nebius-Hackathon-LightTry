@@ -224,3 +224,8 @@ header{gap:20px}header .boundary{flex:0 0 auto}.gpu-monitor{margin-right:auto;di
 #abandon-submission[hidden]{display:none!important}#abandon-submission{margin:8px 0 0;border-color:#ba8a73;color:#874e3c;background:#fff8f4}
 
 .locale-picker{display:flex;align-items:center;gap:5px;white-space:nowrap;font-size:12px;color:#52675c}.locale-picker select{width:auto;min-width:88px;padding:5px 7px;border:1px solid #cad8ce;border-radius:7px;background:#fff} @media(max-width:700px){.locale-picker span{display:none}.locale-picker select{min-width:72px}}
+
+/* Photo drop targets remain available with or without an existing preview. */
+.photo-drop-hint{margin:0;padding:6px 14px 10px;font-size:11px;color:var(--muted)}
+.photo-bar.photo-drag-over,.preview.photo-drag-over{outline:3px dashed var(--green);outline-offset:-3px;background:#eef5e9}
+.preview.photo-drag-over .photo-drop-hint{color:var(--green);font-weight:600}
