@@ -1,5 +1,7 @@
 # LightTry
 
+> 2026-10-18 拖放照片版本已切换线上（浏览器验收待登录）：阿里云网页 `lighttry-cpu` 使用 `lighttry-cpu:photo-drop-20261018-856efd2-online`（镜像 `sha256:fdcf47a228ce1b47bbd084f7e39bb73c3ebf9e91c4aa89442a88a3bf58a48d6e`）。部署镜像以原线上基线构建，仅替换提交 `856efd2` 的四个前端文件，其余应用文件及三张 HDR 逐字节一致；容器启动参数、环境与数据/凭据挂载保留。旧容器已停止并保留为 `lighttry-cpu-rollback-photo-drop-856efd2`，切换前 inspect 和 SQLite 备份留存；独立 GPU 守护 ID 未变。切换前后新鲜守护快照均 STOPPED、instances=[]，活动队列0；公网可信 TLS 登录页200、匿名API401通过。本地89项Node与21项Python回归通过，另复跑5项拖放行为测试通过；真实浏览器拖放仍等待用户在已打开页面完成登录，不视作已验收。未启动 GPU、未提交生成、未调用付费模型。证据复用服务器 `/srv/lighttry-backups/before-dispatch-diagnostics-20261018/photo-drop-856efd2/`，首次基于裸镜像ID构建失败的日志保留，失败未触碰运行容器。
+
 > 公网 HTTPS 已验收（2026-10-18）：目标 IP 的可信证书、Nginx 443 与应用 HTTPS Origin 已实际启用；外部 `/login` 返回 200 且 TLS 验证通过，匿名 API 为 401、明文 HTTP 登录为 404，AD/CL 登录及不同浏览器隔离经真实 HTTPS 验证。Let’s Encrypt 六天 IP 证书已配置两次每日的 systemd 自动续期，`certbot renew --dry-run --cert-name lighttry-ip` 成功，续期后的 Nginx 重载钩子与服务单元均实测通过；通知邮箱尚待补充。外部 SSH 仍在密钥交换阶段断开，实例内 `sshd`、配置与回环握手均正常，已通过云助手完成切换但不声称 SSH 已修复。Nemotron 与 GPU 付费能力仍关闭。
 
 > 历史 HTTPS 中断点（同日已由云助手绕过，仅 SSH 故障未修复）：公网 80 的 ACME 验证路径已实测可达，HTTP 登录返回 404；目标 IP 的 Let’s Encrypt 测试与正式证书均签发并核对 SAN，正式证书有效至 2026-10-24 16:29:22 UTC。随后 SSH 在密钥交换阶段连续断开（退出码 255），因此尚未将 Nginx 切到 443、尚未将应用 Origin 改为 HTTPS，也未配置自动续期。此时只可经 SSH 隧道访问原内网服务；不得把证书已签发误写为公网 HTTPS 已上线，不应分发访问地址。恢复 SSH 后先验证原 pin，再执行已准备的 HTTPS 切换，最后从外部验证可信 TLS 与续期演练。
