@@ -156,6 +156,13 @@ class ModelTests(unittest.TestCase):
         self.worker.upload.assert_not_called();self.control.sessions.submit.assert_not_called()
         self.assertFalse((self.folder/'https-binding.json').exists())
 
+    def test_uncertain_dispatch_is_not_reported_as_a_queued_task(self):
+        self.control.sessions.submit.return_value={'status':'uncertain','mustQueryBeforeRetry':True}
+        with self.assertRaises(LinkUncertain) as raised:self.cpu.submit(self.folder,self.request)
+        self.assertEqual(raised.exception.dispatch_stage,'session_dispatch')
+        self.assertTrue((self.folder/'https-binding.json').is_file())
+        self.worker.upload.assert_called_once();self.control.sessions.submit.assert_called_once()
+
     def tearDown(self):self.ledger.close();self.tmp.cleanup()
     def envelope(self,request=None):
         request=request or self.request;raw=pack_input(self.folder,request);sha=hashlib.sha256(raw).hexdigest();self.ledger.upload(sha,raw)

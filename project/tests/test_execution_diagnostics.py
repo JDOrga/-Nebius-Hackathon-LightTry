@@ -75,6 +75,41 @@ class FailureTests(unittest.TestCase):
         worker=Mock();worker.query.return_value={**self.envelope,'requestSha256':'0'*64,'status':'failed'}
         cpu=HTTPSCosmosExecutor(SimpleNamespace(sessions=SimpleNamespace(worker=worker)),None,self.root)
         cpu.reconcile(folder);self.assertFalse((folder/'execution.json').exists())
+    def test_closed_failed_task_is_not_queried_forever(self):
+        folder=self.root/('a'*32);folder.mkdir();atomic(folder/'request.json',self.request)
+        atomic(folder/'https-binding.json',{'envelope':self.envelope,'deadline':time.time()+60})
+        atomic(folder/'task.json',{'status':'failed','executionUncertain':False})
+        worker=Mock();cpu=HTTPSCosmosExecutor(SimpleNamespace(sessions=SimpleNamespace(worker=worker)),None,self.root)
+        cpu.reconcile(folder);worker.query.assert_not_called()
+        atomic(folder/'task.json',{'status':'failed','executionUncertain':True})
+        worker.query.return_value={**self.envelope,'status':'queued'}
+        cpu.reconcile(folder);worker.query.assert_called_once()
+    def test_submission_waits_for_background_query_to_release_transport(self):
+        import threading
+        folder=self.root/('a'*32);folder.mkdir();atomic(folder/'request.json',self.request)
+        atomic(folder/'https-binding.json',{'envelope':self.envelope,'deadline':time.time()+60})
+        entered=threading.Event();release=threading.Event();submitted=threading.Event();errors=[]
+        def query(*unused):
+            entered.set()
+            if not release.wait(3):raise TimeoutError('SYNTHETIC')
+            return {**self.envelope,'status':'queued'}
+        worker=Mock();worker.query.side_effect=query
+        cpu=HTTPSCosmosExecutor(SimpleNamespace(sessions=SimpleNamespace(worker=worker)),None,self.root)
+        cpu._submit=Mock(side_effect=lambda *unused:submitted.set())
+        def guarded(action):
+            try:action()
+            except Exception as error:errors.append(error)
+        first=threading.Thread(target=lambda:guarded(lambda:cpu.reconcile(folder)))
+        second=threading.Thread(target=lambda:guarded(lambda:cpu.submit(folder,self.request)))
+        first.start()
+        try:
+            self.assertTrue(entered.wait(2));second.start()
+            self.assertFalse(submitted.wait(.1))
+        finally:
+            release.set();first.join(3)
+            if second.ident is not None:second.join(3)
+        self.assertFalse(first.is_alive());self.assertFalse(second.is_alive());self.assertFalse(errors)
+        self.assertTrue(submitted.is_set());cpu._submit.assert_called_once()
     def test_public_task_retains_only_safe_diagnostic_without_resubmission(self):
         from inference.jobs import TaskStore
         from inference_fixture import OfflineExecutor,image_bytes

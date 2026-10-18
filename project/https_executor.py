@@ -20,6 +20,7 @@ class HTTPSCosmosExecutor:
     def __init__(self,control,grant_path,tasks_root):
         self.control,self.grant_path,self.tasks_root=control,grant_path,Path(tasks_root)
         self.stop=threading.Event();self.thread=None
+        self.transport_lock=threading.RLock()
 
     def current(self):
         if getattr(self.control.sessions,'protection_mode',None)=='cpu-only':
@@ -57,6 +58,10 @@ class HTTPSCosmosExecutor:
             target.write_bytes(data)
 
     def submit(self,folder,request):
+        # Leave the worker's other TLS slot available to the independent guard.
+        with self.transport_lock:return self._submit(folder,request)
+
+    def _submit(self,folder,request):
         stage='adapter_submit'
         try:
             stage='current_authorization'
@@ -81,7 +86,10 @@ class HTTPSCosmosExecutor:
             uploaded=worker.upload(raw)
             if uploaded.get('sha256')!=sha or uploaded.get('bytes')!=len(raw):raise ValueError('HTTPS_UPLOAD_RECEIPT_MISMATCH')
             stage='session_dispatch'
-            self.control.sessions.submit(state['sessionId'],envelope)
+            ack=self.control.sessions.submit(state['sessionId'],envelope)
+            if isinstance(ack,dict) and ack.get('status')=='uncertain':
+                from worker_link import LinkUncertain
+                raise LinkUncertain('WORKER_RESPONSE_UNCERTAIN',category='protocol',phase=stage)
         except Exception as exc:
             # Preserve exception type and original protocol contracts; attach only safe stage.
             try:exc.dispatch_stage=stage
@@ -89,8 +97,16 @@ class HTTPSCosmosExecutor:
             raise
 
     def reconcile(self,folder):
+        with self.transport_lock:return self._reconcile(folder)
+
+    def _reconcile(self,folder):
         folder=Path(folder);binding=read(folder/'https-binding.json');envelope=binding['envelope'];request=read(folder/'request.json')
         if envelope['jobId']!=folder.name or envelope['requestSha256']!=request_sha(request):raise ValueError('HTTPS_BINDING_CHANGED')
+        task_path=folder/'task.json'
+        if task_path.is_file():
+            task=read(task_path)
+            if task.get('status') in ('succeeded','partial','expired','failed') and not task.get('executionUncertain'):
+                return
         if (folder/'https-result-rejected.json').exists():return
         existing=folder/'execution.json'
         if existing.exists() and read(existing).get('status') in ('succeeded','failed'):return
