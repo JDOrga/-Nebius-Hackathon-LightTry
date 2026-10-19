@@ -25,7 +25,7 @@ test('the workbench has an explicit local language selector without changing tas
  const html=readFileSync(new URL('../web/index.html',import.meta.url),'utf8');
  const source=readFileSync(new URL('../web/workbench.js',import.meta.url),'utf8');
  assert.ok(html.includes('id="locale-select"'));
- assert.ok(source.includes("import {installI18n,currentLanguage} from './i18n.js'"));
+ assert.ok(source.includes("import {installI18n,currentLanguage,translateString} from './i18n.js'"));
  assert.ok(!source.includes('navigator.language='));
 });
 test('English workbench translates chat and pending-photo UI copy without rewriting model text',()=>{
@@ -50,4 +50,46 @@ test('generated lighting summaries and appended GPU notices translate without ch
  const notice='Stop was requested by the operator. STOPPED and an empty instance list are confirmed. A new start requires a manual action. 当前快照已过期。 工作台在线连接已断开，正在重连。连续5分钟没有任何工作台连接会自动停机；恢复连接不会自动开机。';
  assert.equal(translateString(notice,'en'),'Stop was requested by the operator. STOPPED and an empty instance list are confirmed. A new start requires a manual action. Current snapshot is stale. The workbench connection was lost and is reconnecting. Five minutes without any workbench connection triggers automatic stop; reconnecting does not restart the GPU.');
  assert.equal(translateString(notice,'zh'),notice);
+});
+test('English chat application and context notices have no Chinese UI text',()=>{
+ const cases=new Map([
+  ['编辑上下文已改变，下一次请求使用当前版本。旧建议不能直接应用。','The editing context changed. The next request will use the current version. The old suggestion cannot be applied directly.'],
+  ['已应用到 v2，尚未生成。','Applied to v2; not generated yet.'],
+  ['已应用到版本 2，尚未生成。','Applied to version 2; not generated yet.'],
+  ['当前方案已确认应用到 v2；尚未生成。','Applied to current plan v2; not generated yet.'],
+  ['当前方案已确认应用到 v2；已有匹配结果。','Applied to current plan v2; a matching result already exists.'],
+  ['已确认应用到 v2；未由此操作提交生成。','Applied to v2; this action did not submit generation.'],
+ ]);
+ for(const [source,expected] of cases){assert.equal(translateString(source,'en'),expected);assert.equal(translateString(source,'zh'),source);}
+});
+test('English controlled status, recovery, library and monitor samples have no Chinese remnants',()=>{
+ const controlled=[
+  '准备期间上下文已改变，尚未发送模型请求。','响应关联身份不一致，未应用。','等待超时，服务可能仍在处理或已计费，不会自动重试。',
+  '分析照片 · 阶段 1/4','模拟 · 生成光照效果 · 阶段 2/4，本阶段百分比未知','离线演示 · 非真实 GPU',
+  '状态不可靠 · 最近观测 2026/10/19 17:00 · 5 秒前','状态不可靠 · 尚无可靠观测',
+  '方案编号 abcdef12 / v2','正在准备生成','正在分析照片；执行状态不确定，禁止重复提交',
+  '历史生成结果 · 2026/10/19 17:00 · 非本次生成','正式任务 abcdef12 · 原生成已取回，未重算 · 源方案版本 2',
+  '离线模拟任务 · 非模型结果 abcdef12 · 源方案版本 旧固定预设','历史样例 2026-10-19',
+  '取回失败 · 可恢复 · 实验性','GPU状态无法确认','暂时无法读取 GPU 状态；下列旧快照不代表当前状态。',
+  '请重新选择此方案使用的原照片。','此旧方案无法自动核对原照片，请确认所选文件正确后继续。',
+  '保存全部方案到服务；若当前为用户照片，会上传原照片到私有数据目录。不会生成或收费。继续？',
+  '需要 v1 方案库 JSON。','方案库含无效版本；未部分导入。',
+ ];
+ for(const source of controlled){assert.doesNotMatch(translateString(source,'en'),/[\u3400-\u9fff]/u,source);assert.equal(translateString(source,'zh'),source);}
+ const userName='我自己的照片';assert.equal(translateString(userName,'en'),userName);
+ assert.equal(translateString(`${userName} · AI变体`,'en'),`${userName} · AI variant`);
+ const console=readFileSync(new URL('../web/console.js',import.meta.url),'utf8');
+ const workbench=readFileSync(new URL('../web/workbench.js',import.meta.url),'utf8');
+ const chat=readFileSync(new URL('../web/chat.js',import.meta.url),'utf8');
+ assert.match(console,/currentLanguage\(\)==='en'\?'New light zone'/);
+ assert.match(console,/currentLanguage\(\)==='en'\?'Parameter is out of range'/);
+ assert.equal((workbench.match(/confirm\(translateString\(/g)||[]).length,2);
+ assert.match(chat,/child\.setAttribute\('data-no-i18n',''\)/);
+ assert.match(chat,/m\.role==='user'\)bubble\.setAttribute\('data-no-i18n',''\)/);
+});
+test('English UI dictionary has no duplicate source keys',()=>{
+ const source=readFileSync(new URL('../web/i18n-en.js',import.meta.url),'utf8');
+ const keys=[...source.matchAll(/^\s*\['((?:\\.|[^'\\])*)','/gm)].map(match=>match[1]);
+ assert.ok(keys.length>500);
+ assert.equal(keys.length,new Set(keys).size);
 });
