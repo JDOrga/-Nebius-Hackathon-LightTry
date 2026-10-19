@@ -1,5 +1,6 @@
 import {schemeWire} from './scheme-state.js';
 import {differences,userDifferences} from './console.js';
+import {currentLanguage} from './i18n.js';
 import {uid,sameParameters} from './scheme-state.js';
 const $=id=>document.getElementById(id);
 export const sessionKey=s=>s.inputId+':'+s.planId;
@@ -46,7 +47,7 @@ export function createChat({get,api,environmentLabel,apply}){
  const safeScheme={...schemeWire(live.scheme),name:'当前方案'};const normalized=await api('/api/lighting/normalize',{method:'POST',headers:{'Content-Type':'application/json','X-LightTry-Token':live.token},body:JSON.stringify(safeScheme)});
  if(get().reference!==captured||selected!==sk||editEpoch!==epoch)throw Error('准备期间上下文已改变，尚未发送模型请求。');
  const snapshot=Object.fromEntries(['inputId','planId','version','recipeKey'].map(k=>[k,normalized[k]]));
- const body={currentScheme:safeScheme,currentResult:live.result,text,history:[],replyLanguage:'zh',chat:{schemaVersion:1,sessionId:s.id,requestId:rid,snapshot,messages,operations}};
+ const body={currentScheme:safeScheme,currentResult:live.result,text,history:[],replyLanguage:currentLanguage(),chat:{schemaVersion:1,sessionId:s.id,requestId:rid,snapshot,messages,operations}};
  const value=await api('/api/lighting/recommend',{method:'POST',headers:{'Content-Type':'application/json','X-LightTry-Token':live.token},body:JSON.stringify(body),signal:controller.signal});
  if(value.sessionId!==s.id||value.requestId!==rid)throw Error('响应关联身份不一致，未应用。');
  s.items.push({role:'assistant',text:[value.reason,value.question].filter(Boolean).join(' ')||'此需求暂无可执行建议。',value,operationId:value.status==='ready'?value.operationId:undefined,ref:captured,draftEpoch:epoch,before:live.scheme.parameters,displayDiff:value.status==='ready'?differences(live.scheme.parameters,value.parameters):[]});
