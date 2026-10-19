@@ -18,7 +18,17 @@ function manualLanguage(){
  const value=part?.slice(cookieName.length+1);
  return value==='zh'||value==='en'?value:null;
 }
+const differenceLabels={mode:'Lighting mode',environmentId:'Lighting environment',offsetDeg:'Environment rotation',strength:'Brightness multiplier',ambient:'Ambient light',zones:'Light zones',name:'Name',enabled:'Enabled',azimuthDeg:'Azimuth',elevationDeg:'Elevation',color:'Color',sizeDeg:'Light-zone spread'};
+const differenceNames={'布光模式':differenceLabels.mode,'光照环境':differenceLabels.environmentId,'环境旋转':differenceLabels.offsetDeg,'亮度倍率':differenceLabels.strength,'底光':differenceLabels.ambient,'光区':differenceLabels.zones,'名称':differenceLabels.name,'启用状态':differenceLabels.enabled,'方位角':differenceLabels.azimuthDeg,'仰角':differenceLabels.elevationDeg,'颜色':differenceLabels.color,'光区范围':differenceLabels.sizeDeg};
+const differenceValues={'已更新':'Updated','无':'None','开启':'On','关闭':'Off','"环境"':'"Environment"','"程序化布光"':'"Procedural lighting"'};
+function translateDifference(path,value){
+ const label=path.split(' · ').map(part=>differenceNames[part]??part).join(' · ');
+ const translated=value==='已更新'?'Updated':value.split(' → ').map(part=>differenceValues[part]??part).join(' → ');
+ return `${label}: ${translated}`;
+}
 const patterns=[
+ [/^建议差异 · (演示建议|文字服务)$/u,(_,source)=>`Suggested changes · ${source==='文字服务'?'Text service':'Demo suggestion'}`],
+ [/^((?:布光模式|光照环境|环境旋转|亮度倍率|底光|光区|名称|启用状态|方位角|仰角|颜色|光区范围|\d+)(?: · (?:布光模式|光照环境|环境旋转|亮度倍率|底光|光区|名称|启用状态|方位角|仰角|颜色|光区范围|\d+))*)：(已更新|.+ → .+)$/u,(_,path,value)=>translateDifference(path,value)],
  [/^生成失败：(.+)；执行状态仍待核实，禁止重复提交。请查看 GPU 状态并核实停止释放。(?: 任务编号：([a-f0-9]{32})\.)?$/u,(_,reason,id)=>`Generation failed: ${translateString(reason,'en')}; execution status remains unconfirmed. Do not resubmit. Check GPU status and verify resource release.${id?' Task ID: '+id+'.':''}`],
  [/^生成失败：(.+)；本次无结果，状态已核实。不会自动重试；如需再次生成，请重新明确确认。(?: 任务编号：([a-f0-9]{32})\.)?$/u,(_,reason,id)=>`Generation failed: ${translateString(reason,'en')}; there is no result and the status is verified. No automatic retry; explicitly confirm any new generation.${id?' Task ID: '+id+'.':''}`],
  [/^暂时无法取得任务状态；不会重复提交，正在仅查询原任务：(.+)$/u,(_,detail)=>`Task status is temporarily unavailable. The request will not be resubmitted; only the original task is being queried: ${detail}`],

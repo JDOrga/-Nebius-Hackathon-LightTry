@@ -488,5 +488,9 @@ export const en=Object.freeze(Object.fromEntries([
  ['GPU 已处于活动状态。','GPU is already active.'],
  ['GPU 启动未成功，仍可编辑方案。','GPU start failed. You can still edit plans.'],
  ['GPU 启动请求已提交，准备完成前可先编辑方案。','GPU start request submitted. You can edit plans while it prepares.'],
+ ['GPU 启动请求已提交，你可以继续编辑方案。','GPU start request submitted. You can continue editing plans.'],
+ ['停止请求已提交，请等待服务器释放。','Stop request submitted. Wait for the server to release its resources.'],
+ ['选择文件','Choose file'],
+ ['未选择文件','No file selected'],
  ['GPU 启动请求未被接受，你仍可以编辑方案。','GPU start request was not accepted. You can still edit plans.'],
 ]));
