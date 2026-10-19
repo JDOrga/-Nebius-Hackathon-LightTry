@@ -138,6 +138,41 @@ def parameter_failure(error):
     return failure
 
 
+def recover_chat_zone_strength(request,current,environments,policy,language):
+    """Suggest one bounded strength edit from a clearly named active zone.
+
+    This is a local fallback for a malformed model proposal, not a general
+    natural-language parser. It never applies a change or guesses a zone.
+    """
+    if current.get('schemaVersion')!=2 or current.get('mode')!='procedural':return None
+    lower=request.lower()
+    if not re.search(r'\b(?:reduce|lower|weaken|decrease|dim)\b|(?:减弱|降低|调低|降到|变暗)',lower):return None
+    focus=re.split(r'\b(?:while|keeping|keep|leave)\b|(?:其余|其他|保持)',lower,maxsplit=1)[0]
+    aliases={'fill':('fill','supplementary','补光'),'key':('key','main','主光')}
+    matches=[]
+    for zone in current['zones']:
+        labels={zone['id'].lower(),zone['name'].lower()}
+        labels.update(aliases.get(zone['id'].lower(),()))
+        if any(re.search(r'(?<![a-z0-9])'+re.escape(label)+r'(?![a-z0-9])',focus) for label in labels if label):
+            matches.append(zone)
+    if len(matches)!=1 or not matches[0]['enabled']:return None
+    zone=matches[0]
+    exact=re.search(r'\bfrom\s*(\d+(?:\.\d+)?)\s*to\s*(\d+(?:\.\d+)?)\b|从\s*(\d+(?:\.\d+)?)\s*(?:降到|降低到|调到|到)\s*(\d+(?:\.\d+)?)',lower)
+    if exact:
+        source,target=(float(v) for v in (exact.group(1),exact.group(2)) if v is not None) if exact.group(1) else (float(exact.group(3)),float(exact.group(4)))
+        if source!=zone['strength'] or not 0<=target<source:return None
+    elif re.search(r'\b(?:a bit|a little|slightly)\b|(?:一点|一些|稍微|略微)',lower):
+        source=zone['strength'];target=round(source*.8,3)
+        if not 0<=target<source:return None
+    else:return None
+    try:
+        parameters=resolve_proposal_parameters({'operations':[{'op':'edit_zone','id':zone['id'],'changes':{'strength':target}}]},current,environments)
+        reason=(f"Reduce the {zone['id']} light strength from {source:g} to {target:g}; keep all other settings unchanged. Preview before applying."
+                if language=='en' else f"将{zone['name']}光强从{source:g}降到{target:g}；其余设置不变。应用前请预览。")
+        return validate({'status':'ready','action':'revise','parameters':parameters,'name':'','reason':reason,'question':''},environments,policy,language,True)
+    except LanguageError:return None
+
+
 def validate(value,environments,policy,language='zh',chat=False):
     fields={'status','action','parameters','name','reason','question'}
     if not isinstance(value,dict) or set(value)!=fields:raise LanguageError('INVALID_SCHEME_PROPOSAL','建议结构无效，方案未改变。')
@@ -377,6 +412,7 @@ class RecipeLanguage:
                     'Use clarification only when essential information is missing. If part of an idea cannot be implemented, discuss alternatives and help with the achievable part. '
                     'Parameter bounds apply to applicable proposals, not to what you can discuss. '
                     'For edits, preserve unspecified values from selectedScheme. Prefer operations: rotate, exposure, set, add_zone, edit_zone, remove_zone. '
+                     'For a named fill/key light strength follow-up, use edit_zone on that existing zone ID (zone range 0-16), not set on overall strength (range 0.25-4); preserve every other light. '
                     'Legacy schemes use allowedCombinations; parameterized schemaVersion 2 supports the continuous tool fields. '
                     'Any added or edited light zone operates only in procedural mode. When the selected scheme is in environment mode and the user asks for a new zone, propose the switch to procedural mode yourself: set mode=procedural and both environment references=null, then add the zone. Do not require the user to request the mode switch separately. State that the HDR environment is replaced and the proposed result needs preview and approval; edit or replace existing zones when already at the three-zone limit. '
                     'Complete v2 recipes may omit the three server processing identities; all actual lighting fields are required. '
@@ -474,14 +510,27 @@ class RecipeLanguage:
                     if (chat_context and not self.full_procedural_recipe and self.acceptance_validator is None and
                             (e.code=='PARAMETER_RANGE_INVALID' or
                              (e.code=='INACTIVE_ZONE_CHANGE' and attempt>=self.repair_limit))):
-                        # Keep useful conversation while withholding invalid controls.
-                        # Audit the rejected proposal separately from the accepted text.
+                        # A narrow, explicit follow-up can be reconstructed from
+                        # the trusted selected snapshot without another paid call.
+                        recovered=(recover_chat_zone_strength(body['text'],current['parameters'],self.environments,
+                            self.policy,body['replyLanguage']) if e.code=='PARAMETER_RANGE_INVALID' else None)
+                        if recovered is not None:
+                            record.update(outcome='accepted',proposal=recovered,rejectedProposalCode=e.code,
+                                localZoneStrengthRecovery=True)
+                            return {**recovered,'source':'OFFLINE_SYNTHETIC' if self.synthetic else 'LOCAL_VERIFIED_FOLLOWUP',
+                                'modelCalled':not self.synthetic,'reference':context['selectedScheme'],'operationId':operation}
+                        # Otherwise keep useful conversation but withhold invalid
+                        # controls; do not append a Chinese diagnostic to English.
                         reason=parsed.get('reason','')
                         reason=reason if type(reason) is str else ''
                         if (reason and chinese_chat_request and not re.search(r'[\u4e00-\u9fff]',reason)):
                             reason=''
+                        detail=(('The suggested lighting parameters are invalid; please describe the adjustment again. The current plan is unchanged.'
+                            if e.code=='PARAMETER_RANGE_INVALID' else
+                            'The proposed light-zone change is inactive in environment mode. The current plan is unchanged.')
+                            if body['replyLanguage']=='en' else e.message)
                         fallback={**parsed,'status':'explanation','parameters':None,'name':'','question':'',
-                            'reason':(reason[:900]+'\n\n' if reason else '')+e.message}
+                            'reason':(reason[:900]+'\n\n' if reason else '')+detail}
                         value=validate(fallback,self.environments,self.policy,body['replyLanguage'],True)
                         if self.adapter._key and self.adapter._key in json.dumps(value,ensure_ascii=False):
                             raise LanguageError('UNSAFE_EXPLANATION','回复包含服务凭据，已拒绝。')

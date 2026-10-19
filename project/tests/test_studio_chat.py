@@ -174,6 +174,33 @@ class ChatTests(unittest.TestCase):
   ledger=json.loads(a.ledger_path.read_text());ledger['mode']='REAL_PROVIDER'
   a.ledger_path.write_text(json.dumps(ledger),encoding='utf-8');a.synthetic=False
   with self.assertRaises(LanguageError):a.approved_operation(r['operationId'],self.scheme['inputId'],None)
+ def test_english_fill_followup_recovers_one_zone_without_language_gate(self):
+  from light_console import initial
+  self.policy['parameterized']=True
+  params=initial(self.env['sunny']);params.update(mode='procedural',environmentId=None,environmentSha256=None)
+  zone=lambda ident,value:{'id':ident,'name':ident,'enabled':True,'azimuthDeg':0,'elevationDeg':30,
+      'strength':value,'color':'#ffffff','sizeDeg':40}
+  params['zones']=[zone('key',6),zone('fill',5)]
+  self.body['currentScheme']['parameters']=params
+  normalized=normalize_scheme(self.body['currentScheme'],self.env,self.policy)
+  self.body['chat']['snapshot']={k:normalized[k] for k in ('inputId','planId','version','recipeKey')}
+  self.body['replyLanguage']='en'
+  self.body['text']='Reduce the supplementary (fill) light from 5 to 4 while keeping the main light unchanged.'
+  bad={**self.good,'parameters':{'operations':[{'op':'set','field':'strength','value':5}]},
+      'reason':'Try a less intense fill light.'}
+  a=self.adapter([bad,bad]);a.repair_limit=0
+  result=a.recommend(self.body)
+  self.assertEqual(result['status'],'ready')
+  self.assertEqual([z['strength'] for z in result['parameters']['zones']],[6,4])
+  self.assertNotRegex(result['reason'],r'[\u4e00-\u9fff]')
+  self.assertEqual(params['zones'][1]['strength'],5)
+  self.body['chat']['requestId']='e'*32
+  self.body['text']='Make the scene brighter.'
+  fallback=a.recommend(self.body)
+  self.assertEqual(fallback['status'],'explanation')
+  self.assertIsNone(fallback['parameters'])
+  self.assertNotRegex(fallback['reason'],r'[\u4e00-\u9fff]')
+  self.assertEqual(len(self.sent),2)
  def test_chat_still_blocks_actual_server_key_and_secret_tokens(self):
   for text in ['OFFLINE_SYNTHETIC_KEY','ghp_SECRET','-----BEGIN PRIVATE KEY-----']:
    a=self.adapter([]);b=copy.deepcopy(self.body);b['text']=text
