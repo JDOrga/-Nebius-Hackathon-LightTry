@@ -37,7 +37,7 @@ class Handler(shared.Handler):
         route = urlsplit(self.path).path
         if self.local_cpu_api and self.local_cpu_api.get(self,route):return
         static = {'/': 'index.html', '/index.html': 'index.html',
-                  '/workbench.js': 'workbench.js', '/workspace-portability.js': 'workspace-portability.js', '/scheme-state.js': 'scheme-state.js', '/chat.js': 'chat.js', '/console.js':'console.js', '/gpu-monitor.js':'gpu-monitor.js', '/workbench-presence.js':'workbench-presence.js', '/i18n.js':'i18n.js', '/i18n-en.js':'i18n-en.js', '/workbench.css': 'workbench.css'}
+                  '/workbench.js': 'workbench.js', '/workspace-portability.js': 'workspace-portability.js', '/scheme-state.js': 'scheme-state.js', '/chat.js': 'chat.js', '/console.js':'console.js', '/gpu-monitor.js':'gpu-monitor.js', '/workbench-presence.js':'workbench-presence.js', '/i18n.js':'i18n.js', '/i18n-en.js':'i18n-en.js', '/workbench.css': 'workbench.css', '/lighttry-logo.png': 'lighttry-logo.png', '/favicon.png': 'favicon.png'}
         if route in static:
             return self.send_file(Path(__file__).parent / 'web' / static[route])
         if route == '/api/accepted-results':
