@@ -44,7 +44,7 @@ const patterns=[
  [/^当前方案已确认应用到 v(\d+)$/u,(_,version)=>`Applied to current plan v${version}`],
  [/^已确认应用到 v(\d+)$/u,(_,version)=>`Applied to v${version}`],
  [/^已应用到版本 (\d+)$/u,(_,version)=>`Applied to version ${version}`],
- [/^(\d+) 秒$/u,(_,seconds)=>`${seconds} sec`],
+ [/^([\d.]+) 秒$/u,(_,seconds)=>`${seconds} sec`],
  [/^(\d+) 分 (\d+) 秒$/u,(_,minutes,seconds)=>`${minutes} min ${seconds} sec`],
  [/^服务返回无效数据（HTTP (\d+)）$/u,(_,code)=>`Invalid service response (HTTP ${code})`],
  [/^历史生成结果 · (.+)$/u,(_,name)=>`Historical generated result · ${name}`],
@@ -58,7 +58,7 @@ const patterns=[
  [/^最近观测 (.+) · (\d+) 秒前$/u,(_,at,seconds)=>`Latest observation ${at} · ${seconds} sec ago`],
  [/^最近观测 (.+)$/u,(_,when)=>`Latest observation ${when}`],
  [/^状态不可靠 · (.+)$/u,(_,detail)=>`Status unreliable · ${detail}`],
- [/^累计主机耗时 (.+) · CPU (.+) · 读盘 (.+)$/u,(_,elapsed,cpu,read)=>`Host elapsed ${elapsed} · CPU ${cpu} · Disk read ${read}`],
+ [/^累计主机耗时 (.+) · CPU (.+) · 读盘 (.+)$/u,(_,elapsed,cpu,read)=>`Host elapsed ${translateString(elapsed,'en')} · CPU ${translateString(cpu,'en')} · Disk read ${translateString(read,'en')}`],
  [/^(.+)数值$/u,(_,label)=>`${translateString(label,'en')} value`],
  [/^\$([\d.]+) 含税$/u,(_,amount)=>`$${amount} incl. tax`],
  [/^方向变体 · 环境偏移 \+([\d.]+)°$/u,(_,degrees)=>`Direction variant · environment offset +${degrees}°`],
@@ -71,6 +71,8 @@ const patterns=[
  [/^(.+) · (.+) · v(\d+)$/u,(_,photo,plan,version)=>`${translateString(photo,'en')} · ${translateString(plan,'en')} · v${version}`],
 ];
 const fragments=[
+ ['启动 GPU 可能产生费用','Starting the GPU may incur charges'],
+ ['需载入原始照片','Load an original photo first'],
  ['当前快照已过期。','Current snapshot is stale.'],
  ['工作台在线连接已断开，正在重连。连续5分钟没有任何工作台连接会自动停机；恢复连接不会自动开机。','The workbench connection was lost and is reconnecting. Five minutes without any workbench connection triggers automatic stop; reconnecting does not restart the GPU.'],
  ['GPU 启动服务暂不可用，可以先进入工作台。','GPU start is unavailable. You can still use the workbench.'],
