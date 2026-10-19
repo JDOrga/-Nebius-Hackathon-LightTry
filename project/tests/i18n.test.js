@@ -62,6 +62,13 @@ test('English chat application and context notices have no Chinese UI text',()=>
  ]);
  for(const [source,expected] of cases){assert.equal(translateString(source,'en'),expected);assert.equal(translateString(source,'zh'),source);}
 });
+test('generation confirmation translates a built-in plan label without rewriting a custom name',()=>{
+ assert.equal(translateString('当前方案：光照方案 · v3','en'),'Current plan: Lighting plan · v3');
+ assert.equal(translateString('新方案待生成：光照方案 · v3（仅此方案）。','en'),
+  'New plan pending generation: Lighting plan · v3 (this plan only).');
+ assert.equal(translateString('新方案待生成：用户自定义名字 · v3（仅此方案）。','en'),
+  'New plan pending generation: 用户自定义名字 · v3 (this plan only).');
+});
 test('English controlled status, recovery, library and monitor samples have no Chinese remnants',()=>{
  const controlled=[
   '准备期间上下文已改变，尚未发送模型请求。','响应关联身份不一致，未应用。','等待超时，服务可能仍在处理或已计费，不会自动重试。',
