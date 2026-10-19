@@ -7,6 +7,7 @@ import {paintGenerationButton,paintGpuConsole,gpuNotice,gpuStopCountdown,shouldP
 import {installI18n,currentLanguage,translateString} from './i18n.js';
 import {savedSampleSelection,allowed,removeFamily,createScheme,revise as reviseBase,variant,sameParameters,matchingTask,validateLibrary,referenceKey,uid,restoreInputStub,photoTitle,schemePresentation,environmentEdit,comparisonCursor,schemeCaption,mergeAcceptedLibrary,schemeWire} from './scheme-state.js';
 installI18n();
+document.documentElement.classList.remove('i18n-pending');
 const $=id=>document.getElementById(id), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let catalog,lighting,inference,schemes=[],current,input,file=null,tasks=[],mode='result',compareKey=null,pending=false,requestId=null,region=false,zoom=1,pan={x:0,y:0};
 const libraryKey='lighttry.schemeLibrary.v1',cursorKey='lighttry.schemeCursor.v1',tasksKey='lighttry.schemeTasks.v1',submissionKey='lighttry.schemeSubmission.v1',originsKey='lighttry.schemeOrigins.v1';
