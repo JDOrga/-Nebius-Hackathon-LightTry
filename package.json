@@ -1,9 +1,8 @@
 {
-  "name": "cosmos-light-preview-local",
+  "name": "lighttry",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test project/tests/*.test.js",
     "start": "python -X utf8 -B start.py"
   }
 }

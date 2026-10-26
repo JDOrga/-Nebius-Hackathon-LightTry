@@ -1,16 +1,27 @@
-# 项目执行约定
+# Project execution
 
-涉及 Nebius 云实验、CLI 登录、收费推理或停机收尾时，先读 `C:\Project\Nebius\docs\EXECUTION_FLOW.md`，并读取当前 checkpoint 指向的最新执行状态。该文档优先于历史 RUNBOOK 窗口说明；普通本地前端/代码任务无需启动任何云流程。
+- For Nebius experiments, CLI authentication, paid inference, or shutdown, read
+  `docs/EXECUTION_FLOW.md` and the latest state referenced by the current private
+  checkpoint first. Ordinary local code and frontend work must not start cloud operations.
+- Complete local preparation before authorization. After authorization, use only
+  authentication, required preflight, guard readiness, and one bounded launch.
+  Stop on any failed preflight; use the verified login entry after authentication failure.
+- Continue required checks immediately after the user authenticates. Automatic
+  first-use host pinning requires explicit private operational-risk acceptance;
+  all later SSH connections must match that session's pin. Keep parameter confirmation.
+- Report transitions promptly and long waits every 60 seconds without duplicate cloud polling.
+- Never extend the 600-second startup limit or fixed work, stop, verification, and
+  absolute deadlines. Never reconnect, relaunch, or inherit closed authorization.
+- After STOPPED, prioritize independent empty-instance proof, the guard's actual
+  lifecycle state, and sleep-inhibition release. Report safety before documentation.
+- Preserve failures and unknown outcomes. Distinguish specifications, implemented
+  code, offline simulation, remote deployment, and real model validation.
 
-- 授权前完成本地准备；授权后只走认证、必要预检、守护 ready、单次启动的短链。认证失败后立即使用已验证登录入口，不重复猜命令。任何预检失败都必须截断后续动作。
-- 用户完成认证后立即继续必要步骤；不能等待用户再次提醒。当前主机身份在显式私有运维风险许可下由守护自动绑定本会话首次取得的指纹，不再要求浏览器用户确认；SSH 后续连接仍须严格匹配该 pin。参数应用确认仍必须保留，未配置运维风险许可时不得自动绑定。
-- 状态转换及时报告；较长等待每60秒说明阶段和剩余上限，不新增重复云轮询。
-- STOPPED 后优先连续核实独立空实例、守护退出、防休眠释放；四项齐全立即报告安全收尾，随后才整理文档和补充验证。
-- 不延长600秒启动或既定工作/停机/核验及绝对窗口，不自动重连、重复 launch 或再次启动；不继承已关闭的预算/主机信任/文字追加额度。
-- 未知结果写未知，保留原失败证据；区分流程规范、已实现代码、离线模拟和实机验证。
+# Repository structure
 
-# 结构与记录维护
-
-- 唯一启动入口为根目录 `start.py`，唯一前端为 `project/web/`；不要恢复 next/旧页面。
-- 当前说明更新现有文档；逐轮证据复用原账本，不新增平行 final/release/候选产品树。
-- 本机路径集中在被忽略的 `.local/studio.json`；原始实验、授权账本和失败/停机证据保持只读，不在结构整理中删除。
+- `start.py` is the only entry point; `project/web/` is the only frontend.
+  Do not restore a Next.js or legacy frontend.
+- Update existing documentation and evidence ledgers; do not create parallel product trees.
+- Keep machine-local paths in ignored `.local/studio.json`. Preserve original
+  experiments, authorization ledgers, failures, and shutdown evidence unchanged.
+- `master` is for judging; keep tests and historical development tools on `dev`.
