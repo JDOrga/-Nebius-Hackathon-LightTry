@@ -24,11 +24,12 @@ python -m venv .venv
 .venv/Scripts/python -m pip install -r requirements-cpu.txt
 $env:LIGHTTRY_ACCESS_KEY = .venv/Scripts/python -c "import secrets; print(secrets.token_urlsafe(32))"
 Write-Host "Local access key: $env:LIGHTTRY_ACCESS_KEY"
-.venv/Scripts/python -X utf8 -B start.py --service --listen-host 127.0.0.1 --public-origin http://127.0.0.1:8080 --data-root .local/state/service
+.venv/Scripts/python -X utf8 -B start.py --service --listen-host 127.0.0.1 --public-origin http://127.0.0.1:8080 --data-root "$env:LOCALAPPDATA/LightTry"
 ```
 
 Open **http://127.0.0.1:8080/login** and sign in with the key printed in your terminal.
 Keep it private; do not share or commit it.
+Local data is stored outside the source tree in `%LOCALAPPDATA%/LightTry`.
 Upload your own photo; sample photos and model weights are not bundled.
 
 ## A quick walkthrough
