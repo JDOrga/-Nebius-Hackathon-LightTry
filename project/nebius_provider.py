@@ -26,12 +26,14 @@ def build(binding):return NebiusProvider(binding)
 
 
 def safe_cli_failure_class(stderr):
-    """Return only a closed error category; never retain CLI stderr or identifiers."""
+    """Return only a closed error category; never retain arbitrary CLI stderr."""
     if not isinstance(stderr,str) or not stderr:return 'none'
     sample=stderr[:8192].lower()
     grpc=re.search(r'\b(?:rpc error:\s*)?code\s*=\s*([a-z_]+)\b',sample)
     if grpc and grpc.group(1) in ('unauthenticated','permissiondenied','deadlineexceeded',
-                                   'unavailable','resourceexhausted','internal','unknown'):
+                                   'unavailable','resourceexhausted','internal','unknown',
+                                   'failedprecondition','invalidargument','notfound',
+                                   'alreadyexists','aborted','cancelled'):
         return 'grpc_'+grpc.group(1)
     numeric=re.search(r'\bgrpc-status\s*[:=]\s*(4|7|8|13|14|16)\b',sample)
     if numeric:return 'grpc_'+{'4':'deadlineexceeded','7':'permissiondenied',
@@ -52,6 +54,15 @@ def safe_cli_failure_class(stderr):
     ):
         if any(term in sample for term in terms):return label
     return 'unclassified'
+
+
+def safe_cli_request_id(stderr):
+    """Retain only a labelled canonical UUID; never keep opaque IDs or stderr."""
+    if not isinstance(stderr,str):return None
+    match=re.search(r'(?im)^\s*(?:x-request-id|request-id|x-correlation-id|trace-id)\s*[:=]\s*'
+                    r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s*$',
+                    stderr[:8192])
+    return match.group(1).lower() if match else None
 
 
 class NebiusProvider:
@@ -83,7 +94,8 @@ class NebiusProvider:
         return cmd
 
     def _diagnostic(self, args, started, code, exit_code=None, stderr=''):
-        # Never persist raw commands, IDs, paths, stdout, or arbitrary stderr.
+        # Never persist raw commands, paths, or stdout. Failed mutations keep
+        # bounded stderr only in the private 0600 diagnostic DB, not API state.
         verbs={('iam','v2','project','get'):'project_get',
                ('ai','devlab','get'):'devlab_get',
                ('compute','instance','list'):'instance_list',
@@ -106,13 +118,21 @@ class NebiusProvider:
                  'stderrSummary':categories or (['redacted'] if raw else []),
                  'stderrChars':len(raw),'stderrTruncated':len(raw)>8192,
                  'failureClass':safe_cli_failure_class(raw)}
+        request_id=safe_cli_request_id(raw)
+        if request_id:receipt['providerRequestId']=request_id
+        private_receipt=dict(receipt)
+        if verb in ('restart','stop') and code!='OK' and raw:
+            private_receipt['rawStderr']=raw[:16384]
+            private_receipt['rawStderrTruncated']=len(raw)>16384
         try:
             path=self.root/'provider-diagnostics.sqlite3'
             if path.is_symlink():raise ValueError('DIAGNOSTIC_SYMLINK_FORBIDDEN')
+            fd=os.open(path,os.O_CREAT|os.O_RDWR|getattr(os,'O_NOFOLLOW',0),0o600)
+            os.close(fd)
             with closing(sqlite3.connect(path,timeout=.1)) as db, db:
                 path.chmod(0o600)
                 db.execute('CREATE TABLE IF NOT EXISTS diagnostics(id INTEGER PRIMARY KEY,at REAL,body TEXT)')
-                db.execute('INSERT INTO diagnostics(at,body) VALUES (?,?)',(self.clock(),json.dumps(receipt)))
+                db.execute('INSERT INTO diagnostics(at,body) VALUES (?,?)',(self.clock(),json.dumps(private_receipt)))
                 db.execute('DELETE FROM diagnostics WHERE id NOT IN (SELECT id FROM diagnostics ORDER BY id DESC LIMIT 256)')
             receipt['persisted']=True
         except Exception:
