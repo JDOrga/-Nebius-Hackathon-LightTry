@@ -298,6 +298,31 @@ class Application:
         if path == '/login' and h.command == 'GET':
             self.login_page(h)
             return True
+        if path == '/' and h.command == 'GET' and environ.get('QUERY_STRING'):
+            try:
+                values = parse_qs(environ['QUERY_STRING'], strict_parsing=True, max_num_fields=2, keep_blank_values=True)
+            except ValueError:
+                values = {}
+            if 'token' in values:
+                self.limiter.consume('login', environ.get('REMOTE_ADDR','unknown'))
+                if set(values) != {'token'} or len(values['token']) != 1 or not 24 <= len(values['token'][0]) <= 256:
+                    self.login_page(h, 401, failed=True); return True
+                if not self.login_slots.acquire(blocking=False):
+                    raise JobError('LOGIN_BUSY', '登录服务繁忙，请稍后重试。', 429)
+                try:
+                    owner = self.accounts.authenticate_key(values['token'][0])
+                finally:
+                    self.login_slots.release()
+                if not owner:
+                    self.login_page(h, 401, failed=True); return True
+                self.login_sessions.revoke(self.session_token(environ))
+                token, seconds = self.login_sessions.issue(owner)
+                space=(self.workspace.issue_browser_space(owner,self.accounts.users[owner]['hash'],
+                    self.browser_token(environ)) if owner in self.session_scoped_accounts else None)
+                h.send_response(303); h.send_header('Location', self.gpu_login_destination())
+                if space:h.send_header('Set-Cookie',self.browser_cookie(space))
+                h.send_header('Set-Cookie', self.session_cookie(token, seconds)); h.end_headers()
+                return True
         if path == '/auth/login' and h.command == 'POST':
             if h.headers.get('Origin') != self.origin:
                 raise JobError('INVALID_ORIGIN', '请从本站登录页面提交。', 403)
